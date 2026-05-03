@@ -150,10 +150,15 @@ class EventMonitor {
             controller.update(to: .permission(event.message ?? "권한 요청"))
         case "permission_request":
             if let reqId = event.id {
-                let cmd = event.message ?? "명령"
-                DispatchQueue.main.async {
-                    self.controller.pendingPermissionId = reqId
-                    self.controller.update(to: .permission(cmd))
+                if controller.alwaysApprove {
+                    let file = "/tmp/claude-companion-decision-\(reqId)"
+                    try? "approve".write(toFile: file, atomically: true, encoding: .utf8)
+                } else {
+                    let cmd = event.message ?? "명령"
+                    DispatchQueue.main.async {
+                        self.controller.pendingPermissionId = reqId
+                        self.controller.update(to: .permission(cmd))
+                    }
                 }
             }
         case "usage":

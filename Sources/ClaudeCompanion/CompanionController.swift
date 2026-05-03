@@ -16,6 +16,7 @@ class CompanionController: ObservableObject {
     @Published var usagePercent: Double = 0
     @Published var sessionStart: Date? = nil
     @Published var isSliding: Bool = false   // 등장/퇴장 슬라이드 중
+    @Published var alwaysApprove: Bool = false
     var pendingPermissionId: String? = nil
 
     // AppDelegate가 주입하는 액션 콜백
@@ -41,6 +42,12 @@ class CompanionController: ObservableObject {
         try? "deny".write(toFile: file, atomically: true, encoding: .utf8)
         pendingPermissionId = nil
         update(to: .ready)
+    }
+
+    /// 현재 요청 승인 + 이후 모든 권한 요청 자동 승인
+    func approveAllPermissions() {
+        alwaysApprove = true
+        approvePermission()
     }
 
     var onOpenSettingsRequest: (() -> Void)?

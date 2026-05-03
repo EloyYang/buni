@@ -3,25 +3,38 @@ import SwiftUI
 struct PermissionBubbleView: View {
     let command: String
     let onApprove: () -> Void
+    let onApproveAll: () -> Void
     let onDeny: () -> Void
+
+    @State private var isExpanded = false
 
     var body: some View {
         ZStack(alignment: .trailing) {
             VStack(alignment: .leading, spacing: 8) {
-                // 제목
+                // 제목 + 펼치기 토글
                 HStack(spacing: 5) {
                     Text("🔐")
                     Text("실행 허용?")
                         .font(.system(.callout, design: .monospaced))
                         .fontWeight(.bold)
                         .foregroundColor(.black)
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                    } label: {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(Color(red: 0.5, green: 0.5, blue: 0.5))
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
                 }
 
-                // 명령어 미리보기
+                // 명령어 미리보기 (펼쳐지면 전체 표시)
                 Text(command)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Color(red: 0.25, green: 0.25, blue: 0.25))
-                    .lineLimit(4)
+                    .lineLimit(isExpanded ? nil : 3)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(6)
                     .background(
@@ -30,37 +43,15 @@ struct PermissionBubbleView: View {
                     )
 
                 // 버튼 행
-                HStack(spacing: 8) {
-                    Button(action: onDeny) {
-                        Text("거부")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(red: 0.85, green: 0.25, blue: 0.20))
-                            )
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: onApprove) {
-                        Text("허용")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(red: 0.20, green: 0.70, blue: 0.35))
-                            )
-                    }
-                    .buttonStyle(.plain)
+                HStack(spacing: 6) {
+                    permissionButton("거부",   color: Color(red: 0.85, green: 0.25, blue: 0.20), action: onDeny)
+                    permissionButton("허용",   color: Color(red: 0.20, green: 0.70, blue: 0.35), action: onApprove)
+                    permissionButton("전체 허용", color: Color(red: 0.25, green: 0.50, blue: 0.90), action: onApproveAll)
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .frame(maxWidth: 230, alignment: .leading)
+            .frame(maxWidth: 250, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 14)
                     .fill(Color.white)
@@ -74,5 +65,17 @@ struct PermissionBubbleView: View {
                 .offset(x: 14, y: 0)
         }
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func permissionButton(_ title: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 7).fill(color))
+        }
+        .buttonStyle(.plain)
     }
 }

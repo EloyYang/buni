@@ -101,8 +101,9 @@ struct CompanionView: View {
         if case .permission(let cmd) = ctrl.state {
             PermissionBubbleView(
                 command: cmd,
-                onApprove: { ctrl.approvePermission() },
-                onDeny:    { ctrl.denyPermission() }
+                onApprove:    { ctrl.approvePermission() },
+                onApproveAll: { ctrl.approveAllPermissions() },
+                onDeny:       { ctrl.denyPermission() }
             )
             .transition(
                 .asymmetric(

@@ -96,6 +96,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(.separator())
         }
 
+        // 전체 허용 모드 활성 시 상태 표시 + 해제 버튼
+        if controller.alwaysApprove {
+            let item = NSMenuItem(title: "⚡ 전체 허용 모드 켜짐 — 클릭하여 끄기",
+                                  action: #selector(disableAlwaysApprove),
+                                  keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
+
         let isVisible = overlayPanel?.isVisible ?? false
         menu.addItem(NSMenuItem(title: isVisible ? "숨기기" : "보이기",
                                 action: #selector(toggleVisibility),
@@ -114,6 +124,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self
         }
         statusItem?.menu = menu
+    }
+
+    @objc private func disableAlwaysApprove() {
+        controller.alwaysApprove = false
     }
 
     @objc func toggleVisibility() {
@@ -207,10 +221,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Controller callbacks
 
     private func setupControllerCallbacks() {
-        controller.onHideRequest        = { [weak self] in self?.hideCompanion() }
-        controller.onShowRequest        = { [weak self] in self?.showCompanion() }
-        controller.onOpenClaudeRequest  = { [weak self] in self?.openClaude() }
+        controller.onHideRequest         = { [weak self] in self?.hideCompanion() }
+        controller.onShowRequest         = { [weak self] in self?.showCompanion() }
+        controller.onOpenClaudeRequest   = { [weak self] in self?.openClaude() }
         controller.onOpenSettingsRequest = { [weak self] in self?.openSettings() }
+
+        controller.$alwaysApprove
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildMenu() }
+            .store(in: &cancellables)
     }
 
     private func setupSettingsCallbacks() {
