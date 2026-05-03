@@ -30,17 +30,30 @@ struct PermissionBubbleView: View {
                     .buttonStyle(.plain)
                 }
 
-                // 명령어 미리보기 (펼쳐지면 전체 표시)
-                Text(command)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Color(red: 0.25, green: 0.25, blue: 0.25))
-                    .lineLimit(isExpanded ? nil : 3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(red: 0.94, green: 0.94, blue: 0.94))
-                    )
+                // 명령어 미리보기 (펼쳐지면 스크롤 가능한 전체 표시)
+                Group {
+                    if isExpanded {
+                        ScrollView(.vertical, showsIndicators: true) {
+                            Text(command)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(Color(red: 0.25, green: 0.25, blue: 0.25))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(6)
+                        }
+                        .frame(maxHeight: 110)
+                    } else {
+                        Text(command)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(red: 0.25, green: 0.25, blue: 0.25))
+                            .lineLimit(3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(6)
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(red: 0.94, green: 0.94, blue: 0.94))
+                )
 
                 // 버튼 행
                 HStack(spacing: 6) {
