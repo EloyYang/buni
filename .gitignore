@@ -1,0 +1,5 @@
+.build/
+Claudy.app/
+AppIcon.iconset/
+*.xcodeproj/
+.DS_Store
