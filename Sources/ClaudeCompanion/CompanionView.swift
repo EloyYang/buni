@@ -32,7 +32,7 @@ struct CompanionView: View {
                 .padding(.top, 6)
 
                 // 캐릭터 + 사용량 바
-                VStack(spacing: 2) {
+                VStack(spacing: 1) {
                     characterView
                         .frame(width: 60, height: 70)
 
