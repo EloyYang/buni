@@ -36,8 +36,7 @@ struct CompanionView: View {
                     characterView
                         .frame(width: 60, height: 70)
 
-                    UsageBarView(percent: ctrl.usagePercent,
-                                 sessionStart: ctrl.sessionStart)
+                    UsageBarView(percent: ctrl.usagePercent)
                         .frame(width: 66)
                         .opacity(ctrl.state == .idle ? 0 : 1)
                         .animation(.easeInOut(duration: 0.3), value: ctrl.state == .idle)
