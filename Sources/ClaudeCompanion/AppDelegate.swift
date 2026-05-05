@@ -283,7 +283,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupOverlayPanel() {
         guard let screen = NSScreen.main else { return }
 
-        let panel = NSPanel(
+        let panel = UnconstrainedPanel(
             contentRect: peekFrame(screen: screen),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
