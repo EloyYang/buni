@@ -200,10 +200,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 if let panel = self.overlayPanel, let screen = NSScreen.main {
                     var origin = panel.frame.origin
+                    // 좌우: 캐릭터가 최소 60px 화면 안에 남도록
                     origin.x = max(screen.visibleFrame.minX - self.panelWidth + 60,
                                    min(screen.visibleFrame.maxX - 60, origin.x + dx))
+                    // 상하: 상단은 메뉴바 포함 전체 화면 끝까지, 하단도 동일 비율로 허용
                     origin.y = max(screen.visibleFrame.minY - self.panelHeight + 60,
-                                   min(screen.visibleFrame.maxY - 20, origin.y + dy))
+                                   min(screen.frame.maxY, origin.y + dy))
                     panel.setFrameOrigin(origin)
                     self.customPanelOrigin = origin
                 }
