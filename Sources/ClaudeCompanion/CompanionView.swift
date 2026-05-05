@@ -8,6 +8,9 @@ struct CompanionView: View {
     @State private var dotCount = 1
     private let dotTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
+    // 드래그 위치 조정
+    @State private var dragActive = false
+
     private var isPermission: Bool {
         if case .permission = ctrl.state { return true }
         return false
@@ -44,12 +47,25 @@ struct CompanionView: View {
                 .padding(.trailing, 6)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { ctrl.onOpenClaudeRequest?() }
+                .gesture(
+                    DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                        .onChanged { value in
+                            if !dragActive {
+                                dragActive = true
+                                ctrl.onPanelDragStart?()
+                            }
+                            ctrl.onPanelDrag?(value.translation)
+                        }
+                        .onEnded { _ in
+                            dragActive = false
+                            ctrl.onPanelDragEnd?()
+                        }
+                )
                 .contextMenu {
                     Button("숨기기") { ctrl.onHideRequest?() }
                     Divider()
                     Button("Claude 열기") { ctrl.onOpenClaudeRequest?() }
                     Divider()
-                    // 캐릭터 선택
                     Menu("캐릭터 변경") {
                         ForEach(CharacterType.allCases, id: \.self) { type in
                             Button {
@@ -64,6 +80,8 @@ struct CompanionView: View {
                         }
                     }
                     Button("단축키 설정...") { ctrl.onOpenSettingsRequest?() }
+                    Divider()
+                    Button("위치 초기화") { ctrl.onResetPositionRequest?() }
                 }
             }
             .padding(.bottom, 2)

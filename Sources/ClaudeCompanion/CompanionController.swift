@@ -23,6 +23,10 @@ class CompanionController: ObservableObject {
     var onHideRequest: (() -> Void)?
     var onShowRequest: (() -> Void)?
     var onOpenClaudeRequest: (() -> Void)?
+    var onPanelDragStart: (() -> Void)?
+    var onPanelDrag: ((CGSize) -> Void)?
+    var onPanelDragEnd: (() -> Void)?
+    var onResetPositionRequest: (() -> Void)?
 
     private var autoHideTask: DispatchWorkItem?
 

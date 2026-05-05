@@ -14,7 +14,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let panelWidth: CGFloat  = 320
     private let panelHeight: CGFloat = 200
 
+    // 사용자가 지정한 패널 위치 (nil이면 기본 오른쪽 상단)
+    private var customPanelOrigin: NSPoint?
+    private var dragStartOrigin: NSPoint = .zero
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        customPanelOrigin = loadSavedOrigin()
         setupOverlayPanel()
         setupStatusBar()
         setupControllerCallbacks()
@@ -122,9 +127,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func offScreenRightFrame(screen: NSScreen) -> NSRect {
-        NSRect(x: screen.visibleFrame.maxX,
-               y: screen.visibleFrame.maxY - panelHeight,
-               width: panelWidth, height: panelHeight)
+        let originY = customPanelOrigin?.y ?? (screen.visibleFrame.maxY - panelHeight)
+        return NSRect(x: screen.visibleFrame.maxX,
+                      y: originY,
+                      width: panelWidth, height: panelHeight)
     }
 
     @objc func openClaude() {
@@ -165,6 +171,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onOpenClaudeRequest   = { [weak self] in self?.openClaude() }
         controller.onOpenSettingsRequest = { [weak self] in self?.openSettings() }
 
+        // 드래그로 위치 조정
+        controller.onPanelDragStart = { [weak self] in
+            self?.dragStartOrigin = self?.overlayPanel?.frame.origin ?? .zero
+        }
+        controller.onPanelDrag = { [weak self] translation in
+            guard let self, let panel = self.overlayPanel,
+                  let screen = NSScreen.main else { return }
+            let newX = self.dragStartOrigin.x + translation.width
+            let newY = self.dragStartOrigin.y - translation.height  // SwiftUI Y축 반전
+            // 화면 밖으로 완전히 벗어나지 않도록 클램프
+            let clampedX = max(screen.visibleFrame.minX - self.panelWidth + 60,
+                               min(screen.visibleFrame.maxX - 60, newX))
+            let clampedY = max(screen.visibleFrame.minY - self.panelHeight + 60,
+                               min(screen.visibleFrame.maxY - 20, newY))
+            panel.setFrameOrigin(NSPoint(x: clampedX, y: clampedY))
+            self.customPanelOrigin = panel.frame.origin
+        }
+        controller.onPanelDragEnd = { [weak self] in
+            guard let self, let origin = self.overlayPanel?.frame.origin else { return }
+            self.saveOrigin(origin)
+        }
+        controller.onResetPositionRequest = { [weak self] in
+            guard let self else { return }
+            self.customPanelOrigin = nil
+            UserDefaults.standard.removeObject(forKey: "panel.x")
+            UserDefaults.standard.removeObject(forKey: "panel.y")
+            if let screen = NSScreen.main {
+                self.overlayPanel?.setFrameOrigin(self.activeFrame(screen: screen).origin)
+            }
+        }
+
         controller.$alwaysApprove
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebuildMenu() }
@@ -179,6 +216,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.hotkeyMonitor.updatePermissionState(isPermission)
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: - Position persistence
+
+    private func saveOrigin(_ origin: NSPoint) {
+        UserDefaults.standard.set(Double(origin.x), forKey: "panel.x")
+        UserDefaults.standard.set(Double(origin.y), forKey: "panel.y")
+    }
+
+    private func loadSavedOrigin() -> NSPoint? {
+        guard UserDefaults.standard.object(forKey: "panel.x") != nil else { return nil }
+        return NSPoint(x: UserDefaults.standard.double(forKey: "panel.x"),
+                       y: UserDefaults.standard.double(forKey: "panel.y"))
     }
 
     // MARK: - Hotkey monitor
@@ -238,15 +288,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func peekFrame(screen: NSScreen) -> NSRect {
-        NSRect(x: screen.visibleFrame.maxX - panelWidth,
-               y: screen.visibleFrame.maxY - 40,
-               width: panelWidth, height: panelHeight)
+        // 사용자 지정 위치가 있으면 peek 없이 그대로 유지
+        if let origin = customPanelOrigin {
+            return NSRect(origin: origin, size: CGSize(width: panelWidth, height: panelHeight))
+        }
+        return NSRect(x: screen.visibleFrame.maxX - panelWidth,
+                      y: screen.visibleFrame.maxY - 40,
+                      width: panelWidth, height: panelHeight)
     }
 
     private func activeFrame(screen: NSScreen) -> NSRect {
-        NSRect(x: screen.visibleFrame.maxX - panelWidth,
-               y: screen.visibleFrame.maxY - panelHeight,
-               width: panelWidth, height: panelHeight)
+        let origin = customPanelOrigin ?? NSPoint(x: screen.visibleFrame.maxX - panelWidth,
+                                                   y: screen.visibleFrame.maxY - panelHeight)
+        return NSRect(origin: origin, size: CGSize(width: panelWidth, height: panelHeight))
     }
 
     private func animatePanel(for state: CompanionState) {
