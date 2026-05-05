@@ -36,7 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem?.button {
             button.title = ""
             let icon = MenuBarIcon.make(size: 18)
-            icon.isTemplate = false
+            icon.isTemplate = true   // 다크/라이트 모드 자동 대응
             button.image = icon
             button.imageScaling = .scaleProportionallyDown
         }
