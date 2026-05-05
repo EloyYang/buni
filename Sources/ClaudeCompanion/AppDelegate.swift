@@ -34,8 +34,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
-            button.title = "🐰"
-            button.image = nil
+            button.title = ""
+            let icon = MenuBarIcon.make(size: 18)
+            icon.isTemplate = false
+            button.image = icon
+            button.imageScaling = .scaleProportionallyDown
         }
         rebuildMenu()
     }
