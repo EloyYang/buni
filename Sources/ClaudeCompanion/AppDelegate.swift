@@ -1,75 +1,26 @@
 import Cocoa
 import SwiftUI
 import Combine
-import CoreGraphics
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlayPanel: NSPanel?
     private var statusItem: NSStatusItem?
     private let controller = CompanionController()
     private var eventMonitor: EventMonitor?
-    private var keyMonitor:   Any?
+    private let hotkeyMonitor = HotkeyMonitor()
     private var settingsWindow: NSWindow?
-    private var accessibilityTimer: Timer?
-    private var accessibilityGranted: Bool = true  // 기본 true — 실제 확인 후 갱신
     private var cancellables = Set<AnyCancellable>()
 
     private let panelWidth: CGFloat  = 320
     private let panelHeight: CGFloat = 200
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        requestInputMonitoringIfNeeded()
         setupOverlayPanel()
         setupStatusBar()
         setupControllerCallbacks()
         startEventMonitor()
-        setupKeyMonitor()
+        setupHotkeyMonitor()
         setupSettingsCallbacks()
-    }
-
-    // MARK: - Input Monitoring permission
-    // addGlobalMonitorForEvents는 "입력 모니터링" 권한이 필요 (손쉬운 사용 X)
-
-    private func requestInputMonitoringIfNeeded() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.checkInputMonitoring(requestIfNeeded: true)
-        }
-    }
-
-    private func checkInputMonitoring(requestIfNeeded: Bool) {
-        let granted = CGPreflightListenEventAccess()
-        let changed  = granted != accessibilityGranted
-        accessibilityGranted = granted
-
-        if granted {
-            accessibilityTimer?.invalidate()
-            accessibilityTimer = nil
-            if changed { setupKeyMonitor(); rebuildMenu() }
-            return
-        }
-
-        if requestIfNeeded { CGRequestListenEventAccess() }
-        if changed { rebuildMenu() }
-
-        guard accessibilityTimer == nil else { return }
-        accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.checkInputMonitoring(requestIfNeeded: false)
-        }
-    }
-
-    @objc private func openAccessibilityPrefs() {
-        // 입력 모니터링 설정 페이지로 바로 이동
-        NSWorkspace.shared.open(
-            URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
-        )
-        accessibilityTimer?.invalidate()
-        accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.checkInputMonitoring(requestIfNeeded: false)
-        }
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        if let m = keyMonitor { NSEvent.removeMonitor(m) }
     }
 
     // MARK: - Status bar
@@ -85,16 +36,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func rebuildMenu() {
         let menu = NSMenu()
-
-        // 접근성 권한 없으면 경고 항목 표시
-        if !accessibilityGranted {
-            let warn = NSMenuItem(title: "⚠️ 단축키: 입력 모니터링 권한 필요",
-                                  action: #selector(openAccessibilityPrefs),
-                                  keyEquivalent: "")
-            warn.target = self
-            menu.addItem(warn)
-            menu.addItem(.separator())
-        }
 
         // 전체 허용 모드 활성 시 상태 표시 + 해제 버튼
         if controller.alwaysApprove {
@@ -142,7 +83,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let panel = overlayPanel, let screen = NSScreen.main else {
             overlayPanel?.orderOut(nil); rebuildMenu(); return
         }
-        // 이미 숨겨져 있거나 슬라이드 중이면 그냥 숨김
         guard panel.isVisible, !controller.isSliding else {
             panel.orderOut(nil); rebuildMenu(); return
         }
@@ -181,7 +121,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
-    // 화면 오른쪽 밖 프레임
     private func offScreenRightFrame(screen: NSScreen) -> NSRect {
         NSRect(x: screen.visibleFrame.maxX,
                y: screen.visibleFrame.maxY - panelHeight,
@@ -230,17 +169,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebuildMenu() }
             .store(in: &cancellables)
+
+        // 권한 버블 상태 변화 시 단축키 활성/비활성
+        controller.$state
+            .receive(on: DispatchQueue.main)
+            .map { if case .permission = $0 { return true }; return false }
+            .removeDuplicates()
+            .sink { [weak self] isPermission in
+                self?.hotkeyMonitor.updatePermissionState(isPermission)
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Hotkey monitor
+
+    private func setupHotkeyMonitor() {
+        let store = ShortcutStore.shared
+        hotkeyMonitor.updateShortcuts(approve: store.approve,
+                                      deny: store.deny,
+                                      hide: store.hide)
+        hotkeyMonitor.onApprove = { [weak self] in self?.controller.approvePermission() }
+        hotkeyMonitor.onDeny    = { [weak self] in self?.controller.denyPermission() }
+        hotkeyMonitor.onHide    = { [weak self] in self?.hideCompanion() }
     }
 
     private func setupSettingsCallbacks() {
-        // 단축키 변경 시 모니터 재등록 — debounce로 연속 호출 1회로 묶음
         Publishers.CombineLatest3(
             ShortcutStore.shared.$approve,
             ShortcutStore.shared.$deny,
             ShortcutStore.shared.$hide
         )
         .debounce(for: .milliseconds(80), scheduler: DispatchQueue.main)
-        .sink { [weak self] _ in self?.setupKeyMonitor() }
+        .sink { [weak self] approve, deny, hide in
+            self?.hotkeyMonitor.updateShortcuts(approve: approve, deny: deny, hide: hide)
+        }
         .store(in: &cancellables)
     }
 
@@ -259,14 +221,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isOpaque = false
         panel.hasShadow = false
         panel.isMovable = false
-        panel.ignoresMouseEvents = false   // 클릭 허용
+        panel.ignoresMouseEvents = false
         panel.level = NSWindow.Level(rawValue: Int(NSWindow.Level.floating.rawValue) + 5)
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
 
         let rootView = CompanionView()
             .environmentObject(controller)
         panel.contentView = NSHostingView(rootView: rootView)
-        // Claude가 실행될 때만 표시 — 초기엔 숨김
         overlayPanel = panel
 
         controller.$state
@@ -289,7 +250,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func animatePanel(for state: CompanionState) {
-        // 등장/퇴장 슬라이드 중에는 간섭하지 않음
         guard !controller.isSliding else { return }
         guard let panel = overlayPanel, let screen = NSScreen.main else { return }
         let targetFrame = (state == .idle) ? peekFrame(screen: screen) : activeFrame(screen: screen)
@@ -297,38 +257,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ctx.duration = 0.45
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             panel.animator().setFrame(targetFrame, display: true)
-        }
-    }
-
-    // MARK: - Global key monitor
-
-    private func setupKeyMonitor() {
-        // 기존 모니터 해제
-        if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
-
-        keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return }
-            let store = ShortcutStore.shared
-
-            // 권한 허락 단축키
-            if let sc = store.approve, sc.matches(event) {
-                guard case .permission = self.controller.state else { return }
-                DispatchQueue.main.async { self.controller.approvePermission() }
-                return
-            }
-
-            // 권한 거부 단축키
-            if let sc = store.deny, sc.matches(event) {
-                guard case .permission = self.controller.state else { return }
-                DispatchQueue.main.async { self.controller.denyPermission() }
-                return
-            }
-
-            // 캐릭터 숨기기 단축키
-            if let sc = store.hide, sc.matches(event) {
-                DispatchQueue.main.async { self.hideCompanion() }
-                return
-            }
         }
     }
 
