@@ -16,7 +16,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // 사용자가 지정한 패널 위치 (nil이면 기본 오른쪽 상단)
     private var customPanelOrigin: NSPoint?
-    private var dragStartOrigin: NSPoint = .zero
+    private var dragEventMonitor: Any?
+    private var lastMouseLocation: NSPoint = .zero
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         customPanelOrigin = loadSavedOrigin()
@@ -171,27 +172,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onOpenClaudeRequest   = { [weak self] in self?.openClaude() }
         controller.onOpenSettingsRequest = { [weak self] in self?.openSettings() }
 
-        // 드래그로 위치 조정
+        // 드래그로 위치 조정 — NSEvent 로컬 모니터로 마우스 델타를 직접 추적해 떨림 방지
         controller.onPanelDragStart = { [weak self] in
-            self?.dragStartOrigin = self?.overlayPanel?.frame.origin ?? .zero
+            guard let self else { return }
+            self.lastMouseLocation = NSEvent.mouseLocation
+
+            self.dragEventMonitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.leftMouseDragged, .leftMouseUp]
+            ) { [weak self] event in
+                guard let self else { return event }
+
+                if event.type == .leftMouseUp {
+                    if let m = self.dragEventMonitor { NSEvent.removeMonitor(m) }
+                    self.dragEventMonitor = nil
+                    if let origin = self.overlayPanel?.frame.origin {
+                        self.customPanelOrigin = origin
+                        self.saveOrigin(origin)
+                    }
+                    return event
+                }
+
+                // leftMouseDragged: 이전 위치와의 델타만큼 패널 이동
+                let current = NSEvent.mouseLocation
+                let dx = current.x - self.lastMouseLocation.x
+                let dy = current.y - self.lastMouseLocation.y
+                self.lastMouseLocation = current
+
+                if let panel = self.overlayPanel, let screen = NSScreen.main {
+                    var origin = panel.frame.origin
+                    origin.x = max(screen.visibleFrame.minX - self.panelWidth + 60,
+                                   min(screen.visibleFrame.maxX - 60, origin.x + dx))
+                    origin.y = max(screen.visibleFrame.minY - self.panelHeight + 60,
+                                   min(screen.visibleFrame.maxY - 20, origin.y + dy))
+                    panel.setFrameOrigin(origin)
+                    self.customPanelOrigin = origin
+                }
+                return event
+            }
         }
-        controller.onPanelDrag = { [weak self] translation in
-            guard let self, let panel = self.overlayPanel,
-                  let screen = NSScreen.main else { return }
-            let newX = self.dragStartOrigin.x + translation.width
-            let newY = self.dragStartOrigin.y - translation.height  // SwiftUI Y축 반전
-            // 화면 밖으로 완전히 벗어나지 않도록 클램프
-            let clampedX = max(screen.visibleFrame.minX - self.panelWidth + 60,
-                               min(screen.visibleFrame.maxX - 60, newX))
-            let clampedY = max(screen.visibleFrame.minY - self.panelHeight + 60,
-                               min(screen.visibleFrame.maxY - 20, newY))
-            panel.setFrameOrigin(NSPoint(x: clampedX, y: clampedY))
-            self.customPanelOrigin = panel.frame.origin
-        }
-        controller.onPanelDragEnd = { [weak self] in
-            guard let self, let origin = self.overlayPanel?.frame.origin else { return }
-            self.saveOrigin(origin)
-        }
+        controller.onPanelDrag    = { _ in }  // 로컬 모니터가 처리
+        controller.onPanelDragEnd = { }       // 로컬 모니터가 처리
         controller.onResetPositionRequest = { [weak self] in
             guard let self else { return }
             self.customPanelOrigin = nil
