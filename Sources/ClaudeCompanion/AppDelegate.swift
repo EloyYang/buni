@@ -34,8 +34,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "face.smiling.inverse",
-                                   accessibilityDescription: "Claude Companion")
+            button.title = "🐰"
+            button.image = nil
         }
         rebuildMenu()
     }
