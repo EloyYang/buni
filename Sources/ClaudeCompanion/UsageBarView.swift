@@ -1,8 +1,9 @@
 import SwiftUI
 
 struct UsageBarView: View {
-    let percent: Double      // 0–100
-    var label: String = ""   // 예) "481K" — 바 아래 표시, 빈 문자열이면 숨김
+    let percent: Double        // 0–100
+    var label: String = ""     // 예) "36%" — 바 아래 왼쪽 표시
+    var resetTime: String = "" // 예) "4:32" — 바 아래 오른쪽 표시 (자정까지 남은 시간)
 
     private let totalSegments = 10
     private let segmentH: CGFloat = 9
@@ -55,13 +56,27 @@ struct UsageBarView: View {
         .frame(height: segmentH + borderW * 2)
         .padding(.horizontal, 6)
 
-        // 토큰 수 라벨
-        if !label.isEmpty {
-            Text(label)
-                .font(.system(size: 7, weight: .medium, design: .monospaced))
-                .foregroundColor(.white.opacity(0.45))
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 1)
+        // 바 아래 라벨: 왼쪽 % + 오른쪽 리셋 시간
+        if !label.isEmpty || !resetTime.isEmpty {
+            HStack {
+                if !label.isEmpty {
+                    Text(label)
+                        .font(.system(size: 7, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.45))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                Spacer()
+                if !resetTime.isEmpty {
+                    Text("↺ \(resetTime)")
+                        .font(.system(size: 7, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.30))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.top, 1)
         }
     }
 }

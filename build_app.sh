@@ -52,6 +52,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
     <key>LSUIElement</key>             <true/>
     <key>NSHighResolutionCapable</key> <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key> <true/>
+    <key>NSUserNotificationUsageDescription</key>
+        <string>Buni 새 버전이 출시되면 알려드립니다.</string>
 </dict>
 </plist>
 PLIST

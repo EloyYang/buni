@@ -15,8 +15,11 @@ class EventMonitor {
     static let eventFile = "/tmp/claude-companion-events.jsonl"
 
     private let queue     = DispatchQueue(label: "claude.companion.events", qos: .background)
-    private var timer:      DispatchSourceTimer?
-    private var planTimer:  DispatchSourceTimer?
+    private var timer:       DispatchSourceTimer?
+    private var planTimer:   DispatchSourceTimer?
+    private var serverTimer: DispatchSourceTimer?
+    private static let serverUsageFile = "/tmp/claude-companion-plan-usage.json"
+    private static let fetchScript = NSHomeDirectory() + "/.claude/companion-fetch-usage.py"
     private var fileOffset      = 0
     private var claudeWasRunning = false
     private var isInitialCheck   = true   // 앱 시작 시 이미 실행 중인 경우 구분
@@ -57,15 +60,78 @@ class EventMonitor {
         t.resume()
         timer = t
 
-        // 플랜 사용량: 60초 간격으로 JSONL 파일 집계
+        // 플랜 사용량: 60초 간격으로 JSONL 파일 집계 (로컬 추정)
         let pt = DispatchSource.makeTimerSource(queue: queue)
         pt.schedule(deadline: .now(), repeating: .seconds(60))
         pt.setEventHandler { [weak self] in self?.updatePlanUsage() }
         pt.resume()
         planTimer = pt
+
+        // 서버 플랜 사용량: 시작 즉시 + 5분마다 Python 스크립트로 가져옴
+        let st = DispatchSource.makeTimerSource(queue: queue)
+        st.schedule(deadline: .now() + 2, repeating: .seconds(300))
+        st.setEventHandler { [weak self] in self?.fetchServerUsage() }
+        st.resume()
+        serverTimer = st
     }
 
-    // MARK: - 플랜 일일 사용량
+    // MARK: - 서버 플랜 사용량 (claude.ai API)
+
+    /// playwright가 설치된 python3 경로를 반환
+    private static func findPython3() -> String {
+        let candidates = [
+            "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+            "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3",
+            "/opt/homebrew/bin/python3",
+            "/usr/local/bin/python3",
+            "/usr/bin/python3",
+        ]
+        for path in candidates {
+            if FileManager.default.fileExists(atPath: path) { return path }
+        }
+        return "/usr/bin/python3"
+    }
+
+    private func fetchServerUsage() {
+        // 스크립트가 없으면 스킵
+        guard FileManager.default.fileExists(atPath: Self.fetchScript) else { return }
+
+        // playwright가 있는 python3로 실행
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: Self.findPython3())
+        proc.arguments = [Self.fetchScript]
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError  = FileHandle.nullDevice
+        try? proc.run()
+
+        // 스크립트 완료 후 파일 읽기 (최대 30초 대기)
+        queue.asyncAfter(deadline: .now() + 30) { [weak self] in
+            self?.readServerUsageFile()
+        }
+    }
+
+    private func readServerUsageFile() {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: Self.serverUsageFile)),
+              let obj  = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+
+        let utilization = obj["utilization"] as? Double ?? 0
+        let resetsAt: Date? = (obj["resets_at"] as? String).flatMap { s in
+            let fmt = ISO8601DateFormatter()
+            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return fmt.date(from: s) ?? {
+                fmt.formatOptions = [.withInternetDateTime]
+                return fmt.date(from: s)
+            }()
+        }
+
+        DispatchQueue.main.async {
+            self.controller.serverUtilization = utilization
+            self.controller.serverResetsAt    = resetsAt
+        }
+    }
+
+    // MARK: - 플랜 일일 사용량 (로컬 추정)
 
     private func updatePlanUsage() {
         let tokens  = TokenUsageReader.readToday()

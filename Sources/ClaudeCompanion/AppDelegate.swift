@@ -23,12 +23,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         customPanelOrigin = loadSavedOrigin()
         setupOverlayPanel()
-        setupStatusBar()
+        if !UserDefaults.standard.bool(forKey: "statusBar.hidden") {
+            setupStatusBar()
+        }
         setupControllerCallbacks()
         startEventMonitor()
         setupHotkeyMonitor()
         setupSettingsCallbacks()
-        checkForUpdates()
+        setupUpdateChecker()
     }
 
     // MARK: - Status bar
@@ -69,7 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let isVisible = overlayPanel?.isVisible ?? false
-        menu.addItem(NSMenuItem(title: isVisible ? "숨기기" : "보이기",
+        menu.addItem(NSMenuItem(title: isVisible ? "부니 숨기기" : "부니 보이기",
                                 action: #selector(toggleVisibility),
                                 keyEquivalent: "h"))
         menu.addItem(NSMenuItem(title: "Claude 열기",
@@ -78,6 +80,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "단축키 설정...",
                                 action: #selector(openSettings),
                                 keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: "메뉴바 아이콘 숨기기",
+                                action: #selector(hideStatusBar),
+                                keyEquivalent: ""))
         menu.addItem(.separator())
 
         // 현재 버전 표시 (비활성)
@@ -99,15 +104,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UpdateChecker.openReleasePage()
     }
 
-    private func checkForUpdates() {
-        // 앱 시작 3초 뒤에 조용히 확인
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            UpdateChecker.check { [weak self] newVersion in
-                guard let self, let ver = newVersion else { return }
-                self.availableUpdate = ver
-                self.rebuildMenu()
-            }
+    @objc private func hideStatusBar() {
+        NSStatusBar.system.removeStatusItem(statusItem!)
+        statusItem = nil
+        UserDefaults.standard.set(true, forKey: "statusBar.hidden")
+    }
+
+    func showStatusBar() {
+        guard statusItem == nil else { return }
+        setupStatusBar()
+        UserDefaults.standard.set(false, forKey: "statusBar.hidden")
+    }
+
+    private func setupUpdateChecker() {
+        UpdateChecker.shared.onUpdateFound = { [weak self] ver in
+            guard let self else { return }
+            // 이미 같은 버전이면 스킵
+            if self.availableUpdate == ver { return }
+            self.availableUpdate = ver
+            self.rebuildMenu()
+            // 캐릭터 말풍선 알림 (5초 표시)
+            self.controller.update(to: .notification("🆕 Buni v\(ver) 업데이트"), autohideAfter: 8)
         }
+        UpdateChecker.shared.startPeriodicCheck()
     }
 
     @objc private func disableAlwaysApprove() {
@@ -204,10 +223,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Controller callbacks
 
     private func setupControllerCallbacks() {
-        controller.onHideRequest         = { [weak self] in self?.hideCompanion() }
-        controller.onShowRequest         = { [weak self] in self?.showCompanion() }
-        controller.onOpenClaudeRequest   = { [weak self] in self?.openClaude() }
-        controller.onOpenSettingsRequest = { [weak self] in self?.openSettings() }
+        controller.onHideRequest           = { [weak self] in self?.hideCompanion() }
+        controller.onShowRequest           = { [weak self] in self?.showCompanion() }
+        controller.onOpenClaudeRequest     = { [weak self] in self?.openClaude() }
+        controller.onOpenSettingsRequest   = { [weak self] in self?.openSettings() }
+        controller.onShowStatusBarRequest  = { [weak self] in self?.showStatusBar() }
 
         // 드래그로 위치 조정 — NSEvent 로컬 모니터로 마우스 델타를 직접 추적해 떨림 방지
         controller.onPanelDragStart = { [weak self] in
@@ -347,7 +367,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func peekFrame(screen: NSScreen) -> NSRect {
-        // 사용자 지정 위치가 있으면 peek 없이 그대로 유지
         if let origin = customPanelOrigin {
             return NSRect(origin: origin, size: CGSize(width: panelWidth, height: panelHeight))
         }

@@ -11,7 +11,7 @@ struct JellyfishCharacterView: View {
 
     @State private var bodyDY:      CGFloat = 0
     @State private var bodyDX:      CGFloat = 0
-    @State private var bellScaleY:  CGFloat = 1.0   // 헤엄 수축/이완
+    @State private var bellScaleY:  CGFloat = 1.0
     @State private var tentacleDX:  [CGFloat] = [0, 0, 0, 0]
     @State private var tentacleDY:  [CGFloat] = [0, 0, 0, 0]
     @State private var slideTentaclePhase = false
@@ -22,17 +22,15 @@ struct JellyfishCharacterView: View {
     private let tentXs: [CGFloat] = [-2.0, -0.65, 0.65, 2.0]
     private let tentHs: [CGFloat] = [2.4,  2.9,   2.9,  2.4]
 
-    // MARK: – 벨 (scaleEffect를 위해 별도 View로 분리)
+    // MARK: – 벨
     private var bellBody: some View {
         ZStack {
-            // 계단식 4레이어 (캡 제거)
-            px(w: 4.0, h: 0.8, c: bellColor).offset(y:  p * 2.25)   // 스커트
-            px(w: 5.5, h: 1.0, c: bellColor).offset(y:  p * 1.35)   // 하단
-            px(w: 5.5, h: 1.5, c: bellColor).offset(y:  p * 0.10)   // 중단
-            px(w: 4.0, h: 1.0, c: bellColor).offset(y: -p * 1.15)   // 상단
-            px(w: 3.0, h: 0.8, c: lightColor).offset(y: -p * 0.65)  // 하이라이트
+            px(w: 4.0, h: 0.8, c: bellColor).offset(y:  p * 2.25)
+            px(w: 5.5, h: 1.0, c: bellColor).offset(y:  p * 1.35)
+            px(w: 5.5, h: 1.5, c: bellColor).offset(y:  p * 0.10)
+            px(w: 4.0, h: 1.0, c: bellColor).offset(y: -p * 1.15)
+            px(w: 3.0, h: 0.8, c: lightColor).offset(y: -p * 0.65)
 
-            // 눈 (bodyDY 제외 — 벨 그룹에 offset 으로 적용)
             let eyeY: CGFloat = eyeLookUp ? -p * 0.65 : -p * 0.10
             eyeBlock(x: -p * 1.3, y: eyeY)
             eyeBlock(x:  p * 1.3, y: eyeY)
@@ -48,11 +46,11 @@ struct JellyfishCharacterView: View {
                 px(w: 0.6, h: tentHs[i], c: tentColor)
                     .offset(x: p * tentXs[i] + tentacleDX[i],
                             y: p * 2.55 + bodyDY + tentacleDY[i])
-                    .animation(.easeInOut(duration: 0.22), value: tentacleDX[i])
-                    .animation(.easeInOut(duration: 0.25), value: tentacleDY[i])
+                    .animation(.easeInOut(duration: 0.30), value: tentacleDX[i])
+                    .animation(.easeInOut(duration: 0.30), value: tentacleDY[i])
             }
 
-            // ── 벨 (bodyDY 로 통째로 이동)
+            // ── 벨
             bellBody.offset(y: bodyDY)
         }
         .offset(x: bodyDX)
@@ -122,7 +120,6 @@ struct JellyfishCharacterView: View {
 
         case .permission:
             withAnimation(.easeInOut(duration: 0.18)) { wideEyes = true }
-            // 오른쪽 끝 촉수만 번쩍 들어올리기
             withAnimation(.easeOut(duration: 0.22)) {
                 tentacleDY = [0, 0, 0, -p * 3.2]
             }
@@ -151,16 +148,12 @@ struct JellyfishCharacterView: View {
         }
     }
 
-    /// 해파리 헤엄 — 벨 수축으로 추진 → 이완하며 부유
     private func doSwim() {
         guard case .ready = ctrl.state else { return }
-
-        // 1. 빠른 수축 + 위로 추진
         withAnimation(.easeIn(duration: 0.18)) {
             bellScaleY = 0.48
             bodyDY     = -p * 2.6
         }
-        // 2. 이완 + 천천히 부유 복귀
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
             guard case .ready = ctrl.state else {
                 withAnimation(.easeOut(duration: 0.3)) { bellScaleY = 1.0; bodyDY = 0 }
@@ -190,7 +183,7 @@ struct JellyfishCharacterView: View {
         }
     }
 
-    // MARK: – 슬라이드 등장·퇴장
+    // MARK: – 슬라이드
 
     private func startSlidePulse() {
         slideTentaclePhase = false
@@ -202,7 +195,6 @@ struct JellyfishCharacterView: View {
         slideTentaclePhase.toggle()
         let s: CGFloat = slideTentaclePhase ? 1 : -1
 
-        // 헤엄 수축 + 촉수 파도
         withAnimation(.easeIn(duration: 0.12))    { bellScaleY = 0.55 }
         withAnimation(.easeOut(duration: 0.10).delay(0.12)) { bellScaleY = 1.0 }
         withAnimation(.easeInOut(duration: 0.20)) {
@@ -219,13 +211,6 @@ struct JellyfishCharacterView: View {
     }
 
     // MARK: – 헬퍼
-
-    private func shakeBody() {
-        let steps: [CGFloat] = [0, -p, p, -p, p, -p*0.5, p*0.5, 0]
-        for (i, dy) in steps.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.07) { bodyDY = dy }
-        }
-    }
 
     private func scheduleBlink() {
         DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 2.5...6.0)) {

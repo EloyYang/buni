@@ -4,6 +4,9 @@ import Cocoa
 /// 기본 NSPanel은 setFrameOrigin 호출 시 가시 영역 밖으로 나가지 못하도록
 /// 내부적으로 위치를 보정하는데, 이를 우회해 메뉴바까지 자유롭게 이동할 수 있게 한다.
 final class UnconstrainedPanel: NSPanel {
+    // 채팅 입력이 활성화됐을 때 키보드 입력 허용
+    override var canBecomeKey: Bool { true }
+
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         return frameRect
     }

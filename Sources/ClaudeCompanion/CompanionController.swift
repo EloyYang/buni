@@ -17,13 +17,24 @@ class CompanionController: ObservableObject {
     @Published var planUsagePercent: Double = 0  // 플랜 일일 한도 대비 사용률
     @Published var planTokensToday: Int = 0       // 오늘 사용한 토큰 수
     @Published var sessionStart: Date? = nil
+
+    // 서버에서 가져온 실제 플랜 사용량
+    @Published var serverUtilization: Double? = nil  // five_hour.utilization (%)
+    @Published var serverResetsAt: Date? = nil        // five_hour.resets_at
     @Published var isSliding: Bool = false
     @Published var alwaysApprove: Bool = false
     var pendingPermissionId: String? = nil
 
     var planTokenLabel: String {
-        guard planTokensToday > 0 else { return "" }
-        return String(format: "%.0f%%", planUsagePercent)
+        if let u = serverUtilization {
+            return String(format: "%.0f%%", u)
+        }
+        return "동기화중"   // 서버 값 미수신 시
+    }
+
+    /// 게이지바 표시용 실제 사용률 (0-100)
+    var displayUsagePercent: Double {
+        serverUtilization ?? 0   // 동기화 전엔 빈 바
     }
 
     // AppDelegate가 주입하는 액션 콜백
@@ -34,6 +45,8 @@ class CompanionController: ObservableObject {
     var onPanelDrag: ((CGSize) -> Void)?
     var onPanelDragEnd: (() -> Void)?
     var onResetPositionRequest: (() -> Void)?
+    var onOpenSettingsRequest: (() -> Void)?
+    var onShowStatusBarRequest: (() -> Void)?
 
     private var autoHideTask: DispatchWorkItem?
 
@@ -60,8 +73,6 @@ class CompanionController: ObservableObject {
         alwaysApprove = true
         approvePermission()
     }
-
-    var onOpenSettingsRequest: (() -> Void)?
 
     func update(to newState: CompanionState, autohideAfter seconds: Double? = nil) {
         DispatchQueue.main.async {
