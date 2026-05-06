@@ -22,10 +22,8 @@ class CompanionController: ObservableObject {
     var pendingPermissionId: String? = nil
 
     var planTokenLabel: String {
-        let t = planTokensToday
-        if t >= 1_000_000 { return String(format: "%.1fM", Double(t) / 1_000_000) }
-        if t >= 1_000     { return "\(t / 1_000)K" }
-        return t > 0 ? "\(t)" : ""
+        guard planTokensToday > 0 else { return "" }
+        return String(format: "%.0f%%", planUsagePercent)
     }
 
     // AppDelegate가 주입하는 액션 콜백
