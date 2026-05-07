@@ -1,0 +1,42 @@
+name: Build Windows Exe
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r windows/requirements.txt
+          pip install pyinstaller
+
+      - name: Build Buni.exe
+        run: |
+          pyinstaller `
+            --onefile `
+            --windowed `
+            --name Buni `
+            --hidden-import pystray `
+            --hidden-import PIL `
+            --hidden-import PIL.Image `
+            --hidden-import PIL.ImageDraw `
+            windows/buni.py
+
+      - name: Upload Buni.exe to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Buni.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

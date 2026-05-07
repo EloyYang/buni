@@ -30,24 +30,24 @@ bash build_app.sh --install
 
 ### Windows
 
-**요구사항:** Python 3.10 이상 · [Claude Code](https://claude.ai/code) CLI
+**요구사항:** [Claude Code](https://claude.ai/code) CLI · Python 불필요
+
+1. [Releases 페이지](https://github.com/EloyYang/buni/releases/latest)에서 **Buni.exe** 다운로드
+2. `Buni.exe` 실행
+3. Claude Code 훅 설치 (최초 1회):
 
 ```bat
-git clone https://github.com/EloyYang/buni.git
-cd buni\windows
-install.bat
+cd %USERPROFILE%
+curl -L https://raw.githubusercontent.com/EloyYang/buni/main/windows/install_hooks.py -o install_hooks.py
+python install_hooks.py
 ```
 
-`install.bat`가 수행하는 작업:
-1. `pystray`, `Pillow` pip 설치
-2. Claude Code 훅 스크립트 설치
-3. `~/.claude/settings.json`에 훅 자동 등록
-4. 앱 실행
-
-단독 실행파일(`.exe`) 빌드:
-```bat
-build.bat   # → dist\Buni.exe
-```
+> **소스에서 빌드하려면:**
+> ```bat
+> git clone https://github.com/EloyYang/buni.git
+> cd buni\windows
+> install.bat
+> ```
 
 ---
 
