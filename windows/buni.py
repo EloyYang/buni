@@ -80,8 +80,8 @@ class BuniApp:
         self.blinking = False
         self.wide_eyes = False
         self.dot_count = 1
-        self._usage       = 0.0          # 0.0 – 1.0
-        self._resets_at: datetime.datetime | None = None  # 초기화 시각
+        self._usage           = 0.0   # 0.0 – 1.0 (컨텍스트 사용률)
+        self._session_start: datetime.datetime | None = None  # sessionStartTs
         self._monthly_tokens: int = 0    # 이번 달 누적 토큰
 
         # ── After-job handles (to cancel)
@@ -326,46 +326,71 @@ class BuniApp:
     def _draw_bar(self):
         if self.state == 'idle':
             return
-        # Bar position: below character, right-aligned
-        bx = CHAR_CX - P*3.3
-        by = CHAR_CY + P*4.2
-        w  = P*6.6; h = P*1.4
-        seg = 10; gap = 1.5
-        sw  = (w - gap*(seg-1)) / seg
-        filled = round(self._usage * seg)
 
-        # ── Level + reset time row (above bar)
+        # ── 좌표 기준 (맥용과 동일한 비율)
+        SEG   = 10; GAP = 2; BW = 1.5
+        SH    = 9          # segment height
+        bx    = CHAR_CX - P*3.3
+        bar_y = CHAR_CY + P*4.0   # 게이지 바 top-y
+        w     = P*6.6
+        sw    = (w - GAP*(SEG-1)) / SEG
+
+        filled = int(self._usage * SEG + 0.5)
+        filled = max(0, min(SEG, filled))
+
+        # ── 1. 레벨 (바 위 왼쪽, 맥용 size=7 bold)
         level = self._monthly_tokens // 500_000 + 1
-        lv_x  = bx
-        lv_y  = by - 14
-        self.cv.create_text(lv_x, lv_y, text=f'★ Lv.{level}',
-                             anchor='w', font=('Malgun Gothic', 9, 'bold'),
+        lv_y  = bar_y - 12
+        self.cv.create_text(bx, lv_y, text=f'★ Lv.{level}',
+                             anchor='w', font=('Consolas', 7, 'bold'),
                              fill='#F2CC25', tags='bar')
 
-        if self._resets_at:
-            now  = datetime.datetime.now(datetime.timezone.utc)
-            diff = self._resets_at - now
-            secs = int(diff.total_seconds())
-            if secs > 0:
-                h_left = secs // 3600
-                m_left = (secs % 3600) // 60
-                reset_str = f'↺ {h_left}:{m_left:02d}'
-                self.cv.create_text(bx + w, lv_y, text=reset_str,
-                                    anchor='e', font=('Malgun Gothic', 9),
-                                    fill='#aaaaaa', tags='bar')
+        # ── 2. 게이지 바 (라운드 테두리 + 세그먼트)
+        r = 3   # corner radius (맥용 cornerRadius: 3)
+        self._rounded_rect(bx - BW, bar_y - BW,
+                           bx + w + BW, bar_y + SH + BW,
+                           r, '', '#999999', 'bar')
 
-        # ── Gauge bar
-        self.cv.create_rectangle(bx-1, by-1, bx+w+1, by+h+1,
-                                  fill='', outline='#666666', width=1, tags='bar')
-        for i in range(seg):
-            ratio = (i+1)/seg
-            if ratio <= 0.5:    fc = '#4DDA59'
+        for i in range(SEG):
+            ratio = (i+1)/SEG
+            if ratio <= 0.50:   fc = '#4DDA59'
             elif ratio <= 0.75: fc = '#F2CC25'
             else:               fc = '#F24D33'
-            color = fc if i < filled else '#333333'
-            sx = bx + i*(sw+gap)
-            self.cv.create_rectangle(sx, by, sx+sw, by+h,
+            color = fc if i < filled else '#151515'
+            sx = bx + i*(sw+GAP)
+            # 세그먼트 칸
+            self.cv.create_rectangle(sx, bar_y, sx+sw, bar_y+SH,
                                       fill=color, outline='', tags='bar')
+            # 채워진 세그먼트에 흰 하이라이트 (맥용과 동일)
+            if i < filled:
+                self.cv.create_rectangle(sx, bar_y, sx+sw, bar_y+2,
+                                          fill='#ffffff47', outline='', tags='bar')
+
+        # ── 3. 바 아래: 왼쪽 사용량%, 오른쪽 초기화시간 (맥용 size=7)
+        label_y = bar_y + SH + 10
+        pct_str = f'{round(self._usage * 100)}%'
+        self.cv.create_text(bx, label_y, text=pct_str,
+                             anchor='w', font=('Consolas', 7),
+                             fill='#888888', tags='bar')
+
+        reset_str = self._reset_time_str()
+        if reset_str:
+            self.cv.create_text(bx + w, label_y, text=f'↺ {reset_str}',
+                                 anchor='e', font=('Consolas', 7),
+                                 fill='#888888', tags='bar')
+
+    def _reset_time_str(self) -> str:
+        """sessionStart+5h 기준 남은 시간 (맥용과 동일한 로직)."""
+        if self._session_start is None:
+            return ''
+        reset_at = self._session_start + datetime.timedelta(hours=5)
+        now  = datetime.datetime.now(datetime.timezone.utc)
+        diff = int((reset_at - now).total_seconds())
+        if diff <= 0:
+            return ''
+        h = diff // 3600
+        m = (diff % 3600) // 60
+        return f'{h}:{m:02d}' if h > 0 else f'{m}m'
 
     # ── Bubble text ───────────────────────────────────────────
 
@@ -565,13 +590,15 @@ class BuniApp:
 
     # ── Usage bar ─────────────────────────────────────────────
 
-    def _set_usage(self, pct: float, resets_at: str | None = None):
+    def _set_usage(self, pct: float, session_start_ts: str | None = None):
         self._usage = max(0.0, min(1.0, pct / 100.0))
-        if resets_at:
+        if session_start_ts:
             try:
-                # ISO8601 파싱
-                ts = resets_at.replace('Z', '+00:00')
-                self._resets_at = datetime.datetime.fromisoformat(ts)
+                ts = session_start_ts.replace('Z', '+00:00')
+                parsed = datetime.datetime.fromisoformat(ts)
+                # 더 이른 시각이면 교체 (맥용 동일 로직)
+                if self._session_start is None or parsed < self._session_start:
+                    self._session_start = parsed
             except Exception:
                 pass
         self._draw()
@@ -718,8 +745,12 @@ class BuniApp:
             if running != claude_running:
                 claude_running = running
                 if running:
+                    # 새 세션 시작 시 session_start 초기화
+                    if self._session_start is None:
+                        self._session_start = datetime.datetime.now(datetime.timezone.utc)
                     self._apply_state('ready')
                 else:
+                    self._session_start = None
                     self._apply_state('idle')
             # Poll event file
             self._poll_file()
@@ -778,9 +809,9 @@ class BuniApp:
                 self._apply_state('permission', perm_cmd=cmd, perm_id=pid)
 
         elif t == 'usage':
-            pct       = ev.get('percent', 0)
-            resets_at = ev.get('resets_at', None)
-            self.root.after(0, lambda p=pct, r=resets_at: self._set_usage(p, r))
+            pct = ev.get('percent', 0)
+            sts = ev.get('sessionStartTs', None)
+            self.root.after(0, lambda p=pct, s=sts: self._set_usage(p, s))
 
     @staticmethod
     def _fmt_tool(raw: str) -> str:
