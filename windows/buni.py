@@ -7,7 +7,7 @@ https://github.com/EloyYang/buni
 import tkinter as tk
 import threading
 import json, time, os, sys, math
-import ctypes
+import ctypes, datetime
 from pathlib import Path
 
 # ── Pixel unit (matches macOS p = 6.5)
@@ -80,7 +80,9 @@ class BuniApp:
         self.blinking = False
         self.wide_eyes = False
         self.dot_count = 1
-        self._usage   = 0.0          # 0.0 – 1.0
+        self._usage       = 0.0          # 0.0 – 1.0
+        self._resets_at: datetime.datetime | None = None  # 초기화 시각
+        self._monthly_tokens: int = 0    # 이번 달 누적 토큰
 
         # ── After-job handles (to cancel)
         self._kn_job = self._dot_job = self._idle_job = None
@@ -279,15 +281,27 @@ class BuniApp:
             y2 = CHAR_CY + ay + hw*math.sin(rad) + self.body_dy
             self.cv.create_line(x1, y1, x2, y2, fill=NEEDLE, width=3, tags='char')
 
+    def _rounded_rect(self, x0, y0, x1, y1, r, fill, outline, tag):
+        """tkinter에는 rounded rectangle이 없어서 폴리곤으로 그림."""
+        pts = [
+            x0+r, y0,   x1-r, y0,
+            x1,   y0,   x1,   y0+r,
+            x1,   y1-r, x1,   y1,
+            x1-r, y1,   x0+r, y1,
+            x0,   y1,   x0,   y1-r,
+            x0,   y0+r, x0,   y0,
+        ]
+        self.cv.create_polygon(pts, smooth=True,
+                               fill=fill, outline=outline, width=1, tags=tag)
+
     def _draw_bubble(self):
         if not self.msg:
             return
         bx = CHAR_CX - P*5
         by = CHAR_CY - P*3.5
         text = self.msg
-        # Measure text width
         pad = 10
-        font = ('Consolas', 10)
+        font = ('Malgun Gothic', 10)
         temp = self.cv.create_text(0, 0, text=text, font=font)
         bb = self.cv.bbox(temp)
         self.cv.delete(temp)
@@ -295,14 +309,16 @@ class BuniApp:
         th = (bb[3] - bb[1]) if bb else 14
         bw = tw + pad * 2
         bh = th + pad * 1.4
+        r  = 8   # corner radius
         x0 = bx - bw; y0 = by - bh/2
         x1 = bx;      y1 = by + bh/2
-        # Bubble background
-        self.cv.create_rectangle(x0, y0, x1, y1, fill='white', outline='#cccccc',
-                                  width=1, tags='bubble')
-        # Tail (small triangle pointing right)
-        self.cv.create_polygon(x1, by - 6, x1 + 10, by, x1, by + 6,
-                                fill='white', outline='#cccccc', tags='bubble')
+        # Rounded bubble background
+        self._rounded_rect(x0, y0, x1, y1, r, 'white', '#cccccc', 'bubble')
+        # Tail (small triangle pointing right toward character)
+        self.cv.create_polygon(x1-2, by - 5, x1 + 9, by, x1-2, by + 5,
+                                fill='white', outline='', tags='bubble')
+        self.cv.create_line(x1-2, by-5, x1+9, by, fill='#cccccc', width=1, tags='bubble')
+        self.cv.create_line(x1+9, by, x1-2, by+5, fill='#cccccc', width=1, tags='bubble')
         # Text
         self.cv.create_text(x0 + pad, (y0+y1)/2, text=text, anchor='w',
                              font=font, fill='#222222', tags='bubble')
@@ -312,17 +328,38 @@ class BuniApp:
             return
         # Bar position: below character, right-aligned
         bx = CHAR_CX - P*3.3
-        by = CHAR_CY + P*3.8
+        by = CHAR_CY + P*4.2
         w  = P*6.6; h = P*1.4
         seg = 10; gap = 1.5
         sw  = (w - gap*(seg-1)) / seg
         filled = round(self._usage * seg)
-        # Border
+
+        # ── Level + reset time row (above bar)
+        level = self._monthly_tokens // 500_000 + 1
+        lv_x  = bx
+        lv_y  = by - 14
+        self.cv.create_text(lv_x, lv_y, text=f'★ Lv.{level}',
+                             anchor='w', font=('Malgun Gothic', 9, 'bold'),
+                             fill='#F2CC25', tags='bar')
+
+        if self._resets_at:
+            now  = datetime.datetime.now(datetime.timezone.utc)
+            diff = self._resets_at - now
+            secs = int(diff.total_seconds())
+            if secs > 0:
+                h_left = secs // 3600
+                m_left = (secs % 3600) // 60
+                reset_str = f'↺ {h_left}:{m_left:02d}'
+                self.cv.create_text(bx + w, lv_y, text=reset_str,
+                                    anchor='e', font=('Malgun Gothic', 9),
+                                    fill='#aaaaaa', tags='bar')
+
+        # ── Gauge bar
         self.cv.create_rectangle(bx-1, by-1, bx+w+1, by+h+1,
                                   fill='', outline='#666666', width=1, tags='bar')
         for i in range(seg):
             ratio = (i+1)/seg
-            if ratio <= 0.5:  fc = '#4DDA59'
+            if ratio <= 0.5:    fc = '#4DDA59'
             elif ratio <= 0.75: fc = '#F2CC25'
             else:               fc = '#F24D33'
             color = fc if i < filled else '#333333'
@@ -528,8 +565,50 @@ class BuniApp:
 
     # ── Usage bar ─────────────────────────────────────────────
 
-    def _set_usage(self, pct: float):
+    def _set_usage(self, pct: float, resets_at: str | None = None):
         self._usage = max(0.0, min(1.0, pct / 100.0))
+        if resets_at:
+            try:
+                # ISO8601 파싱
+                ts = resets_at.replace('Z', '+00:00')
+                self._resets_at = datetime.datetime.fromisoformat(ts)
+            except Exception:
+                pass
+        self._draw()
+
+    def _read_monthly_tokens(self):
+        """~/.claude/projects 폴더의 JSONL에서 이번 달 토큰 합산."""
+        try:
+            projects_dir = Path.home() / '.claude' / 'projects'
+            if not projects_dir.exists():
+                return
+            now = datetime.datetime.now()
+            total = 0
+            for jf in projects_dir.rglob('*.jsonl'):
+                try:
+                    for line in jf.read_text(encoding='utf-8', errors='replace').splitlines():
+                        if not line.strip():
+                            continue
+                        obj = json.loads(line)
+                        # timestamp 필드로 이번 달 필터
+                        ts_str = obj.get('timestamp', '')
+                        if ts_str:
+                            try:
+                                ts = datetime.datetime.fromisoformat(
+                                    ts_str.replace('Z', '+00:00'))
+                                if ts.year != now.year or ts.month != now.month:
+                                    continue
+                            except Exception:
+                                continue
+                        msg = obj.get('message', {})
+                        usage = msg.get('usage', {}) if isinstance(msg, dict) else {}
+                        total += usage.get('input_tokens', 0)
+                        total += usage.get('output_tokens', 0)
+                except Exception:
+                    continue
+            self._monthly_tokens = total
+        except Exception:
+            pass
 
     # ── Context menu ──────────────────────────────────────────
 
@@ -628,17 +707,27 @@ class BuniApp:
             EVENTS_FILE.touch()
         self._file_offset = EVENTS_FILE.stat().st_size
 
+        # 앱 시작 시 월별 토큰 즉시 읽기
+        self._read_monthly_tokens()
+        self.root.after(0, self._draw)
+
+        tick = 0
         while True:
             # Process detection
             running = self._is_claude_running()
             if running != claude_running:
                 claude_running = running
                 if running:
-                    self._apply_state('thinking')
+                    self._apply_state('ready')
                 else:
                     self._apply_state('idle')
             # Poll event file
             self._poll_file()
+            # 5분마다 월별 토큰 갱신
+            tick += 1
+            if tick % 600 == 0:
+                self._read_monthly_tokens()
+                self.root.after(0, self._draw)
             time.sleep(0.5)
 
     def _poll_file(self):
@@ -689,8 +778,9 @@ class BuniApp:
                 self._apply_state('permission', perm_cmd=cmd, perm_id=pid)
 
         elif t == 'usage':
-            pct = ev.get('percent', 0)
-            self.root.after(0, lambda: self._set_usage(pct))
+            pct       = ev.get('percent', 0)
+            resets_at = ev.get('resets_at', None)
+            self.root.after(0, lambda p=pct, r=resets_at: self._set_usage(p, r))
 
     @staticmethod
     def _fmt_tool(raw: str) -> str:
