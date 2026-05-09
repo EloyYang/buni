@@ -50,13 +50,13 @@ struct CompanionView: View {
                         .opacity(ctrl.state == .idle ? 0 : 1)
                         .animation(.easeInOut(duration: 0.3), value: ctrl.state == .idle)
                 }
-                // ── 메모 태그: 레이아웃 흐름 밖에 overlay로 귀 위에 고정
-                // d[.bottom] + 24 → 프레임 상단에서 24pt 위에 메모 하단이 위치
-                // (귀가 프레임 상단 근처까지 올라오므로 충분한 여백 확보)
+                // ── 메모 태그: 레이아웃에 영향 없이 캐릭터 위에 띄우기
+                // alignmentGuide로 bottom을 VStack top에 맞춰 귀 위로 올림
                 .overlay(alignment: .top) {
                     if !ctrl.memo.isEmpty {
                         memoTagView
-                            .alignmentGuide(.top) { d in d[.bottom] + 24 }
+                            .alignmentGuide(.top) { d in d[.bottom] }
+                            .offset(y: -20)
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.8, anchor: .bottom).combined(with: .opacity),
                                 removal:   .scale(scale: 0.8, anchor: .bottom).combined(with: .opacity)
