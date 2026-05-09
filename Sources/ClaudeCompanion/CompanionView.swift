@@ -50,12 +50,13 @@ struct CompanionView: View {
                         .opacity(ctrl.state == .idle ? 0 : 1)
                         .animation(.easeInOut(duration: 0.3), value: ctrl.state == .idle)
                 }
-                // ── 메모 태그: 레이아웃 흐름 밖에 overlay로 캐릭터 머리 위에 고정
+                // ── 메모 태그: 레이아웃 흐름 밖에 overlay로 귀 위에 고정
+                // d[.bottom] + 24 → 프레임 상단에서 24pt 위에 메모 하단이 위치
+                // (귀가 프레임 상단 근처까지 올라오므로 충분한 여백 확보)
                 .overlay(alignment: .top) {
                     if !ctrl.memo.isEmpty {
                         memoTagView
-                            // bottom 기준 정렬 → 메모 하단이 캐릭터 상단에 맞닿도록
-                            .alignmentGuide(.top) { d in d[.bottom] }
+                            .alignmentGuide(.top) { d in d[.bottom] + 24 }
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.8, anchor: .bottom).combined(with: .opacity),
                                 removal:   .scale(scale: 0.8, anchor: .bottom).combined(with: .opacity)
