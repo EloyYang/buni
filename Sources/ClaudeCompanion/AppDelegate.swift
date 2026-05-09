@@ -19,8 +19,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let appStartTime       = Date()                     // 비초기 스캔 기준 시각
     private var scanTimer:         DispatchSourceTimer?
     private let scanQueue = DispatchQueue(label: "buni.session.scanner", qos: .background)
-    private var claudeWasRunning = false
-    private var isInitialScan    = true
+    private var claudeWasRunning        = false
+    private var claudeNotRunningStreak  = 0      // sysctl 경합 방지 디바운스 카운터
+    private var isInitialScan           = true
 
     // ── 사용자가 명시적으로 숨긴 상태 — true이면 새 세션도 자동 표시하지 않음
     private var isManuallyHidden = false
@@ -70,8 +71,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let wasInitial    = isInitialScan
         isInitialScan     = false
 
-        // ── Claude 종료 감지: 실행 중이던 Claude가 꺼졌으면 모든 세션 종료 + 무시 목록 초기화
-        if claudeWasRunning && !claudeRunning {
+        // ── Claude 종료 감지 (디바운스: sysctl 경합으로 인한 일시적 false negative 방지)
+        // sysctl 두 번째 호출이 프로세스 수 변화로 실패하면 false를 잘못 반환하는 경우가 있어,
+        // 3회 연속으로 "실행 중 아님"이 감지될 때만 종료로 판단 (1.5초 디바운스)
+        if claudeRunning {
+            claudeNotRunningStreak = 0
+        } else {
+            claudeNotRunningStreak += 1
+        }
+
+        if claudeWasRunning && claudeNotRunningStreak >= 3 {
+            // Claude가 확실히 종료됨 — 모든 세션 제거 + 무시 목록 초기화
+            claudeWasRunning = false
             let ids = Array(sessions.keys)
             if !ids.isEmpty {
                 DispatchQueue.main.async {
@@ -79,8 +90,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self.ignoredSessionIds.removeAll()  // 재시작 때 새 세션 탐지 허용
                 }
             }
+        } else if claudeRunning {
+            claudeWasRunning = true
         }
-        claudeWasRunning = claudeRunning
 
         guard claudeRunning else { return }
 
