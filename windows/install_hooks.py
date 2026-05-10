@@ -272,11 +272,18 @@ def main():
         return {'type': 'command',
                 'command': f'"{python}" "{CLAUDE_DIR / script}"; exit 0'}
 
+    def perm_hook(script):
+        # PermissionRequest는 exit code를 Claude Code에 그대로 전달해야 함
+        # (exit 0 = 허용, exit 1 = 거부) → ; exit 0 붙이지 않음
+        return {'type': 'command',
+                'command': f'"{python}" "{CLAUDE_DIR / script}"'}
+
     new_hooks = {
-        'PreToolUse':   [{'matcher': '', 'hooks': [hook('companion-pretool.py')]}],
-        'PostToolUse':  [{'matcher': '', 'hooks': [hook('companion-posttool.py')]}],
-        'Notification': [{'matcher': '', 'hooks': [hook('companion-notification.py')]}],
-        'Stop':         [{'matcher': '', 'hooks': [hook('companion-stop.py')]}],
+        'PreToolUse':        [{'matcher': '', 'hooks': [hook('companion-pretool.py')]}],
+        'PostToolUse':       [{'matcher': '', 'hooks': [hook('companion-posttool.py')]}],
+        'Notification':      [{'matcher': '', 'hooks': [hook('companion-notification.py')]}],
+        'Stop':              [{'matcher': '', 'hooks': [hook('companion-stop.py')]}],
+        'PermissionRequest': [{'matcher': '', 'hooks': [perm_hook('companion-permission.py')]}],
     }
 
     existing = settings.get('hooks', {})
