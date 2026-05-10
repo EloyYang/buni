@@ -33,7 +33,7 @@ echo       완료
 
 :: 4. 앱 실행
 echo [3/3] Buni 시작...
-start "" pythonw "%~dp0buni.py"
+start "" "%~dp0Buni.exe"
 echo       완료
 echo.
 echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

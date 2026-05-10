@@ -18,15 +18,156 @@ SETTINGS   = CLAUDE_DIR / 'settings.json'
 
 PRETOOL = f'''\
 #!/usr/bin/env python3
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    tool = d.get("tool_name", "tool")
-    line = json.dumps({{"type": "tool_use", "tool": tool}})
-    with open(r"{EVENTS_FILE}", "a", encoding="utf-8") as f:
-        f.write(line + "\\n")
-except Exception:
-    pass
+import sys, json, uuid, time, fnmatch, os
+from pathlib import Path
+
+TEMP     = Path(r"{TEMP}")
+CLAUDE   = Path.home() / ".claude"
+PID_FILE = TEMP / "buni.pid"
+
+
+def _is_buni_running() -> bool:
+    try:
+        pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x0400, False, pid)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _events_file(session_id: str) -> Path:
+    sid = (session_id or "").strip()
+    if sid:
+        safe = "".join(c for c in sid if c.isalnum() or c in "-_")
+        if safe:
+            return TEMP / f"claude-companion-events-{{safe}}.jsonl"
+    return TEMP / "claude-companion-events.jsonl"
+
+
+def _load_allow_list() -> list:
+    patterns = []
+    for fname in ("settings.json", "settings.local.json"):
+        try:
+            data = json.loads((CLAUDE / fname).read_text(encoding="utf-8"))
+            patterns += data.get("permissions", {{}}).get("allow", [])
+        except Exception:
+            pass
+    return patterns
+
+
+def _is_allowed(tool_name, tool_input, patterns) -> bool:
+    rep = ""
+    try:
+        rep = tool_input.get("command") or tool_input.get("file_path") or ""
+    except Exception:
+        pass
+    for pat in patterns:
+        try:
+            if "(" in pat:
+                pname, parg = pat.split("(", 1)
+                parg = parg.rstrip(")")
+                if pname.strip() == tool_name and fnmatch.fnmatch(str(rep), parg):
+                    return True
+            elif pat.strip() == tool_name:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _write_event(events_file, line) -> bool:
+    try:
+        with events_file.open("a", encoding="utf-8") as f:
+            f.write(line + "\\n")
+        return True
+    except Exception:
+        return False
+
+
+def _safe_json(obj) -> str:
+    try:
+        return json.dumps(obj, ensure_ascii=False, default=str)
+    except Exception:
+        return json.dumps(str(obj))
+
+
+def _approve():
+    print(json.dumps({{"decision": "approve"}}), flush=True)
+    sys.exit(0)
+
+
+def _block(reason=""):
+    print(json.dumps({{"decision": "block", "reason": reason}}), flush=True)
+    sys.exit(0)
+
+
+def main():
+    try:
+        raw = sys.stdin.buffer.read()
+        d   = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        _approve()
+        return
+
+    tool_name  = d.get("tool_name", "tool")
+    tool_input = d.get("tool_input", {{}}) or {{}}
+    session_id = d.get("session_id", "")
+    EVENTS     = _events_file(session_id)
+
+    try:
+        allow_list = _load_allow_list()
+        if _is_allowed(tool_name, tool_input, allow_list):
+            _write_event(EVENTS, _safe_json({{"type": "tool_use", "tool": tool_name}}))
+            _approve()
+            return
+    except Exception:
+        pass
+
+    if not _is_buni_running():
+        _write_event(EVENTS, _safe_json({{"type": "tool_use", "tool": tool_name}}))
+        _approve()
+        return
+
+    req_id = str(uuid.uuid4())
+    try:
+        cmd = tool_name + " " + _safe_json(tool_input)
+    except Exception:
+        cmd = tool_name
+    cmd = cmd[:300]
+
+    written = _write_event(EVENTS, _safe_json({{
+        "type": "permission_request", "id": req_id, "message": cmd
+    }}))
+
+    if not written:
+        sys.exit(0)
+        return
+
+    decision_file = TEMP / f"claude-companion-decision-{{req_id}}"
+    for _ in range(120):
+        try:
+            if decision_file.exists():
+                decision = decision_file.read_text(encoding="utf-8").strip()
+                decision_file.unlink(missing_ok=True)
+                if decision == "deny":
+                    _block("buni에서 거부됨")
+                    return
+                _write_event(EVENTS, _safe_json({{"type": "tool_use", "tool": tool_name}}))
+                _approve()
+                return
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+    _block("시간 초과 (60초)")
+
+
+if __name__ == "__main__":
+    main()
 '''
 
 POSTTOOL = f'''\
