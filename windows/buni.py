@@ -1448,6 +1448,8 @@ class SessionWindow:
         self._menu.add_command(label='위치 초기화',  command=self._reset_position)
         self._menu.add_command(label='단축키 설정...', command=self.manager._open_shortcut_settings)
         self._menu.add_separator()
+        self._menu.add_command(label='세션 끊기',    command=self._disconnect)
+        self._menu.add_separator()
         self._menu.add_command(label='종료', command=self.manager.quit)
 
     def _show_menu(self, e: tk.Event):
@@ -1640,6 +1642,23 @@ class SessionWindow:
         except Exception:
             return False
 
+    # ── Disconnect ────────────────────────────────────────────
+
+    def _disconnect(self):
+        """사용자가 이 세션을 수동으로 끊습니다.
+        이벤트 파일을 삭제하고 매니저의 차단 목록에 세션 ID를 추가해
+        같은 세션 파일이 다시 감지돼도 재생성되지 않도록 합니다.
+        Claude를 새로 시작하면 새 session_id로 새 부니가 생성됩니다."""
+        import tkinter.messagebox as mb
+        if not mb.askyesno(
+                '세션 끊기',
+                '이 세션을 끊으시겠습니까?\n\n'
+                '창이 닫히며, 이 세션에 대한 알림은 더 이상 표시되지 않습니다.\n'
+                'Claude를 새로 시작하면 새 부니가 생성됩니다.',
+                parent=self.win):
+            return
+        self.manager.disconnect_session(self.session_id, self.event_file)
+
     # ── Cleanup ───────────────────────────────────────────────
 
     def destroy(self):
@@ -1675,6 +1694,7 @@ class BuniManager:
         self.persist  = PersistenceManager()
         self.sessions: dict[str, SessionWindow] = {}
         self._slot_map: dict[int, str] = {}
+        self._disconnected: set[str] = set()   # 수동으로 끊긴 세션 ID 차단 목록
         self._is_manually_hidden = False
         self._monthly_tokens = 0
         self._claude_was_running = False
@@ -1709,6 +1729,8 @@ class BuniManager:
 
     def _add_session(self, session_id: str, event_file: Path):
         if session_id in self.sessions:
+            return
+        if session_id in self._disconnected:
             return
 
         # 30분 이상 수정되지 않은 오래된 파일은 유령 세션이므로 건너뜀
@@ -1753,6 +1775,17 @@ class BuniManager:
             self._slot_map.pop(win.slot, None)
             win.destroy()
 
+    def disconnect_session(self, session_id: str, event_file: Path):
+        """세션을 수동으로 끊고 차단 목록에 추가합니다.
+        이벤트 파일을 삭제해 훅 이벤트가 재감지되지 않도록 하고,
+        session_id를 차단 목록에 등록해 파일이 다시 생겨도 무시합니다."""
+        self._disconnected.add(session_id)
+        try:
+            event_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+        self.remove_session(session_id)
+
     def hide_all(self):
         self._is_manually_hidden = True
         for win in self.sessions.values():
@@ -1791,6 +1824,8 @@ class BuniManager:
                 for p in glob.glob(str(_TEMP / 'claude-companion-events-*.jsonl')):
                     fp  = Path(p)
                     sid = self._sid_from_file(fp)
+                    if sid in self._disconnected:
+                        continue
                     found[sid] = fp
                 # 세션 ID 없이 쓴 고정 파일 — 세션별 파일이 하나도 없을 때만 폴백으로 사용
                 fixed = _TEMP / 'claude-companion-events.jsonl'
