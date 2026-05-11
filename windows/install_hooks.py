@@ -172,10 +172,27 @@ if __name__ == "__main__":
 
 POSTTOOL = f'''\
 #!/usr/bin/env python3
-import sys
+import sys, json
+from pathlib import Path
+
+TEMP = Path(r"{TEMP}")
+
+
+def _events_file(session_id: str) -> Path:
+    sid = (session_id or "").strip()
+    if sid:
+        safe = "".join(c for c in sid if c.isalnum() or c in "-_")
+        if safe:
+            return TEMP / f"claude-companion-events-{{safe}}.jsonl"
+    return TEMP / "claude-companion-events.jsonl"
+
+
 try:
-    sys.stdin.read()
-    with open(r"{EVENTS_FILE}", "a", encoding="utf-8") as f:
+    raw = sys.stdin.buffer.read()
+    d = json.loads(raw.decode("utf-8", errors="replace"))
+    session_id = d.get("session_id", "")
+    events_file = _events_file(session_id)
+    with events_file.open("a", encoding="utf-8") as f:
         f.write('{{"type":"tool_done"}}\\n')
 except Exception:
     pass
@@ -184,11 +201,28 @@ except Exception:
 NOTIFICATION = f'''\
 #!/usr/bin/env python3
 import sys, json
+from pathlib import Path
+
+TEMP = Path(r"{TEMP}")
+
+
+def _events_file(session_id: str) -> Path:
+    sid = (session_id or "").strip()
+    if sid:
+        safe = "".join(c for c in sid if c.isalnum() or c in "-_")
+        if safe:
+            return TEMP / f"claude-companion-events-{{safe}}.jsonl"
+    return TEMP / "claude-companion-events.jsonl"
+
+
 try:
-    d = json.load(sys.stdin)
+    raw = sys.stdin.buffer.read()
+    d = json.loads(raw.decode("utf-8", errors="replace"))
+    session_id = d.get("session_id", "")
     msg = d.get("message", "알림")[:120]
     line = json.dumps({{"type": "notification", "message": msg}})
-    with open(r"{EVENTS_FILE}", "a", encoding="utf-8") as f:
+    events_file = _events_file(session_id)
+    with events_file.open("a", encoding="utf-8") as f:
         f.write(line + "\\n")
 except Exception:
     pass
@@ -196,10 +230,27 @@ except Exception:
 
 STOP = f'''\
 #!/usr/bin/env python3
-import sys
+import sys, json
+from pathlib import Path
+
+TEMP = Path(r"{TEMP}")
+
+
+def _events_file(session_id: str) -> Path:
+    sid = (session_id or "").strip()
+    if sid:
+        safe = "".join(c for c in sid if c.isalnum() or c in "-_")
+        if safe:
+            return TEMP / f"claude-companion-events-{{safe}}.jsonl"
+    return TEMP / "claude-companion-events.jsonl"
+
+
 try:
-    sys.stdin.read()
-    with open(r"{EVENTS_FILE}", "a", encoding="utf-8") as f:
+    raw = sys.stdin.buffer.read()
+    d = json.loads(raw.decode("utf-8", errors="replace"))
+    session_id = d.get("session_id", "")
+    events_file = _events_file(session_id)
+    with events_file.open("a", encoding="utf-8") as f:
         f.write('{{"type":"done"}}\\n')
 except Exception:
     pass
@@ -207,18 +258,30 @@ except Exception:
 
 PERMISSION = f'''\
 #!/usr/bin/env python3
-import sys, json, uuid, os, time
+import sys, json, uuid, time
 from pathlib import Path
 
 TEMP = Path(r"{TEMP}")
-EVENTS = Path(r"{EVENTS_FILE}")
+
+
+def _events_file(session_id: str) -> Path:
+    sid = (session_id or "").strip()
+    if sid:
+        safe = "".join(c for c in sid if c.isalnum() or c in "-_")
+        if safe:
+            return TEMP / f"claude-companion-events-{{safe}}.jsonl"
+    return TEMP / "claude-companion-events.jsonl"
+
 
 try:
-    d = json.load(sys.stdin)
+    raw = sys.stdin.buffer.read()
+    d = json.loads(raw.decode("utf-8", errors="replace"))
+    session_id = d.get("session_id", "")
+    events_file = _events_file(session_id)
     req_id = str(uuid.uuid4())
     cmd = d.get("tool_name", "") + " " + json.dumps(d.get("tool_input", {{}}))
     line = json.dumps({{"type": "permission_request", "id": req_id, "message": cmd[:300]}})
-    with EVENTS.open("a", encoding="utf-8") as f:
+    with events_file.open("a", encoding="utf-8") as f:
         f.write(line + "\\n")
     # 결정 파일 대기 (최대 60초)
     decision_file = TEMP / f"claude-companion-decision-{{req_id}}"
