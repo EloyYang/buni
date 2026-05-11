@@ -934,7 +934,7 @@ class SessionWindow:
         cy  = CHAR_CY + self.body_dy - P*7.0   # 귀 끝보다 넉넉히 위에 배치
         font = ('Malgun Gothic', 9, 'bold')
         self.cv.create_text(cx+1, cy+1, text=self.memo, anchor='center',
-                             font=font, fill='#111111', tags='memo')
+                             font=font, fill='#999999', tags='memo')
         self.cv.create_text(cx, cy, text=self.memo, anchor='center',
                              font=font, fill='#FFFFFF', tags='memo')
 
@@ -960,7 +960,7 @@ class SessionWindow:
         label_y = bar_y + SH + 6
 
         # ── 텍스트 그리기 헬퍼: 1px 쉐도우 + 본문 ──────────────
-        def _txt(x, y, text, anchor, font, color, shadow='#111111'):
+        def _txt(x, y, text, anchor, font, color, shadow='#555555'):
             self.cv.create_text(x+1, y+1, text=text, anchor=anchor,
                                 font=font, fill=shadow, tags='bar')
             self.cv.create_text(x,   y,   text=text, anchor=anchor,
