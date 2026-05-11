@@ -935,6 +935,8 @@ class SessionWindow:
         font = ('Malgun Gothic', 9, 'bold')
         self.cv.create_text(cx+1, cy+1, text=self.memo, anchor='center',
                              font=font, fill='#999999', tags='memo')
+        self.cv.create_text(cx, cy, text=self.memo, anchor='center',
+                             font=font, fill='#FFFFFF', tags='memo')
 
     # ── Usage bar ─────────────────────────────────────────────
 
@@ -961,6 +963,8 @@ class SessionWindow:
         def _txt(x, y, text, anchor, font, color, shadow='#555555'):
             self.cv.create_text(x+1, y+1, text=text, anchor=anchor,
                                 font=font, fill=shadow, tags='bar')
+            self.cv.create_text(x,   y,   text=text, anchor=anchor,
+                                font=font, fill=color,  tags='bar')
 
         # 레벨 텍스트
         _txt(bx, lv_y,
