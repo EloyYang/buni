@@ -1792,16 +1792,15 @@ class BuniManager:
                     fp  = Path(p)
                     sid = self._sid_from_file(fp)
                     found[sid] = fp
-                # Windows 훅이 세션 ID 없이 고정 파일명으로 쓰는 경우도 감지
-                # 단, 최근 30초 이내에 실제로 이벤트가 기록된 파일만 유효한 세션으로 인식
-                # (install_hooks.py의 touch()로 인한 유령 세션 방지)
+                # 세션 ID 없이 쓴 고정 파일 — 세션별 파일이 하나도 없을 때만 폴백으로 사용
                 fixed = _TEMP / 'claude-companion-events.jsonl'
-                if fixed.exists() and 'windows-default' not in found:
-                    try:
-                        if time.time() - fixed.stat().st_mtime < 30:
-                            found['windows-default'] = fixed
-                    except Exception:
-                        pass
+                if fixed.exists() and not found:
+                    found['windows-default'] = fixed
+
+                # 세션별 파일이 있으면 windows-default 유령 세션 제거
+                real_sids = [s for s in found if s != 'windows-default']
+                if real_sids and 'windows-default' in self.sessions:
+                    self.root.after(0, lambda: self.remove_session('windows-default'))
 
                 # New sessions
                 for sid, fp in found.items():
@@ -1894,12 +1893,30 @@ class BuniManager:
     _aes_key_cache: bytes | None = None
 
     @staticmethod
+    def _find_claude_dir() -> 'Path | None':
+        """%APPDATA%\Claude 또는 MSIX 패키지 경로 중 config.json이 있는 곳을 반환."""
+        candidates = [Path(os.environ.get('APPDATA', '')) / 'Claude']
+        local_app = Path(os.environ.get('LOCALAPPDATA', ''))
+        packages_dir = local_app / 'Packages'
+        if packages_dir.exists():
+            for pkg in packages_dir.iterdir():
+                if pkg.name.startswith('Claude_'):
+                    msix_claude = pkg / 'LocalCache' / 'Roaming' / 'Claude'
+                    if msix_claude.exists():
+                        candidates.insert(0, msix_claude)
+        for d in candidates:
+            if (d / 'config.json').exists():
+                return d
+        return candidates[0]
+
+    @staticmethod
     def _get_aes_key() -> 'bytes | None':
         if BuniManager._aes_key_cache is not None:
             return BuniManager._aes_key_cache
         try:
             import ctypes, ctypes.wintypes as wt
-            local_state = Path(os.environ.get('APPDATA', '')) / 'Claude' / 'Local State'
+            claude_dir = BuniManager._find_claude_dir()
+            local_state = claude_dir / 'Local State'
             data = json.loads(local_state.read_text(encoding='utf-8'))
             enc_b64 = data['os_crypt']['encrypted_key']
             dpapi_blob = base64.b64decode(enc_b64)[5:]  # strip 'DPAPI' prefix
@@ -1927,7 +1944,7 @@ class BuniManager:
             aes_key = BuniManager._get_aes_key()
             if not aes_key:
                 return None
-            config = Path(os.environ.get('APPDATA', '')) / 'Claude' / 'config.json'
+            config = BuniManager._find_claude_dir() / 'config.json'
             cfg = json.loads(config.read_text(encoding='utf-8'))
             enc_b64 = cfg.get('oauth:tokenCache', '')
             if not enc_b64:
@@ -1970,6 +1987,11 @@ class BuniManager:
                                 ra.replace('Z', '+00:00'))
                         except Exception:
                             pass
+                    # resets_at이 이미 지났으면 캐시 데이터 만료 → 둘 다 None으로
+                    now_utc = datetime.datetime.now(datetime.timezone.utc)
+                    if resets_at is not None and resets_at <= now_utc:
+                        util      = None
+                        resets_at = None
                     self._server_utilization = util
                     self._server_resets_at   = resets_at
                     self.root.after(0, self._broadcast_server_usage)
