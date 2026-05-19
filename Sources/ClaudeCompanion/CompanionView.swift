@@ -193,21 +193,72 @@ struct CompanionView: View {
     @ViewBuilder
     private var permissionBubbleView: some View {
         if case .permission(let cmd) = ctrl.state {
-            PermissionBubbleView(
-                command: cmd,
-                onApprove:    { ctrl.approvePermission() },
-                onApproveAll: { ctrl.approveAllPermissions() },
-                onDeny:       { ctrl.denyPermission() }
-            )
-            .transition(
-                .asymmetric(
-                    insertion: .scale(scale: 0.8, anchor: .topTrailing).combined(with: .opacity),
-                    removal:   .opacity
+            if ctrl.pendingPermissionId != nil {
+                PermissionBubbleView(
+                    command: cmd,
+                    onApprove:    { ctrl.approvePermission() },
+                    onApproveAll: { ctrl.approveAllPermissions() },
+                    onDeny:       { ctrl.denyPermission() }
                 )
-            )
+                .transition(
+                    .asymmetric(
+                        insertion: .scale(scale: 0.8, anchor: .topTrailing).combined(with: .opacity),
+                        removal:   .opacity
+                    )
+                )
+            } else {
+                askUserBubble(message: cmd)
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0.8, anchor: .topTrailing).combined(with: .opacity),
+                            removal:   .opacity
+                        )
+                    )
+            }
         } else {
             Color.clear.frame(width: 0, height: 0)
         }
+    }
+
+    // MARK: - 입력 대기 버블 (AskUserQuestion — 버튼 없이 메시지만)
+
+    @ViewBuilder
+    private func askUserBubble(message: String) -> some View {
+        ZStack(alignment: .trailing) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 5) {
+                    Text("❓")
+                    Text("입력 대기 중")
+                        .font(.system(.callout, design: .monospaced))
+                        .fontWeight(.bold)
+                        .foregroundColor(.black)
+                }
+                Text(message)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Color(red: 0.25, green: 0.25, blue: 0.25))
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(red: 0.94, green: 0.94, blue: 0.94))
+                    )
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: 210, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.white)
+                    .shadow(color: .black.opacity(0.20), radius: 8, x: -2, y: 3)
+            )
+
+            SpeechTail()
+                .fill(Color.white)
+                .frame(width: 16, height: 13)
+                .offset(x: 14, y: 0)
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     // MARK: - 메모 태그 (캐릭터 머리 위)

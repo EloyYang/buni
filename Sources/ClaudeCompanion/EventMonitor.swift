@@ -38,7 +38,11 @@ class EventMonitor {
         }
         if let attrs = try? FileManager.default.attributesOfItem(atPath: eventFile),
            let size  = attrs[.size] as? Int {
-            fileOffset = size   // 새 이벤트만 읽음
+            // 새 세션 파일(3초 이내 생성·3KB 미만): 처음부터 읽어 permission_request 등 놓치지 않음
+            // 기존 파일: 끝부터 읽어 과거 이벤트 재생 방지
+            let age = (attrs[FileAttributeKey.modificationDate] as? Date)
+                .map { Date().timeIntervalSince($0) } ?? 9999
+            fileOffset = (size < 3072 && age < 3.0) ? 0 : size
         }
         restoreLastUsage()
     }
@@ -199,9 +203,17 @@ class EventMonitor {
                 self.controller.update(to: .ready)
             }
         case "notification":
+            // ask_user 상태 중(pendingPermissionId == nil인 permission)에는 덮어쓰지 않음
+            if case .permission = controller.state, controller.pendingPermissionId == nil { break }
             controller.update(to: .notification(event.message ?? "알림"), autohideAfter: 5)
         case "permission":
             controller.update(to: .permission(event.message ?? "권한 요청"))
+        case "ask_user":
+            let msg = event.message ?? "터미널에서 선택해 주세요"
+            DispatchQueue.main.async {
+                self.controller.pendingPermissionId = nil
+                self.controller.update(to: .permission(msg))
+            }
         case "permission_request":
             if let reqId = event.id {
                 if controller.alwaysApprove {

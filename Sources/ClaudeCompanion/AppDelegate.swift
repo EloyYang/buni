@@ -71,29 +71,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let wasInitial    = isInitialScan
         isInitialScan     = false
 
-        // ── Claude 종료 감지 (디바운스: sysctl 경합으로 인한 일시적 false negative 방지)
-        // sysctl 두 번째 호출이 프로세스 수 변화로 실패하면 false를 잘못 반환하는 경우가 있어,
-        // 3회 연속으로 "실행 중 아님"이 감지될 때만 종료로 판단 (1.5초 디바운스)
+        // ── Claude 종료 감지 (디바운스: sysctl 경합·Playwright 부하 등으로 인한 false negative 방지)
+        // sysctl은 KERN_PROC_ALL 두 번째 호출이 경합 실패하면 false를 반환하는 경우가 있어
+        // 3초(6틱) 연속 "실행 중 아님"일 때만 반응.
+        // 단, teardown 대신 패널을 숨기기만 하고 sessions는 유지 → 재감지 시 즉시 복원되어
+        // 오탐에 의한 teardown→recreate "재로딩" 현상을 방지.
         if claudeRunning {
+            if claudeNotRunningStreak >= 6 && !sessions.isEmpty {
+                // Claude가 다시 감지됨 — 숨겼던 패널 복원 (사용자가 수동 숨기기한 경우 제외)
+                if !isManuallyHidden {
+                    DispatchQueue.main.async {
+                        self.sessions.values.forEach { $0.showCompanion() }
+                    }
+                }
+            }
             claudeNotRunningStreak = 0
+            claudeWasRunning = true
         } else {
             claudeNotRunningStreak += 1
         }
 
         if claudeWasRunning && claudeNotRunningStreak >= 6 {
-            // Claude가 확실히 종료됨 — 모든 세션 제거
-            // ※ ignoredSessionIds는 초기화하지 않음: 초기화하면 sysctl 오탐 시
-            //   기존 이벤트 파일이 "새 세션"으로 재탐지되어 사라졌다가 다시 나오는 버그 발생.
-            //   Claude가 재시작하면 새 UUID로 새 파일을 생성하므로 초기화 불필요.
+            // Claude가 종료된 것으로 판단 — 패널만 숨김 (teardown 하지 않음)
+            // ※ sessions는 유지하여 오탐 시 즉각 복원 가능하게 함.
+            //   실제 종료라면 EventMonitor의 30분 staleness 타임아웃이 removeSession 처리.
             claudeWasRunning = false
-            let ids = Array(sessions.keys)
-            if !ids.isEmpty {
+            if !sessions.isEmpty {
                 DispatchQueue.main.async {
-                    ids.forEach { self.removeSession(id: $0) }
+                    self.sessions.values.forEach { $0.hideCompanion() }
                 }
             }
-        } else if claudeRunning {
-            claudeWasRunning = true
         }
 
         guard claudeRunning else { return }
@@ -185,19 +192,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let slot = nextAvailableSlot()
 
-        // 캐릭터 우선순위: 세션 UUID 저장값 → 슬롯 저장값 → pickCharacter
-        if UserDefaults.standard.string(forKey: "character.session.\(id)") == nil {
-            let inUse = Set(sessions.values.map { $0.controller.character })
-            if let raw  = UserDefaults.standard.string(forKey: "character.slot.\(slot)"),
-               let type = CharacterType(rawValue: raw), !inUse.contains(type) {
-                // 슬롯에 저장된 캐릭터가 다른 세션과 겹치지 않으면 그대로 사용
-                UserDefaults.standard.set(raw, forKey: "character.session.\(id)")
-            } else {
-                // 없거나 겹치면 사용 안 된 캐릭터 자동 배정
-                let assigned = pickCharacter(for: id)
-                UserDefaults.standard.set(assigned.rawValue, forKey: "character.session.\(id)")
-            }
+        // 캐릭터 우선순위: 세션 UUID 저장값(충돌 없을 때) → 슬롯 저장값(충돌 없을 때) → pickCharacter
+        // 이미 활성 세션이 같은 캐릭터를 사용 중이면 저장값 무시하고 새 캐릭터 배정
+        let inUse = Set(sessions.values.map { $0.controller.character })
+        let characterToUse: CharacterType
+        if let raw  = UserDefaults.standard.string(forKey: "character.session.\(id)"),
+           let type = CharacterType(rawValue: raw), !inUse.contains(type) {
+            characterToUse = type
+        } else if let raw  = UserDefaults.standard.string(forKey: "character.slot.\(slot)"),
+                  let type = CharacterType(rawValue: raw), !inUse.contains(type) {
+            characterToUse = type
+        } else {
+            characterToUse = pickCharacter(for: id)
         }
+        UserDefaults.standard.set(characterToUse.rawValue, forKey: "character.session.\(id)")
 
         let origin = slot == 0 ? savedOrigin : nil
         let win = SessionWindow(sessionId: id, slot: slot,
@@ -234,6 +242,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return all[nextAvailableSlot() % all.count]
     }
 
+    /// EventMonitor가 세션 종료를 확인 시 호출 — 재탐지 방지를 위해 ignoredSessionIds에 추가
     private func removeSession(id: String) {
         ignoredSessionIds.insert(id)   // 종료된 세션 파일 재탐지 방지
         guard let win = sessions[id] else { return }

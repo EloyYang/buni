@@ -232,8 +232,18 @@ class SessionWindow {
     func updateMousePassthrough() {
         guard let panel = panel, panel.isVisible,
               !controller.isSliding, !isDragging else { return }
-        let mouse        = NSEvent.mouseLocation
-        let shouldIgnore = !interactiveRect(for: panel).contains(mouse)
+        let mouse  = NSEvent.mouseLocation
+        let rect   = interactiveRect(for: panel)
+        // 마우스가 rect 안에 있으면 즉시 활성화, 벗어날 때는 10px 여유(hysteresis)를 두어
+        // 드래그 직전 미세한 마우스 이동으로 passthrough가 켜지는 현상 방지
+        let shouldIgnore: Bool
+        if rect.contains(mouse) {
+            shouldIgnore = false
+        } else {
+            let buffer: CGFloat = 10
+            let expanded = rect.insetBy(dx: -buffer, dy: -buffer)
+            shouldIgnore = !expanded.contains(mouse)
+        }
         if panel.ignoresMouseEvents != shouldIgnore {
             panel.ignoresMouseEvents = shouldIgnore
         }
@@ -242,7 +252,7 @@ class SessionWindow {
     private func interactiveRect(for panel: NSWindow) -> NSRect {
         let f = panel.frame
         let charWidth:  CGFloat = 80
-        let charHeight: CGFloat = 90
+        let charHeight: CGFloat = 110   // 캐릭터 상단 7px 여유 포함
         if case .permission = controller.state {
             return NSRect(x: f.minX, y: f.minY, width: f.width, height: charHeight)
         }
