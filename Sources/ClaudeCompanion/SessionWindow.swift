@@ -256,6 +256,9 @@ class SessionWindow {
         if case .permission = controller.state {
             return NSRect(x: f.minX, y: f.minY, width: f.width, height: charHeight)
         }
+        if case .completed = controller.state {
+            return NSRect(x: f.minX, y: f.minY, width: f.width, height: charHeight)
+        }
         return NSRect(x: f.maxX - charWidth, y: f.minY, width: charWidth, height: charHeight)
     }
 
@@ -286,6 +289,10 @@ class SessionWindow {
                 }
             }
             .store(in: &cancellables)
+
+        controller.onDismissCompleted = { [weak self] in
+            DispatchQueue.main.async { self?.onSessionEnded?() }
+        }
 
         controller.onResetPositionRequest = { [weak self] in
             guard let self else { return }
@@ -321,7 +328,11 @@ class SessionWindow {
 
         controller.$state
             .receive(on: DispatchQueue.main)
-            .map { if case .permission = $0 { return true }; return false }
+            .map { s -> Bool in
+                if case .permission = s { return true }
+                if case .completed  = s { return true }
+                return false
+            }
             .removeDuplicates()
             .sink { [weak self] _ in self?.onRebuildMenu?() }
             .store(in: &cancellables)

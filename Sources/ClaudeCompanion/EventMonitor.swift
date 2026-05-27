@@ -22,6 +22,7 @@ class EventMonitor {
 
     private var fileOffset    = 0
     private var lastEventDate = Date()
+    private var isReplaying   = true   // 첫 poll에서 기존 이벤트 재생 중 — done 이벤트 건너뜀
 
     /// done 이벤트 + 30초 무활동 시, 또는 90초 강제 타임아웃 시 호출
     var onSessionEnded: (() -> Void)?
@@ -38,11 +39,12 @@ class EventMonitor {
         }
         if let attrs = try? FileManager.default.attributesOfItem(atPath: eventFile),
            let size  = attrs[.size] as? Int {
-            // 새 세션 파일(3초 이내 생성·3KB 미만): 처음부터 읽어 permission_request 등 놓치지 않음
-            // 기존 파일: 끝부터 읽어 과거 이벤트 재생 방지
-            let age = (attrs[FileAttributeKey.modificationDate] as? Date)
+            // 파일 생성 후 90초 이내: 처음부터 읽어 세션 시작 초반(파일 탐색 등) 이벤트 누락 방지
+            // 수정 날짜 대신 생성 날짜 사용 — 수정 날짜는 이벤트가 계속 쓰일수록 갱신되어 신뢰 불가
+            // 90초 초과(오래된 세션): 끝에서부터 읽어 과거 이벤트 재생 방지
+            let creationAge = (attrs[FileAttributeKey.creationDate] as? Date)
                 .map { Date().timeIntervalSince($0) } ?? 9999
-            fileOffset = (size < 3072 && age < 3.0) ? 0 : size
+            fileOffset = creationAge < 90.0 ? 0 : size
         }
         restoreLastUsage()
     }
@@ -159,6 +161,7 @@ class EventMonitor {
     // MARK: - 파일 폴링
 
     private func pollFile() {
+        defer { isReplaying = false }   // 첫 poll 완료 후 재생 모드 해제
         guard let fh = FileHandle(forReadingAtPath: eventFile) else { return }
         defer { fh.closeFile() }
 
@@ -196,7 +199,17 @@ class EventMonitor {
             }
         case "tool_done":
             controller.update(to: .thinking)  // 도구 완료 후 항상 thinking(타이핑)으로 복귀
+        case "thinking":
+            if isReplaying { break }   // 과거 thinking 이벤트 재생 건너뜀
+            switch controller.state {
+            case .ready, .completed:
+                controller.update(to: .thinking)
+            default:
+                break
+            }
+
         case "done":
+            if isReplaying { break }   // 과거 done 재생 시 세션 조기 제거 방지
             controller.update(to: .completed)
         case "notification":
             // ask_user 상태 중(pendingPermissionId == nil인 permission)에는 덮어쓰지 않음

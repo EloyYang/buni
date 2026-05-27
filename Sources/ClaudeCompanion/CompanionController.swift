@@ -57,6 +57,8 @@ class CompanionController: ObservableObject {
     var onOpenSettingsRequest: (() -> Void)?
     var onShowStatusBarRequest: (() -> Void)?
     var onEditMemoRequest: (() -> Void)?
+    /// 완료 버블 확인 버튼 클릭 시 세션 제거 요청
+    var onDismissCompleted: (() -> Void)?
 
     private var autoHideTask: DispatchWorkItem?
 
@@ -87,6 +89,7 @@ class CompanionController: ObservableObject {
     func dismissCompleted() {
         guard case .completed = state else { return }
         update(to: .ready)
+        onDismissCompleted?()
     }
 
     func update(to newState: CompanionState, autohideAfter seconds: Double? = nil) {

@@ -71,20 +71,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let wasInitial    = isInitialScan
         isInitialScan     = false
 
-        // ── Claude 종료 감지 (디바운스: sysctl 경합·Playwright 부하 등으로 인한 false negative 방지)
-        // sysctl은 KERN_PROC_ALL 두 번째 호출이 경합 실패하면 false를 반환하는 경우가 있어
+        // ── Claude 종료 감지 (디바운스: sysctl 경합 등으로 인한 false negative 방지)
         // 3초(6틱) 연속 "실행 중 아님"일 때만 반응.
-        // 단, teardown 대신 패널을 숨기기만 하고 sessions는 유지 → 재감지 시 즉시 복원되어
-        // 오탐에 의한 teardown→recreate "재로딩" 현상을 방지.
         if claudeRunning {
-            if claudeNotRunningStreak >= 6 && !sessions.isEmpty {
-                // Claude가 다시 감지됨 — 숨겼던 패널 복원 (사용자가 수동 숨기기한 경우 제외)
-                if !isManuallyHidden {
-                    DispatchQueue.main.async {
-                        self.sessions.values.forEach { $0.showCompanion() }
-                    }
-                }
-            }
             claudeNotRunningStreak = 0
             claudeWasRunning = true
         } else {
@@ -92,14 +81,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if claudeWasRunning && claudeNotRunningStreak >= 6 {
-            // Claude가 종료된 것으로 판단 — 패널만 숨김 (teardown 하지 않음)
-            // ※ sessions는 유지하여 오탐 시 즉각 복원 가능하게 함.
-            //   실제 종료라면 EventMonitor의 30분 staleness 타임아웃이 removeSession 처리.
+            // Claude 종료 확인 — 활성 세션(thinking/toolUse 등) 제거, 완료·권한 버블은 유지
             claudeWasRunning = false
-            if !sessions.isEmpty {
-                DispatchQueue.main.async {
-                    self.sessions.values.forEach { $0.hideCompanion() }
-                }
+            DispatchQueue.main.async {
+                self.cleanupInactiveSessions()
             }
         }
 
@@ -178,16 +163,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 String(bytes: buf.prefix(while: { $0 != 0 }), encoding: .utf8) ?? ""
             }
             if name == "claude" { return true }
+            // Claude가 버전 바이너리(예: "2.1.150")로 실행될 때를 처리
+            // p_comm이 버전 패턴이면 proc_pidpath로 경로 확인
+            if looksLikeVersion(name), isClaudePath(pid: p.p_pid) { return true }
         }
         return false
+    }
+
+    private func looksLikeVersion(_ s: String) -> Bool {
+        !s.isEmpty && s.allSatisfy { $0.isNumber || $0 == "." }
+    }
+
+    private func isClaudePath(pid: pid_t) -> Bool {
+        var buf = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buf, UInt32(MAXPATHLEN)) > 0 else { return false }
+        let path = String(cString: buf)
+        return path.contains("/claude/") || path.contains(".claude")
+    }
+
+    /// Claude 종료 시 대기·작업 중 세션만 제거, completed/permission 버블은 유지
+    private func cleanupInactiveSessions() {
+        let toRemove = sessions.compactMap { (id, win) -> String? in
+            switch win.controller.state {
+            case .completed, .permission: return nil   // 사용자 응답 필요 — 유지
+            default: return id
+            }
+        }
+        for id in toRemove { removeSession(id: id) }
+        // 남아있는 세션(completed/permission) 패널 숨기기
+        sessions.values.forEach { $0.hideCompanion() }
+    }
+
+    /// 새 세션 추가 전 이미 완료된(idle/ready/completed) 세션 제거
+    /// — 새 Claude 세션 시작 시 이전 세션의 부니가 남지 않도록 처리
+    private func cleanupFinishedSessions() {
+        let toRemove = sessions.compactMap { (id, win) -> String? in
+            switch win.controller.state {
+            case .idle, .ready, .completed: return id
+            default: return nil   // thinking/tool/permission/notification 은 유지
+            }
+        }
+        for id in toRemove { removeSession(id: id) }
     }
 
     private func addSession(id: String, fileURL: URL) {
         guard sessions[id] == nil else { return }
 
-        // 실제 Claude 세션이 추가될 때 레거시 대기 세션 교체
+        // 실제 Claude 세션이 추가될 때 레거시 대기 세션 및 완료된 세션 교체
         if id != "__legacy__" {
             dismissLegacySession()
+            cleanupFinishedSessions()
         }
 
         let slot = nextAvailableSlot()
@@ -286,10 +311,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func syncHotkeyPermissionState() {
-        let anyPermission = sessions.values.contains {
-            if case .permission = $0.controller.state { return true }; return false
+        let anyActive = sessions.values.contains {
+            if case .permission = $0.controller.state { return true }
+            if case .completed  = $0.controller.state { return true }
+            return false
         }
-        hotkeyMonitor.updatePermissionState(anyPermission)
+        hotkeyMonitor.updatePermissionState(anyActive)
     }
 
     // MARK: - Status bar
@@ -441,6 +468,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyMonitor.onApprove = { [weak self] in
             self?.sessions.values.forEach {
                 if case .permission = $0.controller.state { $0.controller.approvePermission() }
+                else if case .completed = $0.controller.state { $0.controller.dismissCompleted() }
             }
         }
         hotkeyMonitor.onDeny = { [weak self] in
@@ -449,9 +477,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         hotkeyMonitor.onHide          = { [weak self] in self?.toggleVisibility() }
-        // 전체 허용: 모든 세션에 동시 적용
+        // 전체 허용: 모든 세션에 동시 적용 (완료 상태면 확인으로 동작)
         hotkeyMonitor.onAlwaysApprove = { [weak self] in
-            self?.sessions.values.forEach { $0.controller.approveAllPermissions() }
+            self?.sessions.values.forEach {
+                if case .completed = $0.controller.state { $0.controller.dismissCompleted() }
+                else { $0.controller.approveAllPermissions() }
+            }
         }
     }
 

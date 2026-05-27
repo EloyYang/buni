@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Buni for Windows v1.3.2
+Buni for Windows v1.3.3
 Claude Code companion – pixel-art rabbit mascot
 https://github.com/EloyYang/buni
 """
@@ -480,6 +480,7 @@ class SessionWindow:
 
         # ── File monitoring
         self._file_offset = 0
+        self._is_replaying = True   # 첫 poll에서 기존 이벤트 재생 중 — done/thinking 건너뜀
         self._last_event_time = time.time()
         self._init_file_offset()
 
@@ -1278,6 +1279,9 @@ class SessionWindow:
             self._completion_win = None
         if self.state == 'completed':
             self._apply_state('ready')
+            # 확인 버튼 클릭 시 세션 제거 (macOS onDismissCompleted 동작 일치)
+            sid = self.session_id
+            self.manager.root.after(0, lambda: self.manager.remove_session(sid))
 
     def _show_completion_popup(self):
         if self._completion_win and self._completion_win.winfo_exists():
@@ -1617,7 +1621,11 @@ class SessionWindow:
     def _init_file_offset(self):
         try:
             if self.event_file.exists():
-                self._file_offset = self.event_file.stat().st_size
+                st = self.event_file.stat()
+                # Windows: st_ctime는 생성 시각 — 90초 이내 파일은 처음부터 읽어
+                # 세션 시작 초반 이벤트(파일 탐색 등) 누락 방지
+                creation_age = time.time() - st.st_ctime
+                self._file_offset = 0 if creation_age < 90.0 else st.st_size
         except Exception:
             pass
 
@@ -1648,6 +1656,7 @@ class SessionWindow:
         if time.time() - self._last_event_time > 300 and self.state != 'idle':
             self._apply_state('idle')
 
+        self._is_replaying = False   # 첫 poll 완료 후 재생 모드 해제
         return True
 
     def _handle_event(self, raw: str):
@@ -1678,7 +1687,15 @@ class SessionWindow:
                 return
             self._apply_state('thinking')
 
+        elif t == 'thinking':
+            if self._is_replaying:
+                return
+            if self.state in ('ready', 'completed'):
+                self._apply_state('thinking')
+
         elif t == 'done':
+            if self._is_replaying:
+                return   # 과거 done 재생 시 세션 조기 제거 방지
             self._apply_state('completed')
             # 자동 파일 삭제·세션 제거 없음 — 사용자가 숨기기 전까지 유지
 
@@ -1843,6 +1860,10 @@ class BuniManager:
         except Exception:
             return
 
+        # 실제 Claude 세션 추가 시 이미 완료된 세션 제거 (새 세션이 이전 부니 덮어씀)
+        if session_id != 'windows-default':
+            self.cleanup_finished_sessions()
+
         slot = self._next_slot()
         self._slot_map[slot] = session_id
 
@@ -1877,6 +1898,22 @@ class BuniManager:
         if win:
             self._slot_map.pop(win.slot, None)
             win.destroy()
+
+    def cleanup_finished_sessions(self):
+        """새 세션 추가 전 이미 완료된(idle/ready/completed) 세션 제거."""
+        to_remove = [sid for sid, win in list(self.sessions.items())
+                     if win.state in ('idle', 'ready', 'completed')]
+        for sid in to_remove:
+            self.remove_session(sid)
+
+    def cleanup_inactive_sessions(self):
+        """Claude 종료 시 대기·작업 중 세션만 제거, completed/permission 버블은 유지."""
+        to_remove = [sid for sid, win in list(self.sessions.items())
+                     if win.state not in ('completed', 'permission')]
+        for sid in to_remove:
+            self.remove_session(sid)
+        for win in self.sessions.values():
+            win.hide()
 
     def disconnect_session(self, session_id: str, event_file: Path):
         """세션을 수동으로 끊고 차단 목록에 추가합니다.
@@ -1948,20 +1985,16 @@ class BuniManager:
                 # Claude process state (for idle detection)
                 running = self._is_claude_running()
                 if running:
-                    if self._claude_not_running_streak >= 3 and self.sessions:
-                        # Claude 재감지 — 숨겼던 창 복원 (수동 숨기기 제외)
-                        if not self._is_manually_hidden:
-                            self.root.after(0, self.show_all)
                     self._claude_not_running_streak = 0
                     self._claude_was_running = True
                 else:
                     self._claude_not_running_streak += 1
 
                 if self._claude_was_running and self._claude_not_running_streak >= 3:
-                    # 3틱(~3초) 연속 미감지 시 창 숨기기 (즉시 idle 전환 대신)
+                    # 3틱(~3초) 연속 미감지 시 비활성 세션 제거, completed/permission 유지
                     self._claude_was_running = False
                     if self.sessions:
-                        self.root.after(0, self.hide_all)
+                        self.root.after(0, self.cleanup_inactive_sessions)
 
             except Exception:
                 pass
