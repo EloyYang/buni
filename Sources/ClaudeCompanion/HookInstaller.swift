@@ -143,6 +143,18 @@ SAFE_TOOLS = {"Read", "Glob", "Grep", "LS", "WebSearch", "WebFetch",
               "TodoRead", "NotebookRead", "AskUserQuestion"}
 BUNI_PORT = 58765
 
+# ── Claude 자체가 이미 자동 승인하는 모드인지 판정 ──────────────────────
+# 클로드가 사용자에게 안 묻는 상황에서 부니만 승인 창을 띄우는 문제 방지.
+AUTO_APPROVE_MODES = {"auto", "bypassPermissions"}
+EDIT_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
+
+def _skip_gate(tool, perm_mode):
+    if perm_mode in AUTO_APPROVE_MODES:
+        return True
+    # acceptEdits는 편집 도구만 자동 승인 — Bash 등은 그대로 승인 UI 사용
+    return perm_mode == "acceptEdits" and tool in EDIT_TOOLS
+
 
 def _send_tcp(payload):
     try:
@@ -161,6 +173,7 @@ try:
     tool        = d.get("tool_name", "tool")
     tool_input  = d.get("tool_input", {})
     session_id  = d.get("session_id", "") or "legacy"
+    perm_mode   = d.get("permission_mode", "") or ""  # default/auto/acceptEdits/bypassPermissions/plan
     events_file = f"/tmp/claude-companion-events-{session_id}.jsonl"
     is_remote   = bool(os.environ.get("SSH_CLIENT") or os.environ.get("SSH_TTY"))
 
@@ -173,6 +186,10 @@ try:
             open(events_file, "a").close()
 
         if tool in SAFE_TOOLS:
+            with open(events_file, "a") as f:
+                f.write(json.dumps({"type": "tool_use", "tool": tool}) + "\n")
+        elif _skip_gate(tool, perm_mode):
+            # Claude가 이미 자동 승인하는 모드 — 승인 게이트 없이 tool_use만 기록
             with open(events_file, "a") as f:
                 f.write(json.dumps({"type": "tool_use", "tool": tool}) + "\n")
         else:

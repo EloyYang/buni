@@ -326,6 +326,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         win.onOpenSettings  = { [weak self] in self?.openSettings() }
         win.onShowStatusBar = { [weak self] in self?.showStatusBar() }
         win.onRebuildMenu   = { [weak self] in self?.rebuildMenu() }
+        win.shouldAutoShow  = { [weak self] in !(self?.isManuallyHidden ?? false) }
         win.onSessionEnded  = { [weak self] in
             DispatchQueue.main.async { self?.removeSession(id: win.sessionId) }
         }

@@ -34,6 +34,8 @@ class SessionWindow {
     /// 슬롯 0이 드래그로 위치를 바꿀 때 저장 요청 (NSPoint(-1,-1) = 리셋)
     var onSaveOrigin:    ((NSPoint) -> Void)?
     var onRebuildMenu:   (() -> Void)?
+    /// 사용자가 직접 숨긴 상태가 아닐 때만 true — 활동 재개 시 자동 재표시 판단용
+    var shouldAutoShow:  (() -> Bool)?
 
     init(sessionId: String, slot: Int, eventFile: String, savedOrigin: NSPoint? = nil) {
         self.sessionId    = sessionId
@@ -348,6 +350,18 @@ class SessionWindow {
             }
             .removeDuplicates()
             .sink { [weak self] _ in self?.onRebuildMenu?() }
+            .store(in: &cancellables)
+
+        // 숨겨진 패널이 세션 활동 재개 시 다시 나타나도록 복구
+        // (Claude 종료 감지로 숨긴 뒤 같은 세션이 다시 일할 때 영영 안 보이던 문제)
+        controller.$state
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                guard let self, state != .idle else { return }
+                guard self.panel?.isVisible != true, !self.controller.isSliding else { return }
+                guard self.shouldAutoShow?() ?? true else { return }
+                self.showCompanion()
+            }
             .store(in: &cancellables)
     }
 
