@@ -15,7 +15,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var sessions:          [String: SessionWindow] = [:]
     private var slotOwner:         [Int: String] = [:]          // slot → sessionId
     private var sessionOrder:      [String] = []               // 생성 순서 (최신이 앞)
-    private var ignoredSessionIds: Set<String> = []            // 종료된 세션 재탐지 방지
+    // 종료(완료 버블 닫기)된 세션 재탐지 방지 — sid → 닫은 시각.
+    // Claude Code는 --resume으로 같은 session id를 계속 재사용하므로, 닫은 이후
+    // 그 세션이 다시 활동(이벤트 파일 갱신)하면 재탐지를 허용해야 함(무기한 차단 금지).
+    private var ignoredSessionIds: [String: Date] = [:]
     private let appStartTime       = Date()                     // 비초기 스캔 기준 시각
     private var scanTimer:         DispatchSourceTimer?
     private let scanQueue = DispatchQueue(label: "buni.session.scanner", qos: .background)
@@ -35,8 +38,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var savedOrigin: NSPoint? {
         get {
             guard UserDefaults.standard.object(forKey: "panel.x") != nil else { return nil }
-            return NSPoint(x: UserDefaults.standard.double(forKey: "panel.x"),
-                           y: UserDefaults.standard.double(forKey: "panel.y"))
+            let p = NSPoint(x: UserDefaults.standard.double(forKey: "panel.x"),
+                             y: UserDefaults.standard.double(forKey: "panel.y"))
+            // 외장 모니터 분리 등으로 화면 구성이 바뀌어 저장된 위치가 모든 화면
+            // 밖으로 완전히 벗어난 경우, 화면 밖에 갇히지 않도록 저장값을 버리고
+            // 기본 위치(우측 상단)를 쓴다.
+            let panelRect = NSRect(x: p.x, y: p.y, width: 320, height: 200)
+            let onAnyScreen = NSScreen.screens.contains { $0.frame.intersects(panelRect) }
+            guard onAnyScreen else {
+                UserDefaults.standard.removeObject(forKey: "panel.x")
+                UserDefaults.standard.removeObject(forKey: "panel.y")
+                return nil
+            }
+            return p
         }
         set {
             if let p = newValue, p.x >= 0 {
@@ -68,8 +82,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             DispatchQueue.main.async {
                 self.remoteSessionIds.insert(sessionId)
-                guard self.sessions[sessionId] == nil,
-                      !self.ignoredSessionIds.contains(sessionId) else { return }
+                guard self.sessions[sessionId] == nil else { return }
+                // 새 원격 이벤트 자체가 곧 새 활동이므로 예전에 닫혔던 세션이어도 재탐지 허용
+                self.ignoredSessionIds.removeValue(forKey: sessionId)
                 self.addSession(id: sessionId, fileURL: fileURL)
             }
         }
@@ -135,8 +150,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         for (sid, url) in found {
             guard sessions[sid] == nil else { hasRecentSession = true; continue }
-            guard !ignoredSessionIds.contains(sid) else { continue }  // 종료된 세션 재생성 방지
             if let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate {
+                // 완료 버블을 닫아 무시 중인 세션이라도, 닫은 이후 파일이 다시 갱신됐다면
+                // (--resume으로 같은 세션이 재개돼 새 이벤트가 쌓인 경우) 재탐지를 허용
+                if let dismissedAt = ignoredSessionIds[sid], modDate <= dismissedAt { continue }
                 // 앱 시작 시 : 90초 이내 수정된 파일만 복원
                 // 이후 스캔   : 앱 시작 이후에 수정된 파일만 신규 세션으로 인식
                 //              (오래된 잔존 파일이 나중에 탐지되는 것을 방지)
@@ -145,7 +162,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     : now.timeIntervalSince(appStartTime) + 10  // 앱 시작 10초 전까지 허용
                 if now.timeIntervalSince(modDate) < threshold {
                     hasRecentSession = true
-                    DispatchQueue.main.async { self.addSession(id: sid, fileURL: url) }
+                    DispatchQueue.main.async {
+                        self.ignoredSessionIds.removeValue(forKey: sid)
+                        self.addSession(id: sid, fileURL: url)
+                    }
                 }
             }
         }
@@ -290,7 +310,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// EventMonitor가 세션 종료를 확인 시 호출 — 재탐지 방지를 위해 ignoredSessionIds에 추가
     private func removeSession(id: String) {
-        ignoredSessionIds.insert(id)   // 종료된 세션 파일 재탐지 방지
+        ignoredSessionIds[id] = Date()   // 종료된 세션 파일 재탐지 방지 (이후 새 활동 있으면 해제)
         remoteSessionIds.remove(id)
         guard let win = sessions[id] else { return }
         win.teardown()

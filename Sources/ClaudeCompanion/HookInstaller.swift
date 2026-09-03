@@ -43,9 +43,11 @@ enum HookInstaller {
 
         var args = settings["remote.SSH.extraArgs"] as? [String] ?? []
 
-        // 이미 설정돼 있으면 스킵
-        for i in 0..<(args.count - 1) where args[i] == "-R" {
-            if args[i + 1] == "58765:localhost:58765" { return }
+        // 이미 설정돼 있으면 스킵 (args가 비어 있으면 0..<(count-1) 이 음수 범위가 되어 크래시하므로 가드)
+        if args.count >= 2 {
+            for i in 0..<(args.count - 1) where args[i] == "-R" {
+                if args[i + 1] == "58765:localhost:58765" { return }
+            }
         }
 
         args.append(contentsOf: ["-R", "58765:localhost:58765"])

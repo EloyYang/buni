@@ -55,6 +55,13 @@ class SessionWindow {
         } else if let savedMemo = UserDefaults.standard.string(forKey: "memo.slot.\(slot)") {
             ctrl.memo = savedMemo
         }
+        // 전체 허용 모드 복원: 세션 UUID → 슬롯 기반 순서로 시도
+        // (부니 재시작마다 꺼져서 실제로 필요 없는 승인 팝업이 재등장하는 것 방지)
+        if UserDefaults.standard.object(forKey: "alwaysApprove.session.\(sessionId)") != nil {
+            ctrl.alwaysApprove = UserDefaults.standard.bool(forKey: "alwaysApprove.session.\(sessionId)")
+        } else if UserDefaults.standard.object(forKey: "alwaysApprove.slot.\(slot)") != nil {
+            ctrl.alwaysApprove = UserDefaults.standard.bool(forKey: "alwaysApprove.slot.\(slot)")
+        }
         self.controller = ctrl
         self.monitor    = EventMonitor(controller: ctrl, eventFile: eventFile)
         monitor.onSessionEnded = { [weak self] in
@@ -324,7 +331,12 @@ class SessionWindow {
 
         controller.$alwaysApprove
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.onRebuildMenu?() }
+            .sink { [weak self] approve in
+                guard let self else { return }
+                UserDefaults.standard.set(approve, forKey: "alwaysApprove.session.\(self.sessionId)")
+                UserDefaults.standard.set(approve, forKey: "alwaysApprove.slot.\(self.slot)")
+                self.onRebuildMenu?()
+            }
             .store(in: &cancellables)
 
         controller.$state
