@@ -25,6 +25,10 @@ class SessionWindow {
     private var dragMonitor:  Any?
     private var mouseMonitor: Any?
 
+    /// 세션 이름 → 메모 자동 연동용 폴링
+    private var titleSyncTimer: DispatchSourceTimer?
+    private let titleQueue = DispatchQueue(label: "buni.session.title", qos: .utility)
+
     // ── AppDelegate 에서 주입하는 콜백
     var onOpenClaude:         (() -> Void)?
     var onOpenSettings:       (() -> Void)?
@@ -51,11 +55,16 @@ class SessionWindow {
                   let type = CharacterType(rawValue: raw) {
             ctrl.character = type
         }
-        // 메모 복원: 세션 UUID → 슬롯 기반 순서로 시도
-        if let savedMemo = UserDefaults.standard.string(forKey: "memo.session.\(sessionId)") {
-            ctrl.memo = savedMemo
-        } else if let savedMemo = UserDefaults.standard.string(forKey: "memo.slot.\(slot)") {
-            ctrl.memo = savedMemo
+        // 메모 복원
+        // 이 세션에 사용자가 직접 지정한 메모가 있으면(빈 문자열 = 직접 지운 상태 포함)
+        // 그대로 쓰고 자동 연동을 끈다. 없으면 슬롯 메모를 임시로 보여주되 자동 상태로
+        // 두어, 잠시 뒤 세션 이름을 읽어오면 그것으로 대체되게 한다.
+        if UserDefaults.standard.object(forKey: "memo.session.\(sessionId)") != nil {
+            ctrl.memo       = UserDefaults.standard.string(forKey: "memo.session.\(sessionId)") ?? ""
+            ctrl.memoIsAuto = false
+        } else {
+            ctrl.memo       = UserDefaults.standard.string(forKey: "memo.slot.\(slot)") ?? ""
+            ctrl.memoIsAuto = true
         }
         // 전체 허용 모드 복원: 세션 UUID → 슬롯 기반 순서로 시도
         // (부니 재시작마다 꺼져서 실제로 필요 없는 승인 팝업이 재등장하는 것 방지)
@@ -78,6 +87,7 @@ class SessionWindow {
         setupPanel()
         setupControllerCallbacks()
         setupMousePassthrough()
+        startTitleSync()
         monitor.start()
         DispatchQueue.main.async {
             self.controller.sessionStart = Date()
@@ -88,6 +98,7 @@ class SessionWindow {
 
     func teardown() {
         monitor.stop()
+        stopTitleSync()
         removeMouseMonitors()
         DispatchQueue.main.async { [weak self] in
             self?.slideOut { self?.panel?.orderOut(nil) }
@@ -100,6 +111,34 @@ class SessionWindow {
             self?.hideCompanion()
         }
         onStaledSessionEnded?()
+    }
+
+    // MARK: - 세션 이름 → 메모 자동 연동
+
+    /// 메모를 직접 지정하지 않은 세션은 Claude Code 세션 이름을 메모로 보여준다.
+    /// 이름은 대화가 시작된 뒤에야 정해지고 나중에 바뀔 수도 있어 주기적으로 확인한다.
+    private func startTitleSync() {
+        guard sessionId != "__legacy__" else { return }
+        let t = DispatchSource.makeTimerSource(queue: titleQueue)
+        t.schedule(deadline: .now(), repeating: .seconds(15))
+        t.setEventHandler { [weak self] in self?.syncSessionTitle() }
+        t.resume()
+        titleSyncTimer = t
+    }
+
+    private func stopTitleSync() {
+        titleSyncTimer?.cancel()
+        titleSyncTimer = nil
+    }
+
+    private func syncSessionTitle() {
+        guard let title = SessionTitleReader.title(for: sessionId), !title.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // 사용자가 직접 지정하거나 지운 메모는 건드리지 않는다
+            guard self.controller.memoIsAuto, self.controller.memo != title else { return }
+            self.controller.memo = title
+        }
     }
 
     private func removeMouseMonitors() {
@@ -292,10 +331,15 @@ class SessionWindow {
             .dropFirst()
             .sink { [weak self] memo in
                 guard let self else { return }
+                // 세션 이름에서 자동으로 채운 값은 저장하지 않는다 —
+                // 저장하면 사용자가 지정한 메모와 구분할 수 없어진다.
+                guard !self.controller.memoIsAuto else { return }
                 let sessionKey = "memo.session.\(self.sessionId)"
                 let slotKey    = "memo.slot.\(self.slot)"
                 if memo.isEmpty {
-                    UserDefaults.standard.removeObject(forKey: sessionKey)
+                    // 빈 문자열을 남겨 "사용자가 직접 지웠음"을 표시 —
+                    // 키를 지우면 다음 실행 때 세션 이름이 다시 채워진다.
+                    UserDefaults.standard.set("", forKey: sessionKey)
                     UserDefaults.standard.removeObject(forKey: slotKey)
                 } else {
                     UserDefaults.standard.set(memo, forKey: sessionKey)
@@ -392,6 +436,8 @@ class SessionWindow {
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
             let trimmed = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            // 직접 입력(빈칸으로 지우는 것 포함)한 순간부터 세션 이름 자동 연동을 끈다
+            controller.memoIsAuto = false
             controller.memo = trimmed
         }
     }

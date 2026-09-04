@@ -114,6 +114,8 @@ struct CompanionView: View {
                     }
                     if !ctrl.memo.isEmpty {
                         Button("메모 지우기") {
+                            // 직접 지운 것이므로 세션 이름 자동 연동을 끈다
+                            ctrl.memoIsAuto = false
                             ctrl.memo = ""
                         }
                     }

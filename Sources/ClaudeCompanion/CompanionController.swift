@@ -32,6 +32,9 @@ class CompanionController: ObservableObject {
     @Published var isSliding: Bool = false
     @Published var alwaysApprove: Bool = false
     @Published var memo: String = ""
+    /// 메모가 세션 이름에서 자동으로 채워진 값인지 (사용자가 직접 지정/삭제하면 false).
+    /// true인 동안에만 세션 이름 변경을 따라가고, UserDefaults에도 저장하지 않는다.
+    @Published var memoIsAuto: Bool = true
     /// 한도 안내 버블을 사용자가 직접 숨김 — 다음 한도 창이 시작되면 해제
     @Published var limitNoticeDismissed: Bool = false
     var pendingPermissionId: String? = nil
