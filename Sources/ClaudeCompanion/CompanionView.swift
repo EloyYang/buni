@@ -244,29 +244,43 @@ struct CompanionView: View {
         }
     }
 
-    // MARK: - 입력 대기 버블 (AskUserQuestion — 버튼 없이 메시지만)
+    // MARK: - 입력 대기 버블 (AskUserQuestion — 클로드 열기 버튼 제공)
 
     @ViewBuilder
     private func askUserBubble(message: String) -> some View {
         ZStack(alignment: .trailing) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 5) {
-                    Text("❓")
-                    Text("입력 대기 중")
+                    Text("✅")
+                    Text("확인이 필요해요!")
                         .font(.system(.callout, design: .monospaced))
                         .fontWeight(.bold)
                         .foregroundColor(.black)
                 }
-                Text(message)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Color(red: 0.25, green: 0.25, blue: 0.25))
-                    .lineLimit(3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(red: 0.94, green: 0.94, blue: 0.94))
-                    )
+                if !message.isEmpty {
+                    Text(message)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Color(red: 0.25, green: 0.25, blue: 0.25))
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color(red: 0.94, green: 0.94, blue: 0.94))
+                        )
+                }
+                Button { ctrl.onOpenClaudeRequest?() } label: {
+                    Text("클로드 열기")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(Color(red: 0.25, green: 0.50, blue: 0.90))
+                        )
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)

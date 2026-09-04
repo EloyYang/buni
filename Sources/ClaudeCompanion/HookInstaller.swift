@@ -187,7 +187,11 @@ try:
 
         if tool in SAFE_TOOLS:
             with open(events_file, "a") as f:
-                f.write(json.dumps({"type": "tool_use", "tool": tool}) + "\n")
+                if tool == "AskUserQuestion":
+                    # 사용자 선택이 필요한 상황 → 부니에 확인 요청 버블 표시
+                    f.write(json.dumps({"type": "ask_user", "message": ""}) + "\n")
+                else:
+                    f.write(json.dumps({"type": "tool_use", "tool": tool}) + "\n")
         elif _skip_gate(tool, perm_mode):
             # Claude가 이미 자동 승인하는 모드 — 승인 게이트 없이 tool_use만 기록
             with open(events_file, "a") as f:

@@ -220,8 +220,10 @@ class EventMonitor {
             if case .permission = controller.state, controller.pendingPermissionId == nil { break }
             controller.update(to: .notification(event.message ?? "알림"), autohideAfter: 5)
         case "permission":
+            if isReplaying { break }   // 과거 이벤트 재생으로 지난 권한 버블이 되살아나는 것 방지
             controller.update(to: .permission(event.message ?? "권한 요청"))
         case "ask_user":
+            if isReplaying { break }   // 이미 답한 확인 요청이 재시작 때 다시 뜨는 것 방지
             let msg = event.message ?? "터미널에서 선택해 주세요"
             DispatchQueue.main.async {
                 self.controller.pendingPermissionId = nil
