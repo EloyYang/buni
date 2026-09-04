@@ -7,6 +7,10 @@ struct CompanionView: View {
     @State private var resetTimeTick = Date()
     private let resetTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
+    // 한도 도달 시 카운트다운 갱신 (1초마다 — 안내 버블이 떠 있을 때만 반영)
+    @State private var limitTick = Date()
+    private let limitTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
     // 드래그 위치 조정
     @State private var dragActive = false
 
@@ -30,12 +34,14 @@ struct CompanionView: View {
                         permissionBubbleView
                     } else if isCompleted {
                         completionBubbleView
+                    } else if ctrl.isLimitNoticeVisible {
+                        limitBubbleView
                     } else {
                         regularBubbleView
                     }
                 }
                 .padding(.bottom, 6)
-                .allowsHitTesting(isPermission || isCompleted)
+                .allowsHitTesting(isPermission || isCompleted || ctrl.isLimitNoticeVisible)
 
                 // 캐릭터 + 플랜 사용량 바
                 VStack(spacing: -5) {
@@ -122,7 +128,10 @@ struct CompanionView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: bubbleMessage)
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: isCompleted)
+        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: ctrl.isLimitNoticeVisible)
         .onReceive(resetTimer) { t in resetTimeTick = t }
+        // 한도 안내가 떠 있을 때만 상태를 갱신해 불필요한 재렌더 방지
+        .onReceive(limitTimer) { t in if ctrl.isLimitNoticeVisible { limitTick = t } }
     }
 
     // MARK: - 리셋 시간 계산
@@ -244,6 +253,69 @@ struct CompanionView: View {
         }
     }
 
+    // MARK: - 한도 도달 버블 (재설정까지 카운트다운 + 숨기기)
+
+    /// 한도 재설정까지 남은 시간 — "1:23:45" / "23:45" 형식
+    private func limitCountdownString(from now: Date) -> String {
+        guard let resetAt = ctrl.limitResetAt else { return "재설정 시각 확인 중" }
+        let diff = Int(resetAt.timeIntervalSince(now))
+        guard diff > 0 else { return "곧 재설정돼요" }
+        let h = diff / 3600
+        let m = (diff % 3600) / 60
+        let s = diff % 60
+        return h > 0 ? String(format: "%d:%02d:%02d 후 재설정", h, m, s)
+                     : String(format: "%d:%02d 후 재설정", m, s)
+    }
+
+    private var limitBubbleView: some View {
+        ZStack(alignment: .trailing) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 5) {
+                    Text("⏳")
+                    Text("한도에 도달했어요")
+                        .font(.system(.callout, design: .monospaced))
+                        .fontWeight(.bold)
+                        .foregroundColor(.black)
+                }
+                Text(limitCountdownString(from: limitTick))
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Color(red: 0.25, green: 0.25, blue: 0.25))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(red: 0.94, green: 0.94, blue: 0.94))
+                    )
+                HStack {
+                    Spacer()
+                    confirmButton("숨기기", color: Color(red: 0.45, green: 0.45, blue: 0.50)) {
+                        ctrl.limitNoticeDismissed = true
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: 210, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.white)
+                    .shadow(color: .black.opacity(0.20), radius: 8, x: -2, y: 3)
+            )
+
+            SpeechTail()
+                .fill(Color.white)
+                .frame(width: 16, height: 13)
+                .offset(x: 14, y: 0)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .transition(
+            .asymmetric(
+                insertion: .scale(scale: 0.8, anchor: .topTrailing).combined(with: .opacity),
+                removal:   .opacity
+            )
+        )
+    }
+
     // MARK: - 입력 대기 버블 (AskUserQuestion — 클로드 열기 버튼 제공)
 
     @ViewBuilder
@@ -314,6 +386,9 @@ struct CompanionView: View {
     // MARK: - 일반 말풍선
 
     private var bubbleMessage: String? {
+        // 한도에 걸리면 이벤트가 끊겨 마지막 상태("코딩중")가 그대로 남으므로,
+        // 안내를 숨긴 경우에도 잘못된 상태를 계속 보여주지 않는다.
+        if ctrl.isLimitReached { return nil }
         switch ctrl.state {
         case .thinking:              return "코딩중"
         case .toolUse(let name):     return name

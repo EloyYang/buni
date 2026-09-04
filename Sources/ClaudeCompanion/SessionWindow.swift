@@ -269,6 +269,10 @@ class SessionWindow {
         if case .completed = controller.state {
             return NSRect(x: f.minX, y: f.minY, width: f.width, height: charHeight)
         }
+        // 한도 안내 버블의 숨기기 버튼도 클릭 가능해야 함
+        if controller.isLimitNoticeVisible {
+            return NSRect(x: f.minX, y: f.minY, width: f.width, height: charHeight)
+        }
         return NSRect(x: f.maxX - charWidth, y: f.minY, width: charWidth, height: charHeight)
     }
 

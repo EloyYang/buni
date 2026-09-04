@@ -32,7 +32,22 @@ class CompanionController: ObservableObject {
     @Published var isSliding: Bool = false
     @Published var alwaysApprove: Bool = false
     @Published var memo: String = ""
+    /// 한도 안내 버블을 사용자가 직접 숨김 — 다음 한도 창이 시작되면 해제
+    @Published var limitNoticeDismissed: Bool = false
     var pendingPermissionId: String? = nil
+
+    // MARK: - 플랜 한도
+
+    /// 5시간 플랜 한도 도달 여부 (서버 사용률 100% 이상)
+    var isLimitReached: Bool { (serverUtilization ?? 0) >= 100 }
+
+    /// 한도 안내 버블을 실제로 띄울지 여부
+    var isLimitNoticeVisible: Bool { isLimitReached && !limitNoticeDismissed }
+
+    /// 한도 재설정 시각 — 서버 값 우선, 없으면 세션 시작 + 5시간
+    var limitResetAt: Date? {
+        serverResetsAt ?? sessionStart?.addingTimeInterval(5 * 3600)
+    }
 
     var planTokenLabel: String {
         if let u = serverUtilization {

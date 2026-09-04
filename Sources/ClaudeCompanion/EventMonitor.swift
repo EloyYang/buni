@@ -138,6 +138,11 @@ class EventMonitor {
             }()
         }
         DispatchQueue.main.async {
+            // 한도 창이 새로 시작됐거나 아직 한도 전이면 숨김 상태 해제
+            // (다음 한도 도달 때 안내 버블이 다시 뜨도록)
+            if self.controller.serverResetsAt != resetsAt || utilization < 100 {
+                self.controller.limitNoticeDismissed = false
+            }
             self.controller.serverUtilization = utilization
             self.controller.serverResetsAt    = resetsAt
         }
