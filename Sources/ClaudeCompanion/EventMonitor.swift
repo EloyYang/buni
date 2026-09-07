@@ -27,9 +27,13 @@ class EventMonitor {
     /// 처리한 이벤트 순번 — 지연 전환이 최신 상태를 덮어쓰지 않도록 검증용
     private var eventSeq      = 0
 
-    /// 작업 중 상태에서 이 시간(초)만큼 새 이벤트가 없으면 대기 상태로 되돌린다.
+    /// 아직 끝나지 않은 도구 실행 수 (tool_use 발생 - tool_done 도착).
+    /// 0보다 크면 오래 걸리는 도구가 실제로 돌고 있는 것이라 이벤트가 없어도 작업 중이다.
+    private var pendingTools  = 0
+
+    /// 실행 중인 도구가 없는데 이 시간(초)만큼 새 이벤트가 없으면 대기 상태로 되돌린다.
     /// 훅이 누락되거나 세션이 조용히 끝났을 때 "도구 실행 중" 버블이 굳는 것을 방지.
-    private let idleFallbackSeconds: TimeInterval = 120
+    private let idleFallbackSeconds: TimeInterval = 300
 
     /// done 이벤트 + 30초 무활동 시, 또는 90초 강제 타임아웃 시 호출
     var onSessionEnded: (() -> Void)?
@@ -163,8 +167,10 @@ class EventMonitor {
     private func checkStaleness() {
         let quietFor = Date().timeIntervalSince(lastEventDate)
 
-        // 진행 중인 작업이 없는데 작업 상태로 남아 있으면 대기 상태로 되돌린다
-        if quietFor > idleFallbackSeconds {
+        // 진행 중인 작업이 없는데 작업 상태로 남아 있으면 대기 상태로 되돌린다.
+        // 오래 걸리는 도구가 실행 중(tool_use 후 tool_done 미도착)이면 이벤트가
+        // 없는 게 정상이므로 건드리지 않는다.
+        if pendingTools == 0, quietFor > idleFallbackSeconds {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 switch self.controller.state {
@@ -216,6 +222,7 @@ class EventMonitor {
         case "tool_use":
             // 과거 이벤트 재생으로 이미 끝난 도구 실행이 되살아나는 것 방지
             if isReplaying { break }
+            pendingTools += 1
             let raw      = (event.tool ?? "tool").lowercased()
             let toolName = formatToolName(raw)
             let isRead   = ["read", "grep", "websearch", "webfetch", "glob"].contains(raw)
@@ -235,11 +242,13 @@ class EventMonitor {
             }
         case "tool_done":
             if isReplaying { break }
+            pendingTools = max(0, pendingTools - 1)
             controller.update(to: .thinking)  // 도구 완료 후 항상 thinking(타이핑)으로 복귀
         case "thinking":
             // 30초 이내의 이벤트는 replay 중에도 처리 — 새 세션 시작 시 토큰 소비 구간부터 모션 적용
             let isStale = event.ts.map { Date().timeIntervalSince1970 - $0 > 30 } ?? true
             if isReplaying && isStale { break }
+            pendingTools = 0   // 새 턴 시작 — 이전 턴에서 남은 카운트 정리
             switch controller.state {
             case .ready, .completed:
                 controller.update(to: .thinking)
@@ -249,6 +258,7 @@ class EventMonitor {
 
         case "done":
             if isReplaying { break }   // 과거 done 재생 시 세션 조기 제거 방지
+            pendingTools = 0
             controller.update(to: .completed)
         case "notification":
             let notifStale = event.ts.map { Date().timeIntervalSince1970 - $0 > 30 } ?? true
