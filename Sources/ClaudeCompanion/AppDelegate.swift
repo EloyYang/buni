@@ -327,6 +327,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         win.onShowStatusBar = { [weak self] in self?.showStatusBar() }
         win.onRebuildMenu   = { [weak self] in self?.rebuildMenu() }
         win.shouldAutoShow  = { [weak self] in !(self?.isManuallyHidden ?? false) }
+        win.onGlobalHideRequest = { [weak self] in self?.hideAll() }
         win.onSessionEnded  = { [weak self] in
             DispatchQueue.main.async { self?.removeSession(id: win.sessionId) }
         }
@@ -410,7 +411,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let anyVisible = sessions.values.contains { $0.panel?.isVisible == true }
-        menu.addItem(NSMenuItem(title: anyVisible ? "부니 숨기기" : "부니 부르기",
+        menu.addItem(NSMenuItem(title: anyVisible ? "부니 숨기기" : "부니 불러오기",
                                 action: #selector(toggleVisibility), keyEquivalent: "h"))
         menu.addItem(NSMenuItem(title: "Claude 열기",
                                 action: #selector(openClaude), keyEquivalent: "o"))
@@ -462,13 +463,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func toggleVisibility() {
         let anyVisible = sessions.values.contains { $0.panel?.isVisible == true }
-        if anyVisible {
-            isManuallyHidden = true
-            sessions.values.forEach { $0.hideCompanion() }
-        } else {
-            isManuallyHidden = false
-            sessions.values.forEach { $0.showCompanion() }
-        }
+        anyVisible ? hideAll() : showAll()
+    }
+
+    /// 전체 숨김 — 패널 우클릭 메뉴의 "숨기기"와 메뉴바의 "부니 숨기기"가 공유.
+    /// isManuallyHidden을 켜서, 이후 어떤 상태 변화나 새 Claude 세션이 와도
+    /// "부니 불러오기"를 누르기 전까지는 자동으로 다시 나타나지 않게 한다.
+    func hideAll() {
+        isManuallyHidden = true
+        sessions.values.forEach { $0.hideCompanion() }
+    }
+
+    func showAll() {
+        isManuallyHidden = false
+        sessions.values.forEach { $0.showCompanion() }
     }
 
     @objc func openClaude() {

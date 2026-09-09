@@ -40,6 +40,10 @@ class SessionWindow {
     var onRebuildMenu:   (() -> Void)?
     /// 사용자가 직접 숨긴 상태가 아닐 때만 true — 활동 재개 시 자동 재표시 판단용
     var shouldAutoShow:  (() -> Bool)?
+    /// 패널 우클릭 메뉴의 "숨기기" — 메뉴바의 "부니 숨기기"와 동일하게 전체를
+    /// 숨기고 자동 재표시를 끈다 (이 세션만 숨기면 isManuallyHidden과 어긋나
+    /// 다른 상태 변화로 되살아나 버리는 문제가 있었음)
+    var onGlobalHideRequest: (() -> Void)?
 
     init(sessionId: String, slot: Int, eventFile: String, savedOrigin: NSPoint? = nil) {
         self.sessionId    = sessionId
@@ -318,7 +322,8 @@ class SessionWindow {
     // MARK: - Controller callbacks
 
     private func setupControllerCallbacks() {
-        controller.onHideRequest          = { [weak self] in self?.hideCompanion() }
+        // 메뉴바 "부니 숨기기"와 동일한 전체 숨김으로 위임 (isManuallyHidden 동기화)
+        controller.onHideRequest          = { [weak self] in self?.onGlobalHideRequest?() }
         controller.onShowRequest          = { [weak self] in self?.showCompanion() }
         controller.onOpenClaudeRequest    = { [weak self] in self?.onOpenClaude?() }
         controller.onOpenSettingsRequest  = { [weak self] in self?.onOpenSettings?() }
