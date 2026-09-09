@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Buni for Windows v1.3.5
+Buni for Windows v1.5.0
 Claude Code companion – pixel-art rabbit mascot
 https://github.com/EloyYang/buni
 """
@@ -392,6 +392,7 @@ def _run_hook(hook_type: str):
     safe_sid   = ''.join(c for c in session_id if c.isalnum() or c in '-_') or 'legacy'
     ef         = _TEMP / f'claude-companion-events-{safe_sid}.jsonl'
     is_remote  = bool(os.environ.get('SSH_CLIENT') or os.environ.get('SSH_TTY'))
+    perm_mode  = d.get('permission_mode', '') or ''  # default/auto/acceptEdits/bypassPermissions/plan
 
     def _write(ev):
         try:
@@ -434,8 +435,17 @@ def _run_hook(hook_type: str):
         inp   = d.get('tool_input', {}) or {}
         SAFE  = {'Read', 'Glob', 'Grep', 'LS', 'WebSearch', 'WebFetch',
                  'TodoRead', 'NotebookRead', 'AskUserQuestion'}
+        # 클로드 자체가 이미 자동 승인하는 모드에서는 부니 게이트를 건너뛴다
+        # (클로드가 안 묻는데 부니만 물어보는 문제 방지)
+        AUTO_APPROVE_MODES = {'auto', 'bypassPermissions'}
+        EDIT_TOOLS = {'Write', 'Edit', 'MultiEdit', 'NotebookEdit'}
+        skip_gate = (perm_mode in AUTO_APPROVE_MODES or
+                     (perm_mode == 'acceptEdits' and tool in EDIT_TOOLS))
 
-        if tool in SAFE or is_remote:
+        if tool == 'AskUserQuestion':
+            # 터미널에 선택지가 나타날 예정 → 부니에 확인 요청 버블 표시
+            emit({'type': 'ask_user', 'message': ''})
+        elif tool in SAFE or is_remote or skip_gate:
             emit({'type': 'tool_use', 'tool': tool})
         else:
             if tool == 'Bash':
@@ -926,6 +936,77 @@ class ShortcutSettingsWindow:
 
 
 # ══════════════════════════════════════════════════════════════
+# Claude Code 세션 이름 읽기 (메모 자동 연동용)
+# ══════════════════════════════════════════════════════════════
+
+_TITLE_MAX_LEN = 24
+
+
+def _read_session_title(session_id: str) -> str | None:
+    """트랜스크립트(~/.claude/projects/<프로젝트>/<세션id>.jsonl)에서
+    세션 이름을 읽는다. 이름은 아래 형태로 대화 중 계속 덧붙는다.
+        {"type": "custom-title", "customTitle": "...", "sessionId": "..."}
+        {"type": "ai-title",     "aiTitle": "...",     "sessionId": "..."}
+    사용자가 지정한 이름(custom-title) 우선, 같은 종류는 최신 값을 쓴다.
+    제목 줄은 보통 파일 꼬리에 있으므로 꼬리 256KB만 먼저 훑고,
+    거기서 못 찾을 때만 전체를 읽는다."""
+    projects_dir = Path.home() / '.claude' / 'projects'
+    transcript: Path | None = None
+    try:
+        for d in projects_dir.iterdir():
+            candidate = d / f'{session_id}.jsonl'
+            if candidate.exists():
+                transcript = candidate
+                break
+    except Exception:
+        return None
+    if transcript is None:
+        return None
+
+    def _parse(text: str) -> str | None:
+        custom = ai = None
+        for line in text.splitlines():
+            if '-title' not in line:
+                continue
+            try:
+                ev = json.loads(line)
+            except Exception:
+                continue
+            sid = ev.get('sessionId')
+            if sid is not None and sid != session_id:
+                continue
+            ct = ev.get('customTitle')
+            at = ev.get('aiTitle')
+            if ct:
+                custom = ct
+            if at:
+                ai = at
+        return custom or ai
+
+    try:
+        size = transcript.stat().st_size
+        tail_bytes = 256 * 1024
+        with transcript.open('rb') as f:
+            if size > tail_bytes:
+                f.seek(size - tail_bytes)
+                f.readline()  # 중간부터 읽으면 첫 줄은 잘려 있으므로 버림
+            data = f.read()
+        title = _parse(data.decode('utf-8', errors='replace'))
+        if title is None and size > tail_bytes:
+            full  = transcript.read_text(encoding='utf-8', errors='replace')
+            title = _parse(full)
+    except Exception:
+        return None
+
+    if not title:
+        return None
+    title = title.strip()
+    if not title:
+        return None
+    return title if len(title) <= _TITLE_MAX_LEN else title[:_TITLE_MAX_LEN - 1] + '…'
+
+
+# ══════════════════════════════════════════════════════════════
 class PersistenceManager:
     """JSON-backed key-value store (character, memo, window position)."""
 
@@ -988,7 +1069,7 @@ class SessionWindow:
 
         # ── Character & memo
         self.character: str = self._load_character()
-        self.memo:      str = self._load_memo()
+        self.memo, self.memo_is_auto = self._load_memo()
 
         # ── Body/arm animation floats
         self.body_dy  = 0.0;  self.body_dx  = 0.0
@@ -1014,7 +1095,16 @@ class SessionWindow:
         self.msg: str | None = None
         self.perm_id: str | None   = None
         self.perm_cmd: str | None  = None
-        self.always_approve = False
+        self.always_approve = self._load_always_approve()
+        # 한도 도달 안내를 사용자가 직접 숨긴 상태 — 다음 한도 창이 시작되면 해제
+        self._limit_notice_dismissed = False
+        self._limit_win: tk.Toplevel | None = None
+        self._limit_job = None
+        # 진행 중인(끝나지 않은) 도구 실행 수 — tool_use +1 / tool_done -1.
+        # 0보다 크면 오래 걸리는 도구가 실행 중이라 이벤트가 없어도 정상이다.
+        self._pending_tools = 0
+        # 뒤늦게 도착하는 지연 전환이 최신 이벤트를 덮어쓰지 않도록 순번을 올린다
+        self._event_seq = 0
 
         # ── Usage
         self._usage                = 0.0
@@ -1028,8 +1118,10 @@ class SessionWindow:
         self._reading_job  = None
         self._blink_job    = None
         self._idle_job     = None
+        self._title_job    = None
         self._perm_win:        tk.Toplevel | None = None
         self._completion_win: tk.Toplevel | None = None
+        self._ask_user_win:   tk.Toplevel | None = None
         self._destroyed    = False
 
         # ── File monitoring
@@ -1060,6 +1152,7 @@ class SessionWindow:
         self._schedule_blink()
         self._schedule_idle_hop()
         self._tick_bar_refresh()
+        self._schedule_title_sync()
 
     # ── Persistence ───────────────────────────────────────────
 
@@ -1068,9 +1161,25 @@ class SessionWindow:
                 self.persist.get(f'character.slot.{self.slot}') or 'rabbit')
         return char if char in CHARACTERS else 'rabbit'
 
-    def _load_memo(self) -> str:
-        return (self.persist.get(f'memo.session.{self.session_id}') or
-                self.persist.get(f'memo.slot.{self.slot}') or '')
+    def _load_memo(self) -> tuple[str, bool]:
+        """(메모, 자동연동여부) 반환.
+        이 세션에 사용자가 직접 지정한 메모가 있으면(빈 문자열 = 직접 지운
+        상태 포함) 그대로 쓰고 자동 연동을 끈다. 없으면 슬롯 메모를 임시로
+        보여주되 자동 상태로 두어, 곧 세션 이름을 읽어오면 대체되게 한다."""
+        ks = f'memo.session.{self.session_id}'
+        if self.persist.get(ks) is not None:
+            return (self.persist.get(ks) or '', False)
+        return (self.persist.get(f'memo.slot.{self.slot}') or '', True)
+
+    def _load_always_approve(self) -> bool:
+        ks = f'alwaysApprove.session.{self.session_id}'
+        if self.persist.get(ks) is not None:
+            return bool(self.persist.get(ks))
+        return bool(self.persist.get(f'alwaysApprove.slot.{self.slot}', False))
+
+    def _save_always_approve(self):
+        self.persist.set(f'alwaysApprove.session.{self.session_id}', self.always_approve)
+        self.persist.set(f'alwaysApprove.slot.{self.slot}', self.always_approve)
 
     def _save_character(self):
         self.persist.set(f'character.session.{self.session_id}', self.character)
@@ -1083,8 +1192,26 @@ class SessionWindow:
             self.persist.set(ks, self.memo)
             self.persist.set(kl, self.memo)
         else:
-            self.persist.remove(ks)
+            # 빈 문자열을 남겨 "사용자가 직접 지웠음"을 표시 — 키를 지우면
+            # 다음 실행 때 세션 이름이 다시 채워져 버린다.
+            self.persist.set(ks, '')
             self.persist.remove(kl)
+
+    # ── 세션 이름 → 메모 자동 연동 ──────────────────────────────
+
+    def _schedule_title_sync(self):
+        if self.session_id in ('legacy', 'windows-default'):
+            return
+        self._sync_session_title()
+
+    def _sync_session_title(self):
+        if self._destroyed:
+            return
+        title = _read_session_title(self.session_id)
+        if title and self.memo_is_auto and self.memo != title:
+            self.memo = title
+            self._draw()
+        self._title_job = self.win.after(15_000, self._sync_session_title)
 
     # ── Window setup ──────────────────────────────────────────
 
@@ -1099,13 +1226,20 @@ class SessionWindow:
 
     def _position_window(self):
         sw = self.win.winfo_screenwidth()
+        sh = self.win.winfo_screenheight()
         if self.slot == 0:
             saved = self.persist.get('window_pos')
             if saved and isinstance(saved, (list, tuple)) and len(saved) == 2:
                 try:
                     x, y = int(saved[0]), int(saved[1])
-                    self.win.geometry(f'{WIN_W}x{WIN_H}+{x}+{y}')
-                    return
+                    # 모니터 구성이 바뀌어(외장 모니터 분리 등) 저장된 위치가
+                    # 현재 화면 밖으로 완전히 벗어났으면 버리고 기본 위치를 쓴다
+                    on_screen = (x + WIN_W > 0 and x < sw and
+                                 y + WIN_H > 0 and y < sh)
+                    if on_screen:
+                        self.win.geometry(f'{WIN_W}x{WIN_H}+{x}+{y}')
+                        return
+                    self.persist.remove('window_pos')
                 except Exception:
                     pass
         # Top-right corner, slots stack downward
@@ -1773,6 +1907,15 @@ class SessionWindow:
         if new_state != 'toolRead':
             self._stop_reading()
 
+        # 관련 없는 상태로 넘어가면 떠 있던 팝업을 정리한다 — Windows는 각 상태가
+        # 독립된 Toplevel 팝업이라, 정리하지 않으면 화면에 붕 뜬 채로 남는다.
+        if new_state != 'permission' and self._perm_win and self._perm_win.winfo_exists():
+            self._perm_win.destroy()
+        if new_state != 'completed' and self._completion_win and self._completion_win.winfo_exists():
+            self._completion_win.destroy()
+        if new_state != 'ask_user' and self._ask_user_win and self._ask_user_win.winfo_exists():
+            self._ask_user_win.destroy()
+
         if new_state == 'idle':
             self.msg = None
             self._draw()
@@ -1804,20 +1947,40 @@ class SessionWindow:
             self.msg = None
             self.perm_cmd = perm_cmd
             self.perm_id  = perm_id
-            self.show()   # 숨겨진 경우에도 팝업이 보이도록
+            self._auto_show()
             self._draw()
-            self._show_perm_popup()
+            if not self.manager._is_manually_hidden:
+                self._show_perm_popup()
 
         elif new_state == 'completed':
             self.msg = None
             self.wide_eyes = True
             self._bounce(high=True)
             self._draw()
-            self._show_completion_popup()
+            if not self.manager._is_manually_hidden:
+                self._show_completion_popup()
+
+        elif new_state == 'ask_user':
+            self.wide_eyes = True
+            self.msg = None
+            self._draw()
+            if not self.manager._is_manually_hidden:
+                self._show_ask_user_popup()
 
         elif new_state == 'ready':
             self.msg = None
             self._draw()
+            self._auto_show()
+
+        # completed/permission/ask_user 버블이 방금 사라졌다면, 밀려 있던
+        # 한도 도달 안내를 지금 띄운다 (조건은 내부에서 다시 확인)
+        if new_state not in ('permission', 'completed', 'ask_user'):
+            self._maybe_show_limit_popup()
+
+    def _auto_show(self):
+        """숨긴 상태가 아닐 때만 표시 — "부니 불러오기"를 누르기 전까지는
+        어떤 상태 변화(권한 요청 포함)로도 자동으로 다시 나타나지 않게 한다."""
+        if not self.manager._is_manually_hidden:
             self.show()
 
     def _clear_msg_if(self, old_msg):
@@ -1925,6 +2088,247 @@ class SessionWindow:
                     lambda _: cv.itemconfig('btnbg', fill=_darken(bg), outline=_darken(bg)))
         cv.tag_bind('btn', '<Leave>',
                     lambda _: cv.itemconfig('btnbg', fill=bg, outline=bg))
+
+    # ── Ask-user popup (AskUserQuestion — 클로드 열기 버튼 제공) ──
+
+    def _show_ask_user_popup(self):
+        if self._ask_user_win and self._ask_user_win.winfo_exists():
+            self._ask_user_win.destroy()
+
+        TRANSP_  = '#010101'
+        WHITE    = '#FFFFFF'
+        SHADOW   = '#BBBBBB'
+        BW       = 170
+        TAIL_W   = 15
+        R        = 14
+        PAD      = 12
+        TITLE_H  = 20
+        BTN_H    = 28
+        GAP      = 6
+        WIN_H_   = PAD + TITLE_H + GAP + BTN_H + PAD
+
+        def _get_geometry(h):
+            self.win.update_idletasks()
+            rx = self.win.winfo_rootx(); ry = self.win.winfo_rooty()
+            pw = BW + TAIL_W
+            tail_tip_x = int(CHAR_CX - P * 5) + 9 - 30
+            wx = rx + tail_tip_x - pw
+            wy = ry + int(CHAR_CY - P * 3.5) - h // 2
+            return pw, wx, wy
+
+        def _bubble(cv, ox, oy, h, color):
+            x0, y0, x1, y1 = ox, oy, ox + BW, oy + h
+            cv.create_arc(x0, y0, x0+2*R, y0+2*R, start=90, extent=90,
+                          fill=color, outline=color, tags='bubble')
+            cv.create_arc(x1-2*R, y0, x1, y0+2*R, start=0, extent=90,
+                          fill=color, outline=color, tags='bubble')
+            cv.create_arc(x0, y1-2*R, x0+2*R, y1, start=180, extent=90,
+                          fill=color, outline=color, tags='bubble')
+            cv.create_arc(x1-2*R, y1-2*R, x1, y1, start=270, extent=90,
+                          fill=color, outline=color, tags='bubble')
+            cv.create_rectangle(x0+R, y0, x1-R, y1,   fill=color, outline=color, tags='bubble')
+            cv.create_rectangle(x0, y0+R, x1, y1-R,   fill=color, outline=color, tags='bubble')
+            mid = oy + h // 2
+            cv.create_polygon(x1, mid-7, x1+TAIL_W+ox, mid, x1, mid+7,
+                              fill=color, outline=color, tags='bubble')
+
+        def _darken(hex_color):
+            r = max(0, int(hex_color[1:3], 16) - 30)
+            g = max(0, int(hex_color[3:5], 16) - 30)
+            b = max(0, int(hex_color[5:7], 16) - 30)
+            return f'#{r:02X}{g:02X}{b:02X}'
+
+        WIN_W_, wx, wy = _get_geometry(WIN_H_)
+        win = tk.Toplevel(self.win)
+        self._ask_user_win = win
+        win.overrideredirect(True)
+        win.wm_attributes('-topmost', True)
+        win.wm_attributes('-transparentcolor', TRANSP_)
+        win.config(bg=TRANSP_)
+        win.geometry(f'{WIN_W_}x{WIN_H_}+{wx}+{wy}')
+
+        cv = tk.Canvas(win, width=WIN_W_, height=WIN_H_,
+                       bg=TRANSP_, highlightthickness=0)
+        cv.pack()
+
+        _bubble(cv, 2, 3, WIN_H_, SHADOW)
+        _bubble(cv, 0, 0, WIN_H_, WHITE)
+
+        cv.create_text(PAD + 4, PAD + 2, text='✅ 확인이 필요해요!',
+                       anchor='nw', font=('Consolas', 10, 'bold'),
+                       fill='#000000', tags='bubble')
+
+        btn_y = PAD + TITLE_H + GAP
+        bg    = '#3377E0'
+        label = '클로드 열기'
+        bw    = len(label) * 9 + 20
+        bx    = PAD
+        br    = 7
+        by0, by1 = btn_y, btn_y + BTN_H
+        for dx0,dy0,dx1,dy1,st in [
+            (bx,by0,bx+2*br,by0+2*br,90),(bx+bw-2*br,by0,bx+bw,by0+2*br,0),
+            (bx,by1-2*br,bx+2*br,by1,180),(bx+bw-2*br,by1-2*br,bx+bw,by1,270)]:
+            cv.create_arc(dx0,dy0,dx1,dy1, start=st, extent=90,
+                          fill=bg, outline=bg, tags=('btn', 'btnbg', 'bubble'))
+        cv.create_rectangle(bx+br, by0, bx+bw-br, by1, fill=bg, outline=bg, tags=('btn','btnbg','bubble'))
+        cv.create_rectangle(bx, by0+br, bx+bw, by1-br,  fill=bg, outline=bg, tags=('btn','btnbg','bubble'))
+        cv.create_text(bx + bw//2, btn_y + BTN_H//2, text=label,
+                       font=('Consolas', 9, 'bold'), fill='white', tags=('btn','bubble'))
+        cv.tag_bind('btn', '<Button-1>', lambda _: self._open_claude())
+        cv.tag_bind('btn', '<Enter>',
+                    lambda _: cv.itemconfig('btnbg', fill=_darken(bg), outline=_darken(bg)))
+        cv.tag_bind('btn', '<Leave>',
+                    lambda _: cv.itemconfig('btnbg', fill=bg, outline=bg))
+
+    # ── Limit-reached popup (한도 도달 — 카운트다운 + 숨기기 버튼) ──
+
+    def _maybe_show_limit_popup(self):
+        """서버 사용률이 100%에 도달하면 안내 팝업을 띄운다.
+        완료/권한/확인 요청 버블과 겹치지 않도록, 그런 상태가 아닐 때만 띄운다."""
+        reached = (self._server_utilization is not None and
+                   self._server_utilization >= 100)
+        if not reached or self._limit_notice_dismissed:
+            self._hide_limit_popup()
+            return
+        if self.state in ('permission', 'completed', 'ask_user'):
+            return
+        if self.manager._is_manually_hidden:
+            return
+        if self._limit_win and self._limit_win.winfo_exists():
+            self._tick_limit_popup()
+            return
+        self._show_limit_popup()
+
+    def _hide_limit_popup(self):
+        if self._limit_job:
+            try: self.win.after_cancel(self._limit_job)
+            except Exception: pass
+            self._limit_job = None
+        if self._limit_win and self._limit_win.winfo_exists():
+            self._limit_win.destroy()
+        self._limit_win = None
+
+    def _limit_countdown_str(self) -> str:
+        if self._server_resets_at is None:
+            return '재설정 시각 확인 중'
+        now  = datetime.datetime.now(datetime.timezone.utc)
+        diff = int((self._server_resets_at - now).total_seconds())
+        if diff <= 0:
+            return '곧 재설정돼요'
+        h = diff // 3600; m = (diff % 3600) // 60; s = diff % 60
+        return (f'{h}:{m:02d}:{s:02d} 후 재설정' if h > 0
+                else f'{m}:{s:02d} 후 재설정')
+
+    def _show_limit_popup(self):
+        if self._limit_win and self._limit_win.winfo_exists():
+            self._limit_win.destroy()
+
+        TRANSP_  = '#010101'
+        WHITE    = '#FFFFFF'
+        SHADOW   = '#BBBBBB'
+        BW       = 190
+        TAIL_W   = 15
+        R        = 14
+        PAD      = 12
+        TITLE_H  = 20
+        TXT_H    = 18
+        BTN_H    = 26
+        GAP      = 6
+        WIN_H_   = PAD + TITLE_H + GAP + TXT_H + GAP + BTN_H + PAD
+
+        def _get_geometry(h):
+            self.win.update_idletasks()
+            rx = self.win.winfo_rootx(); ry = self.win.winfo_rooty()
+            pw = BW + TAIL_W
+            tail_tip_x = int(CHAR_CX - P * 5) + 9 - 30
+            wx = rx + tail_tip_x - pw
+            wy = ry + int(CHAR_CY - P * 3.5) - h // 2
+            return pw, wx, wy
+
+        def _bubble(cv, ox, oy, h, color):
+            x0, y0, x1, y1 = ox, oy, ox + BW, oy + h
+            cv.create_arc(x0, y0, x0+2*R, y0+2*R, start=90, extent=90,
+                          fill=color, outline=color, tags='bubble')
+            cv.create_arc(x1-2*R, y0, x1, y0+2*R, start=0, extent=90,
+                          fill=color, outline=color, tags='bubble')
+            cv.create_arc(x0, y1-2*R, x0+2*R, y1, start=180, extent=90,
+                          fill=color, outline=color, tags='bubble')
+            cv.create_arc(x1-2*R, y1-2*R, x1, y1, start=270, extent=90,
+                          fill=color, outline=color, tags='bubble')
+            cv.create_rectangle(x0+R, y0, x1-R, y1,   fill=color, outline=color, tags='bubble')
+            cv.create_rectangle(x0, y0+R, x1, y1-R,   fill=color, outline=color, tags='bubble')
+            mid = oy + h // 2
+            cv.create_polygon(x1, mid-7, x1+TAIL_W+ox, mid, x1, mid+7,
+                              fill=color, outline=color, tags='bubble')
+
+        def _darken(hex_color):
+            r = max(0, int(hex_color[1:3], 16) - 30)
+            g = max(0, int(hex_color[3:5], 16) - 30)
+            b = max(0, int(hex_color[5:7], 16) - 30)
+            return f'#{r:02X}{g:02X}{b:02X}'
+
+        WIN_W_, wx, wy = _get_geometry(WIN_H_)
+        win = tk.Toplevel(self.win)
+        self._limit_win = win
+        win.overrideredirect(True)
+        win.wm_attributes('-topmost', True)
+        win.wm_attributes('-transparentcolor', TRANSP_)
+        win.config(bg=TRANSP_)
+        win.geometry(f'{WIN_W_}x{WIN_H_}+{wx}+{wy}')
+
+        cv = tk.Canvas(win, width=WIN_W_, height=WIN_H_,
+                       bg=TRANSP_, highlightthickness=0)
+        cv.pack()
+
+        _bubble(cv, 2, 3, WIN_H_, SHADOW)
+        _bubble(cv, 0, 0, WIN_H_, WHITE)
+
+        cv.create_text(PAD + 4, PAD + 2, text='⏳ 한도에 도달했어요',
+                       anchor='nw', font=('Consolas', 10, 'bold'),
+                       fill='#000000', tags='bubble')
+
+        txt_y = PAD + TITLE_H + GAP
+        cv.create_text(PAD + 4, txt_y, text=self._limit_countdown_str(),
+                       anchor='nw', font=('Consolas', 9, 'bold'),
+                       fill='#444444', tags=('bubble', 'limit_countdown'))
+
+        btn_y = txt_y + TXT_H + GAP
+        bg    = '#73737F'
+        label = '숨기기'
+        bw    = len(label) * 9 + 20
+        bx    = PAD
+        br    = 7
+        by0, by1 = btn_y, btn_y + BTN_H
+        for dx0,dy0,dx1,dy1,st in [
+            (bx,by0,bx+2*br,by0+2*br,90),(bx+bw-2*br,by0,bx+bw,by0+2*br,0),
+            (bx,by1-2*br,bx+2*br,by1,180),(bx+bw-2*br,by1-2*br,bx+bw,by1,270)]:
+            cv.create_arc(dx0,dy0,dx1,dy1, start=st, extent=90,
+                          fill=bg, outline=bg, tags=('btn', 'btnbg', 'bubble'))
+        cv.create_rectangle(bx+br, by0, bx+bw-br, by1, fill=bg, outline=bg, tags=('btn','btnbg','bubble'))
+        cv.create_rectangle(bx, by0+br, bx+bw, by1-br,  fill=bg, outline=bg, tags=('btn','btnbg','bubble'))
+        cv.create_text(bx + bw//2, btn_y + BTN_H//2, text=label,
+                       font=('Consolas', 9, 'bold'), fill='white', tags=('btn','bubble'))
+        cv.tag_bind('btn', '<Button-1>', lambda _: self._dismiss_limit_notice())
+        cv.tag_bind('btn', '<Enter>',
+                    lambda _: cv.itemconfig('btnbg', fill=_darken(bg), outline=_darken(bg)))
+        cv.tag_bind('btn', '<Leave>',
+                    lambda _: cv.itemconfig('btnbg', fill=bg, outline=bg))
+
+        self._tick_limit_popup()
+
+    def _tick_limit_popup(self):
+        if self._destroyed or not (self._limit_win and self._limit_win.winfo_exists()):
+            return
+        try:
+            cv = self._limit_win.children['!canvas']
+            cv.itemconfig('limit_countdown', text=self._limit_countdown_str())
+        except Exception:
+            pass
+        self._limit_job = self.win.after(1000, self._tick_limit_popup)
+
+    def _dismiss_limit_notice(self):
+        self._limit_notice_dismissed = True
+        self._hide_limit_popup()
 
     # ── Permission popup ──────────────────────────────────────
 
@@ -2072,6 +2476,7 @@ class SessionWindow:
             return
         if action == 'approve_all':
             self.always_approve = True
+            self._save_always_approve()
             action = 'approve'
         decision = 'approve' if action == 'approve' else 'deny'
         try:
@@ -2085,7 +2490,10 @@ class SessionWindow:
 
     def _build_menu(self):
         self._menu = tk.Menu(self.win, tearoff=0)
-        self._menu.add_command(label='숨기기',  command=self.hide)
+        # 트레이의 "부니 숨기기"와 동일한 전체 숨김으로 위임 — 이 창만 hide()하면
+        # manager._is_manually_hidden이 안 켜져서, 다른 상태 변화나 새 Claude
+        # 세션으로 언제든 되살아나 버린다.
+        self._menu.add_command(label='숨기기',  command=self.manager.hide_all)
         self._menu.add_command(label='Claude 열기', command=self._open_claude)
         self._menu.add_separator()
 
@@ -2133,11 +2541,14 @@ class SessionWindow:
             '이 캐릭터의 메모를 입력하세요:\n(빈칸으로 두면 메모가 삭제됩니다)',
             initialvalue=self.memo, parent=self.win)
         if result is not None:
+            # 직접 입력(빈칸으로 지우는 것 포함)한 순간부터 세션 이름 자동 연동을 끈다
+            self.memo_is_auto = False
             self.memo = result.strip()
             self._save_memo()
             self._draw()
 
     def _clear_memo(self):
+        self.memo_is_auto = False
         self.memo = ''
         self._save_memo()
         self._draw()
@@ -2166,9 +2577,14 @@ class SessionWindow:
         self._draw()
 
     def set_server_usage(self, utilization: float | None, resets_at: datetime.datetime | None):
+        # 한도 창이 새로 시작됐거나 아직 한도 전이면 숨김 상태 해제
+        # (다음 한도 도달 때 안내가 다시 뜨도록)
+        if self._server_resets_at != resets_at or (utilization or 0) < 100:
+            self._limit_notice_dismissed = False
         self._server_utilization = utilization
         self._server_resets_at   = resets_at
         self._draw()
+        self._maybe_show_limit_popup()
 
     # ── Event file polling ────────────────────────────────────
 
@@ -2193,25 +2609,31 @@ class SessionWindow:
         except FileNotFoundError:
             # 파일이 삭제됐어도 창은 유지 — 사용자가 숨길 때까지
             return True
-        if size <= self._file_offset:
-            return True
-        try:
-            with self.event_file.open('r', encoding='utf-8', errors='replace') as f:
-                f.seek(self._file_offset)
-                data = f.read()
-            self._file_offset = self.event_file.stat().st_size
-        except Exception:
-            return True
-        for line in data.splitlines():
-            if line.strip():
-                self._last_event_time = time.time()
-                self._handle_event(line)
 
-        # macOS처럼 5분 비활동 시 세션 종료 (크래시/강제종료 감지)
-        if time.time() - self._last_event_time > 300 and self.state != 'idle':
+        if size > self._file_offset:
+            try:
+                with self.event_file.open('r', encoding='utf-8', errors='replace') as f:
+                    f.seek(self._file_offset)
+                    data = f.read()
+                self._file_offset = self.event_file.stat().st_size
+            except Exception:
+                data = ''
+            for line in data.splitlines():
+                if line.strip():
+                    self._last_event_time = time.time()
+                    self._handle_event(line)
+            self._is_replaying = False   # 첫 poll(에서 읽은 데이터) 처리 후 재생 모드 해제
+
+        # 새 이벤트 유무와 무관하게 매 호출마다 검사 (기존엔 새 데이터가 있을 때만
+        # 검사해서, 정작 "한동안 이벤트가 없는" 상황에는 절대 작동하지 않았음).
+        # 5분간 새 이벤트가 없으면 조용한 상태로 되돌린다 (훅 누락·조용히 끝난
+        # 세션 등에 대한 안전망). 오래 걸리는 도구가 실행 중
+        # (tool_use 후 tool_done 미도착)이면 이벤트가 없는 게 정상이므로 건드리지 않는다.
+        if (self._pending_tools == 0 and
+                time.time() - self._last_event_time > 300 and
+                self.state not in ('idle', 'completed', 'permission', 'ask_user')):
             self._apply_state('idle')
 
-        self._is_replaying = False   # 첫 poll 완료 후 재생 모드 해제
         return True
 
     def _handle_event(self, raw: str):
@@ -2221,44 +2643,65 @@ class SessionWindow:
             return
         t = ev.get('type', '')
 
+        # 뒤늦게 도착하는 지연 전환이 최신 이벤트를 덮어쓰지 않도록 순번을 올린다
+        self._event_seq += 1
+
         if t == 'tool_use':
-            # 권한 요청 중에는 도구 이벤트 무시 — 말풍선 겹침 방지
-            if self.state == 'permission':
+            # 과거 이벤트 재생으로 이미 끝난 도구 실행이 되살아나는 것 방지
+            if self._is_replaying:
                 return
+            # 권한/확인 요청 중에는 도구 이벤트 무시 — 말풍선 겹침 방지
+            if self.state in ('permission', 'ask_user'):
+                return
+            self._pending_tools += 1
             tool_raw   = ev.get('tool', 'tool')
             label      = self._fmt_tool(tool_raw)
             next_state = 'toolRead' if tool_raw.lower() in READ_TOOLS else 'toolUse'
             # macOS처럼 ready 상태에서는 thinking 0.6초 후 도구 상태로 전환
             if self.state == 'ready':
+                seq = self._event_seq
                 self._apply_state('thinking')
-                self.win.after(600, lambda ns=next_state, lb=label: (
-                    self._apply_state(ns, tool=lb) if self.state == 'thinking' else None
+                self.win.after(600, lambda ns=next_state, lb=label, s=seq: (
+                    self._apply_state(ns, tool=lb)
+                    if self._event_seq == s and self.state == 'thinking' else None
                 ))
             else:
                 self._apply_state(next_state, tool=label)
 
         elif t == 'tool_done':
-            if self.state == 'permission':
+            if self._is_replaying:
                 return
+            if self.state in ('permission', 'ask_user'):
+                return
+            self._pending_tools = max(0, self._pending_tools - 1)
             self._apply_state('thinking')
 
         elif t == 'thinking':
             is_stale = (time.time() - ev.get('ts', 0) > 30) if 'ts' in ev else True
             if self._is_replaying and is_stale:
                 return
+            self._pending_tools = 0   # 새 턴 시작 — 이전 턴에서 남은 카운트 정리
             if self.state in ('ready', 'completed'):
                 self._apply_state('thinking')
 
         elif t == 'done':
             if self._is_replaying:
                 return   # 과거 done 재생 시 세션 조기 제거 방지
+            self._pending_tools = 0
             self._apply_state('completed')
             # 자동 파일 삭제·세션 제거 없음 — 사용자가 숨기기 전까지 유지
+
+        elif t == 'ask_user':
+            if self._is_replaying:
+                return
+            self._apply_state('ask_user')
 
         elif t == 'notification':
             is_stale = (time.time() - ev.get('ts', 0) > 30) if 'ts' in ev else True
             if self._is_replaying and is_stale:
                 return
+            if self.state == 'ask_user':
+                return   # 확인 요청 버블이 알림에 덮이지 않도록
             self._apply_state('notification', notif=ev.get('message', '알림'))
 
         elif t == 'permission_request':
@@ -2290,6 +2733,11 @@ class SessionWindow:
 
     @staticmethod
     def _fmt_tool(raw: str) -> str:
+        # MCP 도구는 mcp__<서버>__<도구> 형태라 그대로 쓰면 말풍선이 지저분해진다
+        if raw.startswith('mcp__'):
+            parts = raw.split('__')
+            tool  = ' '.join(parts[2:]) if len(parts) > 2 else raw
+            return f"{tool.replace('_', ' ')} 실행 중"
         return {
             'bash':      '터미널 명령 실행 중',
             'read':      '파일 읽는 중',
@@ -2309,9 +2757,22 @@ class SessionWindow:
 
     def hide(self):
         self.win.withdraw()
+        # 팝업은 self.win의 자식 Toplevel일 뿐 부모를 따라 자동으로 숨지
+        # 않으므로 직접 숨긴다 (안 그러면 캐릭터는 안 보이는데 말풍선만 뜸)
+        for w in (self._perm_win, self._completion_win, self._ask_user_win, self._limit_win):
+            if w and w.winfo_exists():
+                w.withdraw()
 
     def show(self):
         self.win.deiconify()
+        # 현재 상태에 맞는 팝업만 복원
+        if self.state == 'permission' and self._perm_win and self._perm_win.winfo_exists():
+            self._perm_win.deiconify()
+        elif self.state == 'completed' and self._completion_win and self._completion_win.winfo_exists():
+            self._completion_win.deiconify()
+        elif self.state == 'ask_user' and self._ask_user_win and self._ask_user_win.winfo_exists():
+            self._ask_user_win.deiconify()
+        self._maybe_show_limit_popup()
 
     @property
     def is_visible(self) -> bool:
@@ -2343,7 +2804,8 @@ class SessionWindow:
         if self._destroyed:
             return
         self._destroyed = True
-        for job_attr in ('_laptop_job', '_reading_job', '_blink_job', '_idle_job'):
+        for job_attr in ('_laptop_job', '_reading_job', '_blink_job', '_idle_job',
+                          '_title_job', '_limit_job'):
             job = getattr(self, job_attr, None)
             if job:
                 try: self.win.after_cancel(job)
@@ -2353,6 +2815,12 @@ class SessionWindow:
             except Exception: pass
         if self._completion_win:
             try: self._completion_win.destroy()
+            except Exception: pass
+        if self._ask_user_win:
+            try: self._ask_user_win.destroy()
+            except Exception: pass
+        if self._limit_win:
+            try: self._limit_win.destroy()
             except Exception: pass
         try: self.win.destroy()
         except Exception: pass
@@ -2842,7 +3310,7 @@ class BuniManager:
         # ── 동적 메뉴 타이틀 ─────────────────────────────
         def _toggle_title(item):
             return '부니 숨기기' if any(
-                w.is_visible for w in self.sessions.values()) else '부니 보이기'
+                w.is_visible for w in self.sessions.values()) else '부니 불러오기'
 
         def on_toggle(icon, item):
             self.root.after(0, self._hk_hide)
@@ -2861,7 +3329,20 @@ class BuniManager:
             icon.stop()
             self.root.after(0, self.quit)
 
+        def _any_always_approve(item=None):
+            return any(w.always_approve for w in self.sessions.values())
+
+        def on_disable_always_approve(icon, item):
+            def _do():
+                for w in self.sessions.values():
+                    if w.always_approve:
+                        w.always_approve = False
+                        w._save_always_approve()
+            self.root.after(0, _do)
+
         icon = pystray.Icon('Buni', make_icon(), 'Buni', pystray.Menu(
+            pystray.MenuItem('⚡ 전체 허용 모드 켜짐 — 클릭하여 끄기',
+                              on_disable_always_approve, visible=_any_always_approve),
             pystray.MenuItem(_toggle_title, on_toggle, default=True),
             pystray.MenuItem('Claude 열기',   on_claude),
             pystray.MenuItem('단축키 설정...', on_settings),
