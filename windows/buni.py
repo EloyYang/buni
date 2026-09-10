@@ -3307,13 +3307,15 @@ class BuniManager:
                         d.rectangle([x0, y0, x1, y1], fill=(232, 232, 240, 255))
             return img
 
-        # ── 동적 메뉴 타이틀 ─────────────────────────────
-        def _toggle_title(item):
-            return '부니 숨기기' if any(
-                w.is_visible for w in self.sessions.values()) else '부니 불러오기'
+        # 숨기기/불러오기를 하나로 토글하면, 세션 하나가 소리 없이(예: Claude
+        # 종료 감지) 숨겨졌을 때 "불러오기" 항목 자체가 안 보여서 — 그걸
+        # 보이게 하려고 전체를 숨겼다가 다시 불러와야 하는 번거로움이 생김.
+        # 항상 둘 다 보여주고 각각 명시적으로 동작하게 한다.
+        def on_hide(icon, item):
+            self.root.after(0, self.hide_all)
 
-        def on_toggle(icon, item):
-            self.root.after(0, self._hk_hide)
+        def on_show(icon, item):
+            self.root.after(0, self.show_all)
 
         def on_claude(icon, item):
             self.root.after(0, self._open_claude)
@@ -3343,7 +3345,8 @@ class BuniManager:
         icon = pystray.Icon('Buni', make_icon(), 'Buni', pystray.Menu(
             pystray.MenuItem('⚡ 전체 허용 모드 켜짐 — 클릭하여 끄기',
                               on_disable_always_approve, visible=_any_always_approve),
-            pystray.MenuItem(_toggle_title, on_toggle, default=True),
+            pystray.MenuItem('부니 숨기기',   on_hide, default=True),
+            pystray.MenuItem('부니 불러오기', on_show),
             pystray.MenuItem('Claude 열기',   on_claude),
             pystray.MenuItem('단축키 설정...', on_settings),
             pystray.MenuItem('위치 초기화',    on_reset),
