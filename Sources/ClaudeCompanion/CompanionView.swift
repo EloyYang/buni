@@ -108,6 +108,13 @@ struct CompanionView: View {
                             }
                         }
                     }
+                    if let targets = ctrl.onListSwitchTargets?(), !targets.isEmpty {
+                        Menu("다른 세션으로 전환") {
+                            ForEach(targets) { t in
+                                Button(t.label) { ctrl.onSwitchSessionRequest?(t.id) }
+                            }
+                        }
+                    }
                     Divider()
                     Button(ctrl.memo.isEmpty ? "메모 추가..." : "메모 편집...") {
                         ctrl.onEditMemoRequest?()

@@ -13,6 +13,12 @@ enum CompanionState: Equatable {
     case completed      // 응답 완료 알림 (잠깐 표시 후 ready로)
 }
 
+/// 우클릭 메뉴 "다른 세션으로 전환"에 나열되는 항목 — id는 Claude 세션 UUID
+struct SessionSwitchTarget: Identifiable {
+    let id: String
+    let label: String
+}
+
 class CompanionController: ObservableObject {
     @Published var state: CompanionState = .idle
     @Published var usagePercent: Double = 0      // 컨텍스트 창 사용률 (내부용)
@@ -75,6 +81,10 @@ class CompanionController: ObservableObject {
     var onOpenSettingsRequest: (() -> Void)?
     var onShowStatusBarRequest: (() -> Void)?
     var onEditMemoRequest: (() -> Void)?
+    /// 다른 세션으로 전환 요청 — 대상 세션 id
+    var onSwitchSessionRequest: ((String) -> Void)?
+    /// 전환 가능한 다른 세션 목록 (우클릭 메뉴가 열릴 때마다 호출)
+    var onListSwitchTargets: (() -> [SessionSwitchTarget])?
     /// 완료 버블 확인 버튼 클릭 시 세션 제거 요청
     var onDismissCompleted: (() -> Void)?
 

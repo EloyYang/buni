@@ -4,7 +4,9 @@ import Combine
 
 /// 하나의 Claude 세션에 대응하는 부니 패널 + 컨트롤러 + 이벤트 모니터
 class SessionWindow {
-    let sessionId: String
+    /// 다른 세션으로 전환(rebind)하면 바뀔 수 있어 var — 패널·슬롯은 그대로 두고
+    /// 표시하는 세션만 바꾼다
+    private(set) var sessionId: String
 
     /// 화면 위치 슬롯 — 0이 최상단, 이후 아래로 쌓임 (panelHeight + 8px 간격)
     let slot: Int
@@ -44,6 +46,10 @@ class SessionWindow {
     /// 숨기고 자동 재표시를 끈다 (이 세션만 숨기면 isManuallyHidden과 어긋나
     /// 다른 상태 변화로 되살아나 버리는 문제가 있었음)
     var onGlobalHideRequest: (() -> Void)?
+    /// 다른 세션으로 전환 요청 (우클릭 메뉴 "다른 세션으로 전환") — 대상 세션 id 전달
+    var onSwitchSession: ((String) -> Void)?
+    /// 전환 가능한 다른 세션 목록 제공 — AppDelegate가 주입
+    var switchTargetsProvider: (() -> [SessionSwitchTarget])?
 
     init(sessionId: String, slot: Int, eventFile: String, savedOrigin: NSPoint? = nil) {
         self.sessionId    = sessionId
@@ -82,6 +88,56 @@ class SessionWindow {
         monitor.onSessionEnded = { [weak self] in
             DispatchQueue.main.async { self?.endSession() }
         }
+    }
+
+    // MARK: - 다른 세션으로 전환
+
+    /// 패널(위치·슬롯·NSPanel)은 그대로 두고 표시하는 세션만 바꾼다.
+    /// init과 동일한 순서로 캐릭터·메모·전체 허용을 새 세션 기준으로 다시 불러오고,
+    /// 이벤트 모니터를 새 파일로 교체해 새 세션의 실제 상태를 곧 반영하게 한다.
+    func rebind(to newSessionId: String, eventFile: String) {
+        guard newSessionId != sessionId else { return }
+
+        monitor.stop()
+        stopTitleSync()
+        sessionId = newSessionId
+
+        if let raw  = UserDefaults.standard.string(forKey: "character.session.\(sessionId)"),
+           let type = CharacterType(rawValue: raw) {
+            controller.character = type
+        } else if let raw  = UserDefaults.standard.string(forKey: "character.slot.\(slot)"),
+                  let type = CharacterType(rawValue: raw) {
+            controller.character = type
+        }
+
+        if UserDefaults.standard.object(forKey: "memo.session.\(sessionId)") != nil {
+            controller.memo       = UserDefaults.standard.string(forKey: "memo.session.\(sessionId)") ?? ""
+            controller.memoIsAuto = false
+        } else {
+            controller.memo       = UserDefaults.standard.string(forKey: "memo.slot.\(slot)") ?? ""
+            controller.memoIsAuto = true
+        }
+
+        if UserDefaults.standard.object(forKey: "alwaysApprove.session.\(sessionId)") != nil {
+            controller.alwaysApprove = UserDefaults.standard.bool(forKey: "alwaysApprove.session.\(sessionId)")
+        } else if UserDefaults.standard.object(forKey: "alwaysApprove.slot.\(slot)") != nil {
+            controller.alwaysApprove = UserDefaults.standard.bool(forKey: "alwaysApprove.slot.\(slot)")
+        } else {
+            controller.alwaysApprove = false
+        }
+
+        controller.pendingPermissionId = nil
+        controller.sessionStart = Date()
+        controller.update(to: .ready)
+
+        let newMonitor = EventMonitor(controller: controller, eventFile: eventFile)
+        newMonitor.onSessionEnded = { [weak self] in
+            DispatchQueue.main.async { self?.endSession() }
+        }
+        monitor = newMonitor
+        monitor.start()
+        startTitleSync()
+        onRebuildMenu?()
     }
 
     // MARK: - Lifecycle
@@ -329,6 +385,8 @@ class SessionWindow {
         controller.onOpenSettingsRequest  = { [weak self] in self?.onOpenSettings?() }
         controller.onShowStatusBarRequest = { [weak self] in self?.onShowStatusBar?() }
         controller.onEditMemoRequest      = { [weak self] in self?.showMemoEditDialog() }
+        controller.onSwitchSessionRequest = { [weak self] targetId in self?.onSwitchSession?(targetId) }
+        controller.onListSwitchTargets    = { [weak self] in self?.switchTargetsProvider?() ?? [] }
 
         // 메모 변경 시 세션 UUID + 슬롯 키 모두 저장 (슬롯 키로 다음 세션에 복원)
         controller.$memo
@@ -381,6 +439,8 @@ class SessionWindow {
                                           forKey: "character.session.\(self.sessionId)")
                 UserDefaults.standard.set(type.rawValue,
                                           forKey: "character.slot.\(self.slot)")
+                // 직접 바꾼 캐릭터도 "최근 사용" 취급 — 다음 새 세션의 기본값이 된다
+                UserDefaults.standard.set(type.rawValue, forKey: "character.lastUsed")
             }
             .store(in: &cancellables)
 

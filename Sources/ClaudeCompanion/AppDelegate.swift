@@ -258,12 +258,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let slot = nextAvailableSlot()
 
-        // 캐릭터 우선순위: 세션 UUID 저장값(충돌 없을 때) → 슬롯 저장값(충돌 없을 때) → pickCharacter
+        // 캐릭터 우선순위: 세션 UUID 저장값(충돌 없을 때) → 가장 최근 세션에서 쓰던 캐릭터
+        // (충돌 없을 때) → 슬롯 저장값(충돌 없을 때) → pickCharacter.
         // 이미 활성 세션이 같은 캐릭터를 사용 중이면 저장값 무시하고 새 캐릭터 배정
         let inUse = Set(sessions.values.map { $0.controller.character })
         let characterToUse: CharacterType
         if let raw  = UserDefaults.standard.string(forKey: "character.session.\(id)"),
            let type = CharacterType(rawValue: raw), !inUse.contains(type) {
+            characterToUse = type
+        } else if let raw  = UserDefaults.standard.string(forKey: "character.lastUsed"),
+                  let type = CharacterType(rawValue: raw), !inUse.contains(type) {
             characterToUse = type
         } else if let raw  = UserDefaults.standard.string(forKey: "character.slot.\(slot)"),
                   let type = CharacterType(rawValue: raw), !inUse.contains(type) {
@@ -272,6 +276,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             characterToUse = pickCharacter(for: id)
         }
         UserDefaults.standard.set(characterToUse.rawValue, forKey: "character.session.\(id)")
+        UserDefaults.standard.set(characterToUse.rawValue, forKey: "character.lastUsed")
 
         let origin = slot == 0 ? savedOrigin : nil
         let win = SessionWindow(sessionId: id, slot: slot,
@@ -328,6 +333,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         win.onRebuildMenu   = { [weak self] in self?.rebuildMenu() }
         win.shouldAutoShow  = { [weak self] in !(self?.isManuallyHidden ?? false) }
         win.onGlobalHideRequest = { [weak self] in self?.hideAll() }
+        win.onSwitchSession = { [weak self, weak win] targetId in
+            guard let self, let win else { return }
+            self.switchSession(win, to: targetId)
+        }
+        win.switchTargetsProvider = { [weak self, weak win] in
+            guard let self, let win else { return [] }
+            return self.sessions.compactMap { (sid, w) -> SessionSwitchTarget? in
+                guard sid != win.sessionId else { return nil }
+                let label = w.controller.memo.isEmpty ? "세션 \(w.slot + 1)" : w.controller.memo
+                return SessionSwitchTarget(id: sid, label: label)
+            }.sorted { $0.label < $1.label }
+        }
         win.onSessionEnded  = { [weak self] in
             DispatchQueue.main.async { self?.removeSession(id: win.sessionId) }
         }
@@ -338,6 +355,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard win.slot == 0 else { return }
             self?.savedOrigin = origin
         }
+    }
+
+    /// 패널(위치·화면상 자리)은 그대로 두고 표시하는 세션만 다른 세션과 맞바꾼다.
+    /// 대상 세션도 자기 패널이 있어야만 우클릭 메뉴에 나열되므로 항상 맞바꾸기다
+    /// — 어느 세션도 패널을 잃지 않는다.
+    private func switchSession(_ win: SessionWindow, to targetId: String) {
+        let sourceId = win.sessionId
+        guard sourceId != targetId, let targetWin = sessions[targetId] else { return }
+
+        let sourceFile = "/tmp/claude-companion-events-\(sourceId).jsonl"
+        let targetFile = "/tmp/claude-companion-events-\(targetId).jsonl"
+
+        sessions.removeValue(forKey: sourceId)
+        sessions.removeValue(forKey: targetId)
+
+        win.rebind(to: targetId, eventFile: targetFile)
+        targetWin.rebind(to: sourceId, eventFile: sourceFile)
+
+        sessions[targetId] = win
+        sessions[sourceId] = targetWin
+        slotOwner[win.slot]      = targetId
+        slotOwner[targetWin.slot] = sourceId
+        if let i = sessionOrder.firstIndex(of: sourceId) { sessionOrder[i] = targetId }
+        if let i = sessionOrder.firstIndex(of: targetId) { sessionOrder[i] = sourceId }
+
+        rebuildMenu()
     }
 
     /// 비활동 타임아웃으로 자동 종료된 세션 제거 — ignoredSessionIds에 추가하지 않아 재탐지 허용
