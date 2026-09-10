@@ -87,6 +87,11 @@ struct CompanionView: View {
                             ctrl.onPanelDragEnd?()
                         }
                 )
+                // macOS SwiftUI의 .contextMenu는 동적(ForEach 등) 서브메뉴 내용이 한 번
+                // 만들어진 뒤 안 바뀌는 경우가 있어(NSMenu 캐싱 문제로 보임), 전환 대상
+                // 목록이 바뀔 때마다 뷰 자체를 새로 만들도록 강제해 메뉴가 항상 다시
+                // 지어지게 한다.
+                .id(ctrl.switchTargets.map(\.id).joined(separator: ","))
                 .contextMenu {
                     Button("숨기기") { ctrl.onHideRequest?() }
                     Button("메뉴바 아이콘 표시") { ctrl.onShowStatusBarRequest?() }
