@@ -108,9 +108,9 @@ struct CompanionView: View {
                             }
                         }
                     }
-                    if let targets = ctrl.onListSwitchTargets?(), !targets.isEmpty {
+                    if !ctrl.switchTargets.isEmpty {
                         Menu("다른 세션으로 전환") {
-                            ForEach(targets) { t in
+                            ForEach(ctrl.switchTargets) { t in
                                 Button(t.label) { ctrl.onSwitchSessionRequest?(t.id) }
                             }
                         }

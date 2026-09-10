@@ -83,8 +83,11 @@ class CompanionController: ObservableObject {
     var onEditMemoRequest: (() -> Void)?
     /// 다른 세션으로 전환 요청 — 대상 세션 id
     var onSwitchSessionRequest: ((String) -> Void)?
-    /// 전환 가능한 다른 세션 목록 (우클릭 메뉴가 열릴 때마다 호출)
-    var onListSwitchTargets: (() -> [SessionSwitchTarget])?
+    /// 전환 가능한 다른 세션 목록. AppDelegate가 세션 추가/제거/전환마다 갱신한다.
+    /// 우클릭 메뉴 closure 안에서 직접 함수를 호출하는 방식은 SwiftUI가 의존성으로
+    /// 추적하지 못해, 세션이 새로 생겨도 먼저 열어본 적 있는 메뉴는 안 갱신되는
+    /// 문제가 있었음 — @Published로 바꿔 항상 최신 상태가 반영되게 한다.
+    @Published var switchTargets: [SessionSwitchTarget] = []
     /// 완료 버블 확인 버튼 클릭 시 세션 제거 요청
     var onDismissCompleted: (() -> Void)?
 

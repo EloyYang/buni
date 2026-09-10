@@ -48,8 +48,6 @@ class SessionWindow {
     var onGlobalHideRequest: (() -> Void)?
     /// 다른 세션으로 전환 요청 (우클릭 메뉴 "다른 세션으로 전환") — 대상 세션 id 전달
     var onSwitchSession: ((String) -> Void)?
-    /// 전환 가능한 다른 세션 목록 제공 — AppDelegate가 주입
-    var switchTargetsProvider: (() -> [SessionSwitchTarget])?
 
     init(sessionId: String, slot: Int, eventFile: String, savedOrigin: NSPoint? = nil) {
         self.sessionId    = sessionId
@@ -386,7 +384,6 @@ class SessionWindow {
         controller.onShowStatusBarRequest = { [weak self] in self?.onShowStatusBar?() }
         controller.onEditMemoRequest      = { [weak self] in self?.showMemoEditDialog() }
         controller.onSwitchSessionRequest = { [weak self] targetId in self?.onSwitchSession?(targetId) }
-        controller.onListSwitchTargets    = { [weak self] in self?.switchTargetsProvider?() ?? [] }
 
         // 메모 변경 시 세션 UUID + 슬롯 키 모두 저장 (슬롯 키로 다음 세션에 복원)
         controller.$memo

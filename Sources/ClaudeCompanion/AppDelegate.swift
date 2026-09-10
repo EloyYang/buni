@@ -337,14 +337,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, let win else { return }
             self.switchSession(win, to: targetId)
         }
-        win.switchTargetsProvider = { [weak self, weak win] in
-            guard let self, let win else { return [] }
-            return self.sessions.compactMap { (sid, w) -> SessionSwitchTarget? in
-                guard sid != win.sessionId else { return nil }
-                let label = w.controller.memo.isEmpty ? "세션 \(w.slot + 1)" : w.controller.memo
-                return SessionSwitchTarget(id: sid, label: label)
-            }.sorted { $0.label < $1.label }
-        }
         win.onSessionEnded  = { [weak self] in
             DispatchQueue.main.async { self?.removeSession(id: win.sessionId) }
         }
@@ -354,6 +346,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         win.onSaveOrigin = { [weak self] origin in
             guard win.slot == 0 else { return }
             self?.savedOrigin = origin
+        }
+    }
+
+    /// 모든 세션 창의 "다른 세션으로 전환" 목록을 다시 계산해 반영한다.
+    /// 세션 추가·제거·전환마다 호출 — 우클릭 메뉴가 항상 최신 목록을 보여주게 한다.
+    private func refreshSwitchTargets() {
+        for (sid, win) in sessions {
+            win.controller.switchTargets = sessions.compactMap { (otherSid, otherWin) -> SessionSwitchTarget? in
+                guard otherSid != sid else { return nil }
+                let label = otherWin.controller.memo.isEmpty ? "세션 \(otherWin.slot + 1)" : otherWin.controller.memo
+                return SessionSwitchTarget(id: otherSid, label: label)
+            }.sorted { $0.label < $1.label }
         }
     }
 
@@ -437,6 +441,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func rebuildMenu() {
         syncHotkeyPermissionState()
+        refreshSwitchTargets()
         let menu = NSMenu()
 
         if let ver = availableUpdate {
