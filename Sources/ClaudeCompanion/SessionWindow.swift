@@ -248,11 +248,7 @@ class SessionWindow {
         panel?.orderFrontRegardless()
 
         controller.isSliding = true
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration       = 0.85
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel?.animator().setFrame(targetFrame, display: true)
-        } completionHandler: {
+        hoppingSlide(from: startFrame, to: targetFrame, hops: 3, hopHeight: 22, perHopDuration: 0.28) {
             self.controller.isSliding = false
             self.updateMousePassthrough()
         }
@@ -273,17 +269,58 @@ class SessionWindow {
         guard let panel = panel, let screen = NSScreen.main else { completion(); return }
         guard !controller.isSliding else { completion(); return }
         controller.isSliding = true
+        let startFrame = panel.frame
         let exitFrame = NSRect(x: screen.visibleFrame.maxX,
                                y: panel.frame.origin.y,
                                width: panelWidth, height: panelHeight)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration       = 0.55
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            panel.animator().setFrame(exitFrame, display: true)
-        } completionHandler: {
+        hoppingSlide(from: startFrame, to: exitFrame, hops: 2, hopHeight: 18, perHopDuration: 0.28) {
             self.controller.isSliding = false
             completion()
         }
+    }
+
+    /// 토끼가 깡총깡총 뛰어서 이동하는 것처럼, 목표 지점까지 가로로 이동하는 동안
+    /// 위아래로 여러 번 튀어 오르는(포물선) 애니메이션. y는 매 홉마다 baseY로 착지해
+    /// 마지막엔 targetFrame과 정확히 일치한다.
+    private func hoppingSlide(from startFrame: NSRect, to targetFrame: NSRect,
+                               hops: Int, hopHeight: CGFloat,
+                               perHopDuration: TimeInterval,
+                               completion: @escaping () -> Void) {
+        guard let panel = panel, hops > 0 else {
+            self.panel?.setFrame(targetFrame, display: true)
+            completion()
+            return
+        }
+        let baseY = targetFrame.origin.y
+        let dx = targetFrame.origin.x - startFrame.origin.x
+
+        func doHop(_ index: Int, currentX: CGFloat) {
+            guard index < hops else {
+                panel.setFrame(targetFrame, display: true)
+                completion()
+                return
+            }
+            let nextX = startFrame.origin.x + dx * CGFloat(index + 1) / CGFloat(hops)
+            let midX  = (currentX + nextX) / 2
+            let riseFrame = NSRect(x: midX, y: baseY + hopHeight,
+                                   width: targetFrame.width, height: targetFrame.height)
+            let landFrame = NSRect(x: nextX, y: baseY,
+                                   width: targetFrame.width, height: targetFrame.height)
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration       = perHopDuration * 0.45
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().setFrame(riseFrame, display: true)
+            } completionHandler: {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration       = perHopDuration * 0.55
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                    panel.animator().setFrame(landFrame, display: true)
+                } completionHandler: {
+                    doHop(index + 1, currentX: nextX)
+                }
+            }
+        }
+        doHop(0, currentX: startFrame.origin.x)
     }
 
     // MARK: - Position
