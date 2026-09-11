@@ -473,6 +473,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "단축키 설정...",
                                 action: #selector(openSettings), keyEquivalent: ","))
 
+        let focusItem = NSMenuItem(title: "딴짓 금지모드 (대기 중 화면 돌아다니기)",
+                                   action: #selector(toggleFocusMode), keyEquivalent: "")
+        focusItem.state = FocusModeStore.shared.enabled ? .on : .off
+        menu.addItem(focusItem)
+
         let loginItem = NSMenuItem(title: "부팅 시 자동 실행",
                                    action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.state = isLaunchAtLoginEnabled ? .on : .off
@@ -568,6 +573,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 부팅 시 자동 실행
 
     private var isLaunchAtLoginEnabled: Bool { SMAppService.mainApp.status == .enabled }
+
+    // MARK: - 딴짓 금지 모드
+
+    @objc private func toggleFocusMode() {
+        FocusModeStore.shared.enabled.toggle()
+        rebuildMenu()
+    }
 
     @objc private func toggleLaunchAtLogin() {
         do {

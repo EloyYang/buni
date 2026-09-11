@@ -27,6 +27,11 @@ class SessionWindow {
     private var dragMonitor:  Any?
     private var mouseMonitor: Any?
 
+    /// 딴짓 금지 모드 — 대기 중일 때 화면을 돌아다니는 상태
+    private var focusModeCancellable: AnyCancellable?
+    private var wanderWorkItem: DispatchWorkItem?
+    private var isWandering = false
+
     /// 세션 이름 → 메모 자동 연동용 폴링
     private var titleSyncTimer: DispatchSourceTimer?
     private let titleQueue = DispatchQueue(label: "buni.session.title", qos: .utility)
@@ -145,6 +150,7 @@ class SessionWindow {
         setupPanel()
         setupControllerCallbacks()
         setupMousePassthrough()
+        setupFocusMode()
         startTitleSync()
         monitor.start()
         DispatchQueue.main.async {
@@ -158,6 +164,8 @@ class SessionWindow {
         monitor.stop()
         stopTitleSync()
         removeMouseMonitors()
+        wanderWorkItem?.cancel(); wanderWorkItem = nil
+        focusModeCancellable?.cancel()
         DispatchQueue.main.async { [weak self] in
             self?.slideOut { self?.panel?.orderOut(nil) }
         }
@@ -350,6 +358,73 @@ class SessionWindow {
         let origin = slottedOrigin(base: base)
         return NSRect(x: screen.visibleFrame.maxX, y: origin.y,
                       width: panelWidth, height: panelHeight)
+    }
+
+    // MARK: - 딴짓 금지 모드 (대기 중일 때 화면을 돌아다니며 주의 끌기)
+
+    /// 전역 켜짐/꺼짐 상태(FocusModeStore)와 세션 상태를 함께 구독해,
+    /// "대기(ready) 상태 + 모드 켜짐"일 때만 돌아다니게 한다.
+    private func setupFocusMode() {
+        focusModeCancellable = Publishers.CombineLatest(FocusModeStore.shared.$enabled, controller.$state)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled, state in
+                self?.updateFocusMode(enabled: enabled, state: state)
+            }
+    }
+
+    private func updateFocusMode(enabled: Bool, state: CompanionState) {
+        let shouldWander = enabled && state == .ready
+        guard shouldWander != isWandering else { return }
+        isWandering = shouldWander
+        if shouldWander {
+            scheduleWander()
+        } else {
+            wanderWorkItem?.cancel()
+            wanderWorkItem = nil
+            returnToAssignedPosition()
+        }
+    }
+
+    private func scheduleWander() {
+        guard isWandering else { return }
+        let delay = Double.random(in: 4.0...8.0)
+        let work = DispatchWorkItem { [weak self] in self?.performWanderStep() }
+        wanderWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func performWanderStep() {
+        guard isWandering else { return }
+        guard !isDragging, let panel = panel, panel.isVisible,
+              !controller.isSliding, let screen = NSScreen.main else {
+            scheduleWander()   // 조건이 안 맞으면 잠시 후 다시 시도
+            return
+        }
+        let vf   = screen.visibleFrame
+        let maxX = vf.maxX - panelWidth
+        let maxY = vf.maxY - panelHeight
+        guard maxX > vf.minX, maxY > vf.minY else { scheduleWander(); return }
+        let target = NSRect(x: CGFloat.random(in: vf.minX...maxX),
+                            y: CGFloat.random(in: vf.minY...maxY),
+                            width: panelWidth, height: panelHeight)
+        controller.isSliding = true
+        hoppingSlide(from: panel.frame, to: target, hops: 2, hopHeight: 16, perHopDuration: 0.26) { [weak self] in
+            guard let self else { return }
+            self.controller.isSliding = false
+            self.updateMousePassthrough()
+            self.scheduleWander()
+        }
+    }
+
+    /// 모드가 꺼지거나 세션이 다시 진행 상태가 되면 원래 지정된 자리(슬롯 위치)로 복귀
+    private func returnToAssignedPosition() {
+        guard let panel = panel, panel.isVisible, !isDragging, let screen = NSScreen.main else { return }
+        controller.isSliding = true
+        hoppingSlide(from: panel.frame, to: activeFrame(screen: screen),
+                     hops: 2, hopHeight: 16, perHopDuration: 0.26) { [weak self] in
+            self?.controller.isSliding = false
+            self?.updateMousePassthrough()
+        }
     }
 
     private func animatePanel(isIdle: Bool) {
