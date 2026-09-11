@@ -5,6 +5,7 @@ private struct ClaudeEvent: Decodable {
     let type: String
     let tool: String?
     let message: String?
+    let count: Int?
     let percent: Double?
     let id: String?
     let sessionStartTs: String?
@@ -276,6 +277,17 @@ class EventMonitor {
             let work = DispatchWorkItem { [weak self] in self?.controller.update(to: .completed) }
             pendingCompletionWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + completionDebounceSeconds, execute: work)
+
+        case "background":
+            // Stop 훅이 왔지만 run_in_background로 띄운 작업이 아직 돌고 있는 경우 —
+            // 완료가 아니라 "백그라운드 작업 중"으로 표시. 대기 중이던 완료 표시도 취소.
+            if isReplaying { break }
+            pendingTools = 0
+            pendingCompletionWork?.cancel(); pendingCompletionWork = nil
+            let count = event.count ?? 1
+            let base  = event.message ?? "백그라운드 작업"
+            let label = count > 1 ? "\(base) 외 \(count - 1)건" : base
+            controller.update(to: .backgroundWork("⏳ \(label)"))
         case "notification":
             let notifStale = event.ts.map { Date().timeIntervalSince1970 - $0 > 30 } ?? true
             if isReplaying && notifStale { break }

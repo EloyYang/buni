@@ -407,9 +407,10 @@ struct CompanionView: View {
         case .thinking:              return "코딩중"
         case .toolUse(let name):     return name
         case .toolRead(let name):    return name
-        case .notification(let msg): return msg
-        case .permission, .completed: return nil
-        case .idle, .ready:          return nil
+        case .notification(let msg):     return msg
+        case .backgroundWork(let msg):   return msg
+        case .permission, .completed:    return nil
+        case .idle, .ready:              return nil
         }
     }
 

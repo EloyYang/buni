@@ -201,7 +201,7 @@ struct YellowRabbitCharacterView: View {
             withAnimation(.easeOut(duration: 0.30)) { showProp = false }
         }
         switch state {
-        case .thinking, .toolUse: break
+        case .thinking, .toolUse, .backgroundWork: break
         default: stopKnitting()
         }
         switch state {
@@ -213,7 +213,7 @@ struct YellowRabbitCharacterView: View {
         }
 
         switch state {
-        case .thinking, .toolUse:
+        case .thinking, .toolUse, .backgroundWork:
             startKnitting()
         case .toolRead:
             startReading()
@@ -265,7 +265,7 @@ struct YellowRabbitCharacterView: View {
     }
 
     private func stepKnitting() {
-        switch ctrl.state { case .thinking, .toolUse: break; default: return }
+        switch ctrl.state { case .thinking, .toolUse, .backgroundWork: break; default: return }
         knittingPhase.toggle()
         let base: CGFloat = p * 1.00; let swing: CGFloat = p * 0.60
         withAnimation(.easeInOut(duration: 0.46)) {

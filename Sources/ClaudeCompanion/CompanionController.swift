@@ -11,6 +11,7 @@ enum CompanionState: Equatable {
     case notification(String)
     case permission(String)
     case completed      // 응답 완료 알림 (잠깐 표시 후 ready로)
+    case backgroundWork(String)  // Stop 이후에도 계속 도는 백그라운드 작업 — 완료 아님
 }
 
 /// 우클릭 메뉴 "다른 세션으로 전환"에 나열되는 항목 — id는 Claude 세션 UUID

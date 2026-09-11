@@ -399,11 +399,30 @@ try:
     events_file = f"/tmp/claude-companion-events-{session_id}.jsonl"
     is_remote   = bool(os.environ.get("SSH_CLIENT") or os.environ.get("SSH_TTY"))
 
+    # 백그라운드 작업이 아직 돌고 있으면 완료가 아니라 "백그라운드 작업 중"으로 표시.
+    # Stop 훅은 클로드 응답 한 턴이 끝날 때마다 오는데, run_in_background로 띄운
+    # 작업은 그 뒤에도 계속 실행될 수 있어 완료 문구를 그대로 띄우면 오해를 준다.
+    running = [t for t in (d.get("background_tasks") or [])
+               if t.get("status") == "running"]
+
     if is_remote:
-        _send_tcp({"type": "done", "session_id": session_id})
+        if running:
+            desc = running[0].get("description") or running[0].get("command", "")
+            _send_tcp({"type": "background", "count": len(running),
+                       "message": desc[:80], "session_id": session_id})
+        else:
+            _send_tcp({"type": "done", "session_id": session_id})
     else:
         with open(events_file, "a") as f:
-            f.write('{"type":"done"}\n')
+            if running:
+                desc = running[0].get("description") or running[0].get("command", "")
+                f.write(json.dumps({
+                    "type": "background",
+                    "count": len(running),
+                    "message": desc[:80],
+                }) + "\n")
+            else:
+                f.write('{"type":"done"}\n')
 except Exception:
     pass
 """#
