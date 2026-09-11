@@ -27,7 +27,7 @@ class SessionWindow {
     private var dragMonitor:  Any?
     private var mouseMonitor: Any?
 
-    /// 딴짓 금지 모드 — 대기 중일 때 화면을 돌아다니는 상태
+    /// 집중모드 — 대기 중일 때 화면을 돌아다니는 상태
     private var focusModeCancellable: AnyCancellable?
     private var wanderWorkItem: DispatchWorkItem?
     private var isWandering = false
@@ -360,7 +360,7 @@ class SessionWindow {
                       width: panelWidth, height: panelHeight)
     }
 
-    // MARK: - 딴짓 금지 모드 (대기 중일 때 화면을 돌아다니며 주의 끌기)
+    // MARK: - 집중모드 (대기 중일 때 화면을 돌아다니며 주의 끌기)
 
     /// 전역 켜짐/꺼짐 상태(FocusModeStore)와 세션 상태를 함께 구독해,
     /// "대기(ready) 상태 + 모드 켜짐"일 때만 돌아다니게 한다.
