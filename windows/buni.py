@@ -424,7 +424,16 @@ def _run_hook(hook_type: str):
         emit({'type': 'tool_done'})
 
     elif hook_type == 'stop':
-        emit({'type': 'done'})
+        # 백그라운드 작업이 아직 돌고 있으면 완료가 아니라 "백그라운드 작업 중"으로
+        # 표시 — Stop 훅은 클로드 응답 한 턴이 끝날 때마다 오는데, run_in_background로
+        # 띄운 작업은 그 뒤에도 계속 실행될 수 있어 완료 문구를 그대로 띄우면 오해를 준다.
+        running = [t for t in (d.get('background_tasks') or [])
+                   if t.get('status') == 'running']
+        if running:
+            desc = running[0].get('description') or running[0].get('command', '')
+            emit({'type': 'background', 'count': len(running), 'message': desc[:80]})
+        else:
+            emit({'type': 'done'})
 
     elif hook_type == 'notification':
         msg = d.get('message', '알림')[:120]
@@ -1908,7 +1917,7 @@ class SessionWindow:
         self.wide_eyes = False
 
         # Stop animations that are no longer relevant
-        if new_state not in ('thinking', 'toolUse'):
+        if new_state not in ('thinking', 'toolUse', 'backgroundWork'):
             self._stop_laptop()
         if new_state != 'toolRead':
             self._stop_reading()
@@ -1947,6 +1956,11 @@ class SessionWindow:
             self._draw()
             self._bounce()
             self.win.after(5000, lambda: self._clear_msg_if(notif))
+
+        elif new_state == 'backgroundWork':
+            self.msg = notif
+            self._start_laptop()
+            self._draw()
 
         elif new_state == 'permission':
             self.wide_eyes = True
@@ -2637,7 +2651,7 @@ class SessionWindow:
         # (tool_use 후 tool_done 미도착)이면 이벤트가 없는 게 정상이므로 건드리지 않는다.
         if (self._pending_tools == 0 and
                 time.time() - self._last_event_time > 300 and
-                self.state not in ('idle', 'completed', 'permission', 'ask_user')):
+                self.state not in ('idle', 'completed', 'permission', 'ask_user', 'backgroundWork')):
             self._apply_state('idle')
 
         return True
@@ -2706,6 +2720,20 @@ class SessionWindow:
             self._completion_job = self.win.after(
                 self._completion_debounce_ms, self._show_completion_if_pending)
             # 자동 파일 삭제·세션 제거 없음 — 사용자가 숨기기 전까지 유지
+
+        elif t == 'background':
+            # Stop 훅은 왔지만 run_in_background로 띄운 작업이 아직 돌고 있는 경우 —
+            # 완료가 아니라 "백그라운드 작업 중"으로 표시. 대기 중이던 완료 표시도 취소.
+            if self._is_replaying:
+                return
+            self._pending_tools = 0
+            if self._completion_job:
+                self.win.after_cancel(self._completion_job)
+                self._completion_job = None
+            count = ev.get('count', 1)
+            base  = ev.get('message') or '백그라운드 작업'
+            label = f'{base} 외 {count - 1}건' if count > 1 else base
+            self._apply_state('backgroundWork', notif=f'⏳ {label}')
 
     def _show_completion_if_pending(self):
         self._completion_job = None
