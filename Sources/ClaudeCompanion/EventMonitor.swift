@@ -36,6 +36,13 @@ class EventMonitor {
     /// 훅이 누락되거나 세션이 조용히 끝났을 때 "도구 실행 중" 버블이 굳는 것을 방지.
     private let idleFallbackSeconds: TimeInterval = 300
 
+    /// "백그라운드 작업 중" 표시가 이 시간(초)만큼 갱신되지 않으면 대기로 되돌린다.
+    /// 훅에는 "백그라운드 작업이 끝났다"는 신호가 따로 없어(다음 Stop이 와야
+    /// background_tasks 최신 상태를 알 수 있음), 실제로는 끝났는데 문구만 계속
+    /// 남아있는 문제가 있었다. idleFallbackSeconds보다 짧게 잡아, 정보가 낡았다
+    /// 싶으면 "완료"로 단정하지 않고 그냥 조용한 대기 상태로 돌아간다.
+    private let backgroundWorkStaleSeconds: TimeInterval = 90
+
     /// done(Stop 훅) 이벤트는 클로드가 한 번 응답을 마칠 때마다 매번 오므로,
     /// 그대로 바로 "완료했어요!"를 띄우면 아직 세션이 안 끝났는데(예: 클로드가
     /// 곧바로 다음 턴을 이어가는 경우) 중간에 완료 문구가 떴다 사라지는 것처럼
@@ -180,12 +187,14 @@ class EventMonitor {
         // 진행 중인 작업이 없는데 작업 상태로 남아 있으면 대기 상태로 되돌린다.
         // 오래 걸리는 도구가 실행 중(tool_use 후 tool_done 미도착)이면 이벤트가
         // 없는 게 정상이므로 건드리지 않는다.
-        if pendingTools == 0, quietFor > idleFallbackSeconds {
+        if pendingTools == 0 {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 switch self.controller.state {
                 case .thinking, .toolUse, .toolRead:
-                    self.controller.update(to: .ready)
+                    if quietFor > self.idleFallbackSeconds { self.controller.update(to: .ready) }
+                case .backgroundWork:
+                    if quietFor > self.backgroundWorkStaleSeconds { self.controller.update(to: .ready) }
                 default:
                     break   // 완료·권한·알림 버블은 사용자가 확인해야 하므로 유지
                 }
