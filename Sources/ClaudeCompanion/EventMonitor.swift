@@ -35,6 +35,14 @@ class EventMonitor {
     /// 훅이 누락되거나 세션이 조용히 끝났을 때 "도구 실행 중" 버블이 굳는 것을 방지.
     private let idleFallbackSeconds: TimeInterval = 300
 
+    /// done(Stop 훅) 이벤트는 클로드가 한 번 응답을 마칠 때마다 매번 오므로,
+    /// 그대로 바로 "완료했어요!"를 띄우면 아직 세션이 안 끝났는데(예: 클로드가
+    /// 곧바로 다음 턴을 이어가는 경우) 중간에 완료 문구가 떴다 사라지는 것처럼
+    /// 보인다. 잠깐 대기했다가, 그사이 새 작업(thinking/tool_use)이 시작되면
+    /// 취소하고, 조용히 지나가면 그때 완료를 표시한다.
+    private var pendingCompletionWork: DispatchWorkItem?
+    private let completionDebounceSeconds: TimeInterval = 3.0
+
     /// done 이벤트 + 30초 무활동 시, 또는 90초 강제 타임아웃 시 호출
     var onSessionEnded: (() -> Void)?
 
@@ -97,6 +105,7 @@ class EventMonitor {
     func stop() {
         timer?.cancel();       timer = nil
         serverTimer?.cancel(); serverTimer = nil
+        pendingCompletionWork?.cancel(); pendingCompletionWork = nil
     }
 
     private func updateMonthlyTokens() {
@@ -222,6 +231,9 @@ class EventMonitor {
         case "tool_use":
             // 과거 이벤트 재생으로 이미 끝난 도구 실행이 되살아나는 것 방지
             if isReplaying { break }
+            // 새 작업이 시작됐으니 대기 중이던 "완료" 표시는 취소 — 아직 세션이
+            // 안 끝났는데 중간에 완료 문구가 떴다 사라지는 것 방지
+            pendingCompletionWork?.cancel(); pendingCompletionWork = nil
             pendingTools += 1
             let raw      = (event.tool ?? "tool").lowercased()
             let toolName = formatToolName(raw)
@@ -248,6 +260,7 @@ class EventMonitor {
             // 30초 이내의 이벤트는 replay 중에도 처리 — 새 세션 시작 시 토큰 소비 구간부터 모션 적용
             let isStale = event.ts.map { Date().timeIntervalSince1970 - $0 > 30 } ?? true
             if isReplaying && isStale { break }
+            pendingCompletionWork?.cancel(); pendingCompletionWork = nil
             pendingTools = 0   // 새 턴 시작 — 이전 턴에서 남은 카운트 정리
             switch controller.state {
             case .ready, .completed:
@@ -259,7 +272,10 @@ class EventMonitor {
         case "done":
             if isReplaying { break }   // 과거 done 재생 시 세션 조기 제거 방지
             pendingTools = 0
-            controller.update(to: .completed)
+            pendingCompletionWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.controller.update(to: .completed) }
+            pendingCompletionWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + completionDebounceSeconds, execute: work)
         case "notification":
             let notifStale = event.ts.map { Date().timeIntervalSince1970 - $0 > 30 } ?? true
             if isReplaying && notifStale { break }

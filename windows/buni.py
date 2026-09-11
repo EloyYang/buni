@@ -1119,6 +1119,12 @@ class SessionWindow:
         self._blink_job    = None
         self._idle_job     = None
         self._title_job    = None
+        # done(Stop 훅)은 클로드가 한 번 응답을 마칠 때마다 매번 와서, 그대로 바로
+        # "완료했어요!"를 띄우면 세션이 아직 안 끝났는데(곧바로 다음 턴이 이어지는
+        # 경우) 중간에 완료 문구가 떴다 사라지는 것처럼 보인다. 잠깐 기다렸다가
+        # 그 사이 새 작업이 시작되면 취소한다.
+        self._completion_job = None
+        self._completion_debounce_ms = 3000
         self._perm_win:        tk.Toplevel | None = None
         self._completion_win: tk.Toplevel | None = None
         self._ask_user_win:   tk.Toplevel | None = None
@@ -2653,6 +2659,10 @@ class SessionWindow:
             # 권한/확인 요청 중에는 도구 이벤트 무시 — 말풍선 겹침 방지
             if self.state in ('permission', 'ask_user'):
                 return
+            # 새 작업이 시작됐으니 대기 중이던 "완료" 표시는 취소
+            if self._completion_job:
+                self.win.after_cancel(self._completion_job)
+                self._completion_job = None
             self._pending_tools += 1
             tool_raw   = ev.get('tool', 'tool')
             label      = self._fmt_tool(tool_raw)
@@ -2680,6 +2690,9 @@ class SessionWindow:
             is_stale = (time.time() - ev.get('ts', 0) > 30) if 'ts' in ev else True
             if self._is_replaying and is_stale:
                 return
+            if self._completion_job:
+                self.win.after_cancel(self._completion_job)
+                self._completion_job = None
             self._pending_tools = 0   # 새 턴 시작 — 이전 턴에서 남은 카운트 정리
             if self.state in ('ready', 'completed'):
                 self._apply_state('thinking')
@@ -2688,8 +2701,16 @@ class SessionWindow:
             if self._is_replaying:
                 return   # 과거 done 재생 시 세션 조기 제거 방지
             self._pending_tools = 0
-            self._apply_state('completed')
+            if self._completion_job:
+                self.win.after_cancel(self._completion_job)
+            self._completion_job = self.win.after(
+                self._completion_debounce_ms, self._show_completion_if_pending)
             # 자동 파일 삭제·세션 제거 없음 — 사용자가 숨기기 전까지 유지
+
+    def _show_completion_if_pending(self):
+        self._completion_job = None
+        if not self._destroyed:
+            self._apply_state('completed')
 
         elif t == 'ask_user':
             if self._is_replaying:
@@ -2805,7 +2826,7 @@ class SessionWindow:
             return
         self._destroyed = True
         for job_attr in ('_laptop_job', '_reading_job', '_blink_job', '_idle_job',
-                          '_title_job', '_limit_job'):
+                          '_title_job', '_limit_job', '_completion_job'):
             job = getattr(self, job_attr, None)
             if job:
                 try: self.win.after_cancel(job)
