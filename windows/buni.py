@@ -1134,6 +1134,9 @@ class SessionWindow:
         # 그 사이 새 작업이 시작되면 취소한다.
         self._completion_job = None
         self._completion_debounce_ms = 3000
+        # "백그라운드 작업 중" 표시가 이만큼(초) 갱신되지 않으면 대기로 되돌린다.
+        # idle 폴백(300초)보다 짧게 잡아, 실제로는 끝났는데 문구만 남는 것을 방지.
+        self._background_stale_seconds = 90
         self._perm_win:        tk.Toplevel | None = None
         self._completion_win: tk.Toplevel | None = None
         self._ask_user_win:   tk.Toplevel | None = None
@@ -2649,10 +2652,16 @@ class SessionWindow:
         # 5분간 새 이벤트가 없으면 조용한 상태로 되돌린다 (훅 누락·조용히 끝난
         # 세션 등에 대한 안전망). 오래 걸리는 도구가 실행 중
         # (tool_use 후 tool_done 미도착)이면 이벤트가 없는 게 정상이므로 건드리지 않는다.
-        if (self._pending_tools == 0 and
-                time.time() - self._last_event_time > 300 and
-                self.state not in ('idle', 'completed', 'permission', 'ask_user', 'backgroundWork')):
-            self._apply_state('idle')
+        quiet_for = time.time() - self._last_event_time
+        if self._pending_tools == 0:
+            if (self.state not in ('idle', 'completed', 'permission', 'ask_user', 'backgroundWork')
+                    and quiet_for > 300):
+                self._apply_state('idle')
+            elif self.state == 'backgroundWork' and quiet_for > self._background_stale_seconds:
+                # 훅에는 "백그라운드 작업이 끝났다"는 신호가 따로 없어(다음 Stop이
+                # 와야 최신 상태를 알 수 있음), 오래 조용하면 정보가 낡았다고 보고
+                # "완료"로 단정하지 않고 조용한 대기 상태로 되돌린다.
+                self._apply_state('ready')
 
         return True
 
