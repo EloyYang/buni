@@ -2911,6 +2911,7 @@ class BuniManager:
         self._claude_not_running_streak = 0
         self._server_utilization: float | None = None
         self._server_resets_at:   datetime.datetime | None = None
+        self._tray_icon = None   # _start_tray()에서 채움 — 트레이 툴팁에 한도 표시용
 
         # ── 단축키 ─────────────────────────────────────────
         self._hotkey_mgr = GlobalHotkeyManager()
@@ -3273,6 +3274,13 @@ class BuniManager:
     def _broadcast_server_usage(self):
         for win in self.sessions.values():
             win.set_server_usage(self._server_utilization, self._server_resets_at)
+        # Windows 트레이는 macOS 메뉴바처럼 아이콘 옆에 상시 텍스트를 못 붙이므로
+        # (아이콘 하나뿐) 마우스를 올렸을 때 보이는 툴팁에 한도를 표시한다.
+        if self._tray_icon is not None and self._server_utilization is not None:
+            try:
+                self._tray_icon.title = f'Buni — 한도 {round(self._server_utilization)}%'
+            except Exception:
+                pass
 
     # ── 단축키 ────────────────────────────────────────────────
 
@@ -3411,6 +3419,7 @@ class BuniManager:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('종료',           on_quit),
         ))
+        self._tray_icon = icon
         threading.Thread(target=icon.run, daemon=True).start()
 
 
