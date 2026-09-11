@@ -50,7 +50,8 @@ LAP_SILVER = '#C2C2CC'  # silverCol rgb(0.76,0.76,0.80)
 LAP_HI     = '#E0E0EB'  # silverHi  rgb(0.88,0.88,0.92)
 LAP_DARK   = '#808089'  # silverDark rgb(0.50,0.50,0.54)
 LAP_MID    = '#A3A3AD'  # silverMid  rgb(0.64,0.64,0.68)
-LAP_APPLE  = '#EBEBF2'  # appleCol   rgb(0.92,0.92,0.95)
+LAP_CARROT = '#F28C2E'  # carrotCol  rgb(0.95,0.55,0.18)
+LAP_LEAF   = '#66B359'  # leafCol    rgb(0.40,0.70,0.35)
 
 # ── Document colors (from DocumentView.swift)
 DOC_PAPER  = '#EDE3C7'  # paperCol  rgb(0.93,0.89,0.78)
@@ -1546,11 +1547,27 @@ class SessionWindow:
         r(3.13, 3.80, 0.16, LAP_DARK)     # Keyboard front thickness
         r(2.82, 3.10, 0.13, '#909099')    # Key hint
         r(3.02, 1.00, 0.22, '#9090A0')    # Trackpad
-        # Apple logo (simplified)
-        lx = cx; ly = cy + P*1.42
-        self.cv.create_rectangle(lx - P*0.35, ly - P*0.55,
-                                  lx + P*0.35, ly + P*0.40,
-                                  fill=LAP_APPLE, outline='', tags='char')
+        # Carrot logo (macOS 사과 로고 패러디 — 한 입 베어먹은 당근)
+        def rl(ox, oy, w, h, color):
+            x = cx + P*ox
+            y = cy + P*1.42 + P*oy
+            self.cv.create_rectangle(x - P*w/2, y - P*h/2,
+                                      x + P*w/2, y + P*h/2,
+                                      fill=color, outline='', tags='char')
+
+        # 당근 꼭지 잎 (Canvas는 회전을 안 쓰므로 단순화한 세 갈래)
+        rl(-0.10, -0.56, 0.12, 0.28, LAP_LEAF)
+        rl( 0.10, -0.56, 0.12, 0.28, LAP_LEAF)
+        rl( 0.00, -0.52, 0.12, 0.24, LAP_LEAF)
+        # 당근 몸통 — 위가 넓고 아래로 갈수록 좁아지는 계단식
+        rl(0, -0.28, 0.52, 0.14, LAP_CARROT)
+        rl(0, -0.14, 0.46, 0.14, LAP_CARROT)
+        rl(0,  0.00, 0.40, 0.14, LAP_CARROT)
+        rl(0,  0.14, 0.32, 0.14, LAP_CARROT)
+        rl(0,  0.28, 0.22, 0.14, LAP_CARROT)
+        rl(0,  0.41, 0.12, 0.13, LAP_CARROT)
+        # 한 입 베어먹은 자국
+        rl(0.22, -0.20, 0.20, 0.18, LAP_SILVER)
 
     # ── Document ──────────────────────────────────────────────
 

@@ -10,7 +10,8 @@ struct LaptopView: View {
     private let silverHi   = Color(red: 0.88, green: 0.88, blue: 0.92)
     private let silverDark = Color(red: 0.50, green: 0.50, blue: 0.54)
     private let silverMid  = Color(red: 0.64, green: 0.64, blue: 0.68)
-    private let appleCol   = Color(red: 0.92, green: 0.92, blue: 0.95)
+    private let carrotCol  = Color(red: 0.95, green: 0.55, blue: 0.18)
+    private let leafCol    = Color(red: 0.40, green: 0.70, blue: 0.35)
 
     var body: some View {
         ZStack {
@@ -35,8 +36,8 @@ struct LaptopView: View {
             rect(w: 0.12, h: 2.15, c: silverDark.opacity(0.25))
                 .offset(x: p * 1.52, y: p * 1.48)
 
-            // ── Apple 로고 (뚜껑 중앙)
-            appleLogoView
+            // ── 당근 로고 (뚜껑 중앙, 맥북 사과 로고 패러디)
+            carrotLogoView
                 .offset(y: p * 1.42)
 
             // ── 힌지
@@ -61,29 +62,37 @@ struct LaptopView: View {
         }
     }
 
-    // MARK: - Apple 로고 (픽셀아트)
+    // MARK: - 당근 로고 (픽셀아트, 맥북 사과 로고 패러디 — 한 입 베어먹은 당근)
 
-    private var appleLogoView: some View {
+    private var carrotLogoView: some View {
         ZStack {
-            // 줄기
-            rect(w: 0.13, h: 0.22, c: appleCol)
-                .offset(x: p * 0.06, y: -p * 0.52)
-            // 잎
-            rect(w: 0.28, h: 0.15, c: appleCol)
-                .rotationEffect(.degrees(-28))
-                .offset(x: p * 0.20, y: -p * 0.50)
-            // 사과 상단
-            rect(w: 0.54, h: 0.32, c: appleCol)
-                .offset(y: -p * 0.20)
-            // 사과 중간 (가장 넓음)
-            rect(w: 0.70, h: 0.36, c: appleCol)
-                .offset(y:  p * 0.08)
-            // 사과 하단
-            rect(w: 0.54, h: 0.27, c: appleCol)
-                .offset(y:  p * 0.38)
+            // 당근 꼭지 잎 — 세 갈래
+            rect(w: 0.12, h: 0.28, c: leafCol)
+                .rotationEffect(.degrees(-20))
+                .offset(x: -p * 0.10, y: -p * 0.56)
+            rect(w: 0.12, h: 0.28, c: leafCol)
+                .rotationEffect(.degrees(20))
+                .offset(x:  p * 0.10, y: -p * 0.56)
+            rect(w: 0.12, h: 0.24, c: leafCol)
+                .offset(y: -p * 0.52)
+
+            // 당근 몸통 — 위가 넓고 아래로 갈수록 좁아지는 계단식 픽셀 형태
+            rect(w: 0.52, h: 0.14, c: carrotCol)
+                .offset(y: -p * 0.28)
+            rect(w: 0.46, h: 0.14, c: carrotCol)
+                .offset(y: -p * 0.14)
+            rect(w: 0.40, h: 0.14, c: carrotCol)
+                .offset(y:  p * 0.00)
+            rect(w: 0.32, h: 0.14, c: carrotCol)
+                .offset(y:  p * 0.14)
+            rect(w: 0.22, h: 0.14, c: carrotCol)
+                .offset(y:  p * 0.28)
+            rect(w: 0.12, h: 0.13, c: carrotCol)
+                .offset(y:  p * 0.41)
+
             // 한 입 베어먹은 자국
-            rect(w: 0.22, h: 0.20, c: silverCol)
-                .offset(x: p * 0.24, y: -p * 0.28)
+            rect(w: 0.20, h: 0.18, c: silverCol)
+                .offset(x: p * 0.22, y: -p * 0.20)
         }
     }
 
