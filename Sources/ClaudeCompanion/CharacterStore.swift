@@ -10,7 +10,6 @@ enum CharacterType: String, CaseIterable {
     case orangeRabbit = "orangeRabbit"
     case yellowRabbit = "yellowRabbit"
     case greenRabbit  = "greenRabbit"
-    case softRabbit   = "softRabbit"
 
     var displayName: String {
         switch self {
@@ -20,7 +19,6 @@ enum CharacterType: String, CaseIterable {
         case .orangeRabbit: return "주니 (주황토끼)"
         case .yellowRabbit: return "누니 (노란토끼)"
         case .greenRabbit:  return "우니 (연두토끼)"
-        case .softRabbit:   return "말니 (말랑토끼)"
         }
     }
 }

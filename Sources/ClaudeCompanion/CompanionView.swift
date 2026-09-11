@@ -177,7 +177,6 @@ struct CompanionView: View {
         case .orangeRabbit:  OrangeRabbitCharacterView()
         case .yellowRabbit:  YellowRabbitCharacterView()
         case .greenRabbit:   GreenRabbitCharacterView()
-        case .softRabbit:    SoftRabbitCharacterView()
         }
     }
 
