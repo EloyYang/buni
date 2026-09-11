@@ -429,15 +429,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Status bar
 
     private func setupStatusBar() {
-        // 아이콘 옆에 한도 퍼센트 글자를 같이 보여줘야 하므로 고정폭(squareLength)이
-        // 아니라 내용에 맞춰 늘어나는 가변폭으로 잡는다.
+        // 한도 퍼센트 글자를 아이콘 아래쪽에 같이 보여줘야 하므로 고정폭
+        // (squareLength)이 아니라 내용에 맞춰 늘어나는 가변폭으로 잡는다.
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
-            let icon = MenuBarIcon.make(size: 18)
+            // 메뉴바 높이가 고정(약 24pt)이라 아이콘+글자를 위아래로 쌓으려면
+            // 둘 다 작게 잡아야 잘림 없이 들어간다.
+            let icon = MenuBarIcon.make(size: 13)
             icon.isTemplate = true
             button.image = icon
             button.imageScaling = .scaleProportionallyDown
-            button.imagePosition = .imageLeft
+            button.imagePosition = .imageAbove   // 아이콘 위, 글자 아래
+            button.font = NSFont.systemFont(ofSize: 8, weight: .semibold)
             button.title = ""
         }
         rebuildMenu()
@@ -445,8 +448,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         startStatusBarUsagePolling()
     }
 
-    /// 메뉴바 아이콘 옆 한도(%) — 세션 유무와 무관하게 계정 전체의 5시간 한도를
-    /// 그대로 보여준다. EventMonitor가 5분마다 갱신하는 캐시 파일을 그대로 읽는다.
+    /// 메뉴바 아이콘 아래쪽 한도(%) — 세션 유무와 무관하게 계정 전체의 5시간
+    /// 한도를 그대로 보여준다. EventMonitor가 5분마다 갱신하는 캐시 파일을 그대로 읽는다.
     private func startStatusBarUsagePolling() {
         let t = DispatchSource.makeTimerSource(queue: .main)
         t.schedule(deadline: .now() + 30, repeating: .seconds(30))
@@ -463,7 +466,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.title = ""
             return
         }
-        button.title = " \(Int(pct.rounded()))%"
+        button.title = "\(Int(pct.rounded()))%"
     }
 
     private func rebuildMenu() {
