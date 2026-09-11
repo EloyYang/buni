@@ -473,7 +473,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "단축키 설정...",
                                 action: #selector(openSettings), keyEquivalent: ","))
 
-        let focusItem = NSMenuItem(title: "집중모드 (대기 중 화면 돌아다니기)",
+        let focusItem = NSMenuItem(title: "딴짓 방해모드",
                                    action: #selector(toggleFocusMode), keyEquivalent: "")
         focusItem.state = FocusModeStore.shared.enabled ? .on : .off
         menu.addItem(focusItem)
@@ -574,7 +574,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var isLaunchAtLoginEnabled: Bool { SMAppService.mainApp.status == .enabled }
 
-    // MARK: - 집중모드
+    // MARK: - 딴짓 방해모드
 
     @objc private func toggleFocusMode() {
         FocusModeStore.shared.enabled.toggle()
