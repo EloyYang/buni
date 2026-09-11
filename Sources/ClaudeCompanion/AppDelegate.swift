@@ -6,7 +6,6 @@ import Darwin
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    private var statusBarUsageTimer: DispatchSourceTimer?
     private let hotkeyMonitor = HotkeyMonitor()
     private var settingsWindow: NSWindow?
     private var cancellables = Set<AnyCancellable>()
@@ -429,37 +428,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Status bar
 
     private func setupStatusBar() {
-        // 아이콘 아래에 한도 게이지 바를 같이 그려야 하므로 고정폭(squareLength)이
-        // 아니라 내용에 맞춰 늘어나는 가변폭으로 잡는다.
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
-            button.imageScaling = .scaleProportionallyDown
             button.title = ""
+            let icon = MenuBarIcon.make(size: 18)
+            icon.isTemplate = true
+            button.image = icon
+            button.imageScaling = .scaleProportionallyDown
         }
         rebuildMenu()
-        refreshStatusBarUsage()
-        startStatusBarUsagePolling()
-    }
-
-    /// 메뉴바 아이콘 아래 한도 게이지 — 세션 유무와 무관하게 계정 전체의 5시간
-    /// 한도를 그대로 보여준다. EventMonitor가 5분마다 갱신하는 캐시 파일을 그대로 읽는다.
-    private func startStatusBarUsagePolling() {
-        let t = DispatchSource.makeTimerSource(queue: .main)
-        t.schedule(deadline: .now() + 30, repeating: .seconds(30))
-        t.setEventHandler { [weak self] in self?.refreshStatusBarUsage() }
-        t.resume()
-        statusBarUsageTimer = t
-    }
-
-    private func refreshStatusBarUsage() {
-        guard let button = statusItem?.button else { return }
-        let data = try? Data(contentsOf: URL(fileURLWithPath: "/tmp/claude-companion-plan-usage.json"))
-        let obj  = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-        let pct  = obj.flatMap { $0["utilization"] as? Double }
-
-        let icon = MenuBarIcon.makeWithGauge(percent: pct)
-        icon.isTemplate = true
-        button.image = icon
     }
 
     private func rebuildMenu() {
@@ -522,7 +499,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func downloadUpdate() { UpdateChecker.openReleasePage() }
 
     @objc private func hideStatusBar() {
-        statusBarUsageTimer?.cancel(); statusBarUsageTimer = nil
         NSStatusBar.system.removeStatusItem(statusItem!)
         statusItem = nil
         UserDefaults.standard.set(true, forKey: "statusBar.hidden")
