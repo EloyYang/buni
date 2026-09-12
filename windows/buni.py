@@ -549,9 +549,19 @@ def _tcp_event_server(manager: 'BuniManager'):
             break
 
 
+# VS Code 및 형제 에디터(Insiders, Cursor, VSCodium) — 사용자가 어느 걸 SSH
+# Remote에 쓰는지 알 수 없으니 설치돼 있는 건 다 패치한다.
+_VSCODE_VARIANT_DIR_NAMES = ['Code', 'Code - Insiders', 'Cursor', 'VSCodium']
+
+
 def _patch_vscode_settings():
-    """VS Code settings.json에 SSH RemoteForward 설정 자동 추가."""
-    vscode_dir = Path(os.environ.get('APPDATA', '')) / 'Code' / 'User'
+    """VS Code(및 형제 에디터) settings.json에 SSH RemoteForward 설정 자동 추가."""
+    appdata = Path(os.environ.get('APPDATA', ''))
+    for dir_name in _VSCODE_VARIANT_DIR_NAMES:
+        _patch_one_vscode_settings(appdata / dir_name / 'User')
+
+
+def _patch_one_vscode_settings(vscode_dir):
     if not vscode_dir.exists():
         return
     settings_path = vscode_dir / 'settings.json'

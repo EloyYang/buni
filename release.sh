@@ -75,17 +75,19 @@ gh release create "v$VERSION" \
 
 ---
 
-## 🔗 VS Code SSH Remote 지원
+## 🔗 VS Code SSH Remote 지원 (Cursor, VSCodium 포함)
 
-VS Code에서 SSH 원격 서버에 접속해 Claude Code를 사용할 경우, Buni 실행 시 VS Code \`settings.json\`이 **자동으로 설정**됩니다.
+VS Code(또는 Cursor, VSCodium)로 SSH 원격 서버에 접속해 Claude Code를 사용할 경우도 지원합니다.
 
-수동으로 추가하려면 VS Code \`settings.json\` (\`Cmd+Shift+P\` → *Preferences: Open User Settings (JSON)*) 에 아래 항목을 추가하세요:
+**로컬 쪽은 자동**: Buni 실행 시 설치된 VS Code 계열 에디터의 \`settings.json\`에 포트 포워딩(\`-R 58765:localhost:58765\`)이 자동으로 추가됩니다.
 
-\`\`\`json
-\"remote.SSH.extraArgs\": [\"-R\", \"58765:localhost:58765\"]
+**원격 호스트는 한 번만 직접 설치** (Buni는 데스크톱 전용이라 원격 서버에는 훅 스크립트만 필요):
+
+\`\`\`bash
+ssh <원격호스트> 'bash -s' < remote-install.sh
 \`\`\`
 
-이후 VS Code로 SSH 접속 시 원격 Claude Code 세션이 로컬 Buni에 자동으로 표시됩니다."
+이후 VS Code로 새로 SSH 접속해 \`claude\`를 실행하면 원격 세션이 로컬 Buni에 자동으로 표시됩니다."
 
 RELEASE_URL="https://github.com/EloyYang/buni/releases/tag/v$VERSION"
 echo "✓ 릴리즈 완료: $RELEASE_URL"

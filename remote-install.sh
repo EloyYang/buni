@@ -1,151 +1,51 @@
-import Foundation
+#!/usr/bin/env bash
+# Buni — SSH 원격 호스트용 훅 설치 스크립트
+#
+# VS Code(또는 Cursor 등)로 SSH Remote 접속해 그 원격 서버에서 Claude Code를
+# 돌릴 때, 로컬 Buni 앱이 원격 세션 상태를 받아보려면 "이 스크립트를 원격
+# 호스트에서 한 번" 실행해야 한다. 로컬 Buni(Mac/Windows)는 실행될 때
+# 자기 자신의 VS Code settings.json에 `remote.SSH.extraArgs`로 포트 포워딩
+# (-R 58765:localhost:58765)을 자동으로 추가해 두지만, 그건 로컬 절반일
+# 뿐이고 원격 호스트에 Claude Code 훅이 설치돼 있어야 이벤트가 애초에
+# 발생한다. Buni 앱 자체는 데스크톱용이라 원격 리눅스/맥 서버에서는 돌지
+# 않으므로, 훅 스크립트만 따로 이 파일로 배포한다.
+#
+# 사용법 (로컬 맥/윈도우 터미널에서, 파일을 원격에 복사할 필요 없이 바로 실행):
+#   ssh <원격호스트> 'bash -s' < remote-install.sh
+#
+# 또는 원격 호스트에 직접 올려서:
+#   scp remote-install.sh <원격호스트>:~/ && ssh <원격호스트> 'bash ~/remote-install.sh'
+#
+# 요구사항: 원격 호스트에 python3 (훅 스크립트 실행용, 대부분의 리눅스/맥에 기본 포함)
+set -e
 
-/// 앱 최초 실행 시 Claude Code 훅 스크립트를 ~/.claude/ 에 자동 설치하고
-/// ~/.claude/settings.json 에 hook 엔트리를 추가한다.
-/// 이미 설치된 경우 스킵 (멱등). 기존 스크립트 파일은 덮어쓰지 않아 사용자 커스터마이징을 보호.
-enum HookInstaller {
+HOOKS_DIR="$HOME/.claude"
+SETTINGS_FILE="$HOOKS_DIR/settings.json"
 
-    static func ensureInstalled() {
-        let fm = FileManager.default
-        let claudeDir = fm.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
-        let settingsURL = claudeDir.appendingPathComponent("settings.json")
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Buni — SSH 원격 훅 설치"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-        if !isInstalled(at: settingsURL) {
-            do {
-                try fm.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-                try writeScripts(to: claudeDir)
-                try patchSettings(at: settingsURL, hookDir: claudeDir.path)
-            } catch {
-                // 훅 설치 실패해도 Buni는 동작 — 무시
-            }
-        }
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "✗ python3을 찾을 수 없습니다. 원격 호스트에 python3을 설치한 뒤 다시 실행하세요."
+    exit 1
+fi
 
-        // VS Code SSH RemoteForward 설정은 매번 체크 (기존 설치 사용자 포함)
-        patchVSCodeSettings()
-    }
+mkdir -p "$HOOKS_DIR"
 
-    // MARK: - VS Code settings.json 패치
+write_script() {
+    local name="$1"
+    local dest="$HOOKS_DIR/$name"
+    if [ -f "$dest" ]; then
+        echo "· $name — 이미 있음, 건드리지 않음 (사용자 커스터마이징 보호)"
+        return
+    fi
+    cat > "$dest"
+    chmod 755 "$dest"
+    echo "✓ $name 설치됨"
+}
 
-    /// VS Code 및 형제 에디터(Insiders, Cursor, VSCodium)를 모두 찾아 각각 패치한다.
-    /// 사용자가 어느 걸 SSH Remote에 쓰는지 알 수 없으니 설치돼 있는 건 다 처리.
-    private static let vscodeVariantDirNames = ["Code", "Code - Insiders", "Cursor", "VSCodium"]
-
-    private static func patchVSCodeSettings() {
-        let appSupport = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support")
-        for dirName in vscodeVariantDirNames {
-            patchVSCodeSettings(userDir: appSupport.appendingPathComponent("\(dirName)/User"))
-        }
-    }
-
-    private static func patchVSCodeSettings(userDir vscodeDir: URL) {
-        guard FileManager.default.fileExists(atPath: vscodeDir.path) else { return }
-
-        let settingsURL = vscodeDir.appendingPathComponent("settings.json")
-
-        var settings: [String: Any]
-        if let data = try? Data(contentsOf: settingsURL),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            settings = json
-        } else {
-            settings = [:]
-        }
-
-        var args = settings["remote.SSH.extraArgs"] as? [String] ?? []
-
-        // 이미 설정돼 있으면 스킵 (args가 비어 있으면 0..<(count-1) 이 음수 범위가 되어 크래시하므로 가드)
-        if args.count >= 2 {
-            for i in 0..<(args.count - 1) where args[i] == "-R" {
-                if args[i + 1] == "58765:localhost:58765" { return }
-            }
-        }
-
-        args.append(contentsOf: ["-R", "58765:localhost:58765"])
-        settings["remote.SSH.extraArgs"] = args
-
-        guard let data = try? JSONSerialization.data(
-            withJSONObject: settings, options: [.prettyPrinted]) else { return }
-        try? data.write(to: settingsURL, options: .atomic)
-    }
-
-    // MARK: - 설치 여부 확인
-
-    private static func isInstalled(at settingsURL: URL) -> Bool {
-        guard let data = try? Data(contentsOf: settingsURL),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let hooks = json["hooks"] as? [String: Any],
-              let pre = hooks["PreToolUse"] as? [[String: Any]] else { return false }
-        return pre.contains { entry in
-            (entry["hooks"] as? [[String: Any]])?.contains { h in
-                (h["command"] as? String)?.contains("companion-pretool") == true
-            } ?? false
-        }
-    }
-
-    // MARK: - 스크립트 파일 작성
-
-    private static func writeScripts(to dir: URL) throws {
-        let scripts: [(String, String)] = [
-            ("companion-pretool.py",      pretoolScript),
-            ("companion-posttool.py",     posttoolScript),
-            ("companion-notification.py", notificationScript),
-            ("companion-stop.py",         stopScript),
-            ("companion-prompt.py",       promptScript),
-        ]
-        let fm = FileManager.default
-        for (name, content) in scripts {
-            let url = dir.appendingPathComponent(name)
-            if fm.fileExists(atPath: url.path) { continue }   // 기존 파일 보호
-            try content.write(to: url, atomically: true, encoding: .utf8)
-            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
-        }
-    }
-
-    // MARK: - settings.json 패치
-
-    private static func patchSettings(at url: URL, hookDir: String) throws {
-        var settings: [String: Any]
-        if let data = try? Data(contentsOf: url),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            settings = json
-        } else {
-            settings = [:]
-        }
-
-        func makeHook(_ script: String) -> [String: Any] {
-            ["type": "command", "command": "python3 \(hookDir)/\(script); exit 0"]
-        }
-
-        let additions: [(String, String)] = [
-            ("PreToolUse",       "companion-pretool.py"),
-            ("PostToolUse",      "companion-posttool.py"),
-            ("Notification",     "companion-notification.py"),
-            ("Stop",             "companion-stop.py"),
-            ("UserPromptSubmit", "companion-prompt.py"),
-        ]
-
-        var existing = settings["hooks"] as? [String: Any] ?? [:]
-        for (event, script) in additions {
-            let newEntry: [String: Any] = ["matcher": "", "hooks": [makeHook(script)]]
-            var prev = (existing[event] as? [[String: Any]] ?? [])
-                .filter { entry in
-                    !((entry["hooks"] as? [[String: Any]])?.contains { h in
-                        (h["command"] as? String)?.contains("companion-") == true
-                    } ?? false)
-                }
-            prev.append(newEntry)
-            existing[event] = prev
-        }
-        settings["hooks"] = existing
-
-        let data = try JSONSerialization.data(withJSONObject: settings,
-                                              options: [.prettyPrinted, .sortedKeys])
-        try data.write(to: url, options: .atomic)
-    }
-
-    // MARK: - 내장 스크립트
-
-    private static let pretoolScript = #"""
+write_script companion-pretool.py << 'PYEOF'
 #!/usr/bin/env python3
 import sys, json, os, uuid, time
 
@@ -311,9 +211,9 @@ try:
 
 except Exception:
     pass
-"""#
+PYEOF
 
-    private static let posttoolScript = #"""
+write_script companion-posttool.py << 'PYEOF'
 #!/usr/bin/env python3
 import sys, json, os
 
@@ -345,9 +245,9 @@ try:
             f.write('{"type":"tool_done"}\n')
 except Exception:
     pass
-"""#
+PYEOF
 
-    private static let notificationScript = #"""
+write_script companion-notification.py << 'PYEOF'
 #!/usr/bin/env python3
 import sys, json, os, time
 
@@ -382,9 +282,9 @@ try:
             f.write(json.dumps(event) + "\n")
 except Exception:
     pass
-"""#
+PYEOF
 
-    private static let stopScript = #"""
+write_script companion-stop.py << 'PYEOF'
 #!/usr/bin/env python3
 import sys, json, os
 
@@ -435,9 +335,9 @@ try:
                 f.write('{"type":"done"}\n')
 except Exception:
     pass
-"""#
+PYEOF
 
-    private static let promptScript = #"""
+write_script companion-prompt.py << 'PYEOF'
 #!/usr/bin/env python3
 import sys, json, os, time
 
@@ -471,5 +371,60 @@ try:
             f.write(json.dumps(event) + "\n")
 except Exception:
     pass
-"""#
-}
+PYEOF
+
+echo ""
+echo "▶ ~/.claude/settings.json 에 훅 등록 중..."
+
+python3 - "$SETTINGS_FILE" "$HOOKS_DIR" << 'PYEOF'
+import json, os, sys
+
+settings_path, hooks_dir = sys.argv[1], sys.argv[2]
+
+settings = {}
+if os.path.exists(settings_path):
+    try:
+        with open(settings_path) as f:
+            settings = json.load(f)
+    except Exception:
+        settings = {}
+
+def make_hook(script):
+    return {"type": "command", "command": f"python3 {hooks_dir}/{script}; exit 0"}
+
+additions = [
+    ("PreToolUse",       "companion-pretool.py"),
+    ("PostToolUse",      "companion-posttool.py"),
+    ("Notification",     "companion-notification.py"),
+    ("Stop",             "companion-stop.py"),
+    ("UserPromptSubmit", "companion-prompt.py"),
+]
+
+hooks = settings.get("hooks", {})
+for event, script in additions:
+    prev = [
+        entry for entry in hooks.get(event, [])
+        if not any("companion-" in h.get("command", "")
+                   for h in entry.get("hooks", []))
+    ]
+    prev.append({"matcher": "", "hooks": [make_hook(script)]})
+    hooks[event] = prev
+settings["hooks"] = hooks
+
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=2, sort_keys=True, ensure_ascii=False)
+
+print("✓ settings.json 업데이트 완료")
+PYEOF
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  ✅ 설치 완료!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "로컬 쪽도 준비됐는지 확인하세요:"
+echo "  1. 로컬 맥/윈도우에서 Buni 앱을 한 번 실행한 적 있어야 합니다"
+echo "     (VS Code settings.json에 remote.SSH.extraArgs 포트 포워딩이 자동 추가됨)"
+echo "  2. VS Code(Cursor 등)로 이 호스트에 새로 SSH 접속하세요"
+echo "     (이미 접속 중이었다면 포트 포워딩 설정 반영을 위해 재접속 필요)"
+echo "  3. 이 호스트에서 claude 명령을 실행하면 로컬 Buni에 자동으로 나타납니다"

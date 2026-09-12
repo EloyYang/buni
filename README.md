@@ -51,6 +51,36 @@ python install_hooks.py
 
 ---
 
+## SSH Remote 지원 (VS Code, Cursor 등)
+
+VS Code(또는 Cursor, VSCodium 등)로 원격 서버에 SSH 접속해 그 위에서 Claude
+Code를 돌릴 때도, 로컬 Buni에 세션이 똑같이 나타나게 할 수 있습니다.
+
+**1) 로컬 (맥/윈도우) — 자동으로 끝남**
+Buni를 한 번이라도 실행하면 설치돼 있는 VS Code 계열 에디터(Code, Code -
+Insiders, Cursor, VSCodium)의 `settings.json`에 `remote.SSH.extraArgs`로
+포트 포워딩(`-R 58765:localhost:58765`)이 자동으로 추가됩니다.
+
+**2) 원격 호스트 — 딱 한 번만 직접 실행**
+Buni 앱은 데스크톱 전용이라 원격 리눅스/맥 서버에서 돌릴 수 없어서, 원격
+쪽에는 훅 스크립트만 별도로 설치해야 합니다. 로컬 터미널에서:
+
+```bash
+ssh <원격호스트> 'bash -s' < remote-install.sh
+```
+
+(레포를 원격에 clone해뒀다면 원격에서 직접 `bash remote-install.sh`도 가능)
+
+**3) 새로 SSH 접속 후 사용**
+이미 접속 중이었다면 포트 포워딩이 반영되도록 VS Code에서 한 번 재접속한
+뒤, 원격 호스트에서 `claude`를 실행하면 로컬 Buni에 자동으로 나타납니다.
+
+> 원격 세션은 권한 요청 팝업 없이 자동 승인 상태로 상태만 보여줍니다
+> (생각중/도구사용/완료 등). SSH 서버에서 `AllowTcpForwarding`이 꺼져
+> 있으면 포트 포워딩 자체가 안 되니 관리자에게 확인하세요.
+
+---
+
 ## 기능
 
 ### 상태 애니메이션
