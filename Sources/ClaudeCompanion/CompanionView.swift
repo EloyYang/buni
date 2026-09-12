@@ -388,11 +388,14 @@ struct CompanionView: View {
     // MARK: - 메모 태그 (캐릭터 머리 위)
 
     private var memoTagView: some View {
+        // 세션 이름이 길면(자동 연동 메모) 끝없이 길어지는 대신 최대 2줄까지만
+        // 보여주고, 그래도 안 들어가면 말줄임표로 자연스럽게 자른다.
         Text(ctrl.memo)
             .font(.system(size: 10, weight: .semibold, design: .rounded))
             .foregroundColor(.white)
             .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(2)
+            .truncationMode(.tail)
             .frame(width: 66)
             .shadow(color: .black.opacity(0.60), radius: 2, x: 0, y: 1)
     }

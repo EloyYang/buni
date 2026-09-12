@@ -6,6 +6,7 @@ https://github.com/EloyYang/buni
 """
 import tkinter as tk
 from tkinter import simpledialog
+from tkinter import font as tkfont
 import threading
 import json, time, os, sys, math, glob, random, re, base64, shutil, uuid
 import ctypes, datetime, queue
@@ -668,6 +669,55 @@ def _set_click_through(hwnd: int, enable: bool) -> None:
     else:
         style = (style | WS_EX_LAYERED) & ~WS_EX_TRANSPARENT
     _u32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+
+
+# ── 메모 태그 텍스트 ──────────────────────────────────────────
+# Malgun Gothic은 같은 포인트 크기라도 macOS의 SF Rounded보다 시각적으로
+# 크게 보여서, 8pt로 한 단계 낮춰 macOS 10pt semibold rounded와 크기를 맞췄다.
+_memo_font_cache = None
+
+
+def _memo_font():
+    """tkinter.font.Font는 Tk 루트가 생긴 뒤에만 만들 수 있어 지연 생성 + 캐시."""
+    global _memo_font_cache
+    if _memo_font_cache is None:
+        _memo_font_cache = tkfont.Font(family='Malgun Gothic', size=8, weight='bold')
+    return _memo_font_cache
+
+
+def _wrap_memo_lines(text, font, max_width_px, max_lines=2):
+    """세션 이름이 길어져도 메모가 잘려 보이지 않도록, 단어 단위로 최대
+    max_lines줄까지 감싸고 그래도 넘치면 마지막 줄 끝을 잘라 … 를 붙인다."""
+    words = text.split()
+    if not words:
+        return []
+
+    lines, current, i = [], '', 0
+    while i < len(words) and len(lines) < max_lines:
+        w = words[i]
+        trial = f'{current} {w}'.strip()
+        if not current or font.measure(trial) <= max_width_px:
+            current = trial
+            i += 1
+        else:
+            lines.append(current)
+            current = ''
+    if len(lines) < max_lines and current:
+        lines.append(current)
+        current = ''
+
+    leftover_words = i < len(words)
+    last_too_wide  = bool(lines) and font.measure(lines[-1]) > max_width_px
+
+    if leftover_words or last_too_wide or current:
+        last = lines.pop() if lines else ''
+        if current:
+            last = f'{last} {current}'.strip() if last else current
+        while last and font.measure(last + '…') > max_width_px:
+            last = last[:-1].rstrip()
+        lines.append((last + '…') if last else '…')
+
+    return lines[:max_lines]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1662,16 +1712,28 @@ class SessionWindow:
 
     # ── Memo tag ──────────────────────────────────────────────
 
+    MEMO_MAX_WIDTH_PX = 70   # macOS memoTagView의 .frame(width: 66)와 맞춤
+    MEMO_MAX_LINES    = 2
+
     def _draw_memo(self):
         if not self.memo:
             return
-        cx  = CHAR_CX + self.body_dx
-        cy  = CHAR_CY + self.body_dy - P*7.0   # 귀 끝보다 넉넉히 위에 배치
-        font = ('Malgun Gothic', 9, 'bold')
-        self.cv.create_text(cx+1, cy+1, text=self.memo, anchor='center',
-                             font=font, fill='#999999', tags='memo')
-        self.cv.create_text(cx, cy, text=self.memo, anchor='center',
-                             font=font, fill='#FFFFFF', tags='memo')
+        cx   = CHAR_CX + self.body_dx
+        cy   = CHAR_CY + self.body_dy - P*7.0   # 귀 끝보다 넉넉히 위에 배치
+        font = _memo_font()
+        lines = _wrap_memo_lines(self.memo, font,
+                                  self.MEMO_MAX_WIDTH_PX, self.MEMO_MAX_LINES)
+        if not lines:
+            return
+        # 마지막 줄이 기존 단일 줄 위치(cy)에 오도록 하고, 앞 줄들은 위로 쌓는다
+        line_h = font.metrics('linespace')
+        n = len(lines)
+        for idx, line in enumerate(lines):
+            ly = cy - (n - 1 - idx) * line_h
+            self.cv.create_text(cx+1, ly+1, text=line, anchor='center',
+                                 font=font, fill='#999999', tags='memo')
+            self.cv.create_text(cx, ly, text=line, anchor='center',
+                                 font=font, fill='#FFFFFF', tags='memo')
 
     # ── Usage bar ─────────────────────────────────────────────
 
