@@ -461,9 +461,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 종료 감지) 숨겨졌을 때 "불러오기" 항목 자체가 안 보여서 — 그걸
         // 보이게 하려고 전체를 숨겼다가 다시 불러와야 하는 번거로움이 생김.
         // 항상 둘 다 보여주고 각각 명시적으로 동작하게 한다.
-        menu.addItem(NSMenuItem(title: "부니 숨기기",
+        menu.addItem(NSMenuItem(title: "전체 부니 숨기기",
                                 action: #selector(hideAllMenuAction), keyEquivalent: "h"))
-        menu.addItem(NSMenuItem(title: "부니 불러오기",
+        menu.addItem(NSMenuItem(title: "전체 부니 불러오기",
                                 action: #selector(showAllMenuAction), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Claude 열기",
                                 action: #selector(openClaude), keyEquivalent: "o"))
@@ -526,9 +526,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func hideAllMenuAction() { hideAll() }
     @objc private func showAllMenuAction() { showAll() }
 
-    /// 전체 숨김 — 패널 우클릭 메뉴의 "숨기기"와 메뉴바의 "부니 숨기기"가 공유.
+    /// 전체 숨김 — 메뉴바의 "전체 부니 숨기기".
     /// isManuallyHidden을 켜서, 이후 어떤 상태 변화나 새 Claude 세션이 와도
-    /// "부니 불러오기"를 누르기 전까지는 자동으로 다시 나타나지 않게 한다.
+    /// "전체 부니 불러오기"를 누르기 전까지는 자동으로 다시 나타나지 않게 한다.
     func hideAll() {
         isManuallyHidden = true
         sessions.values.forEach { $0.hideCompanion() }
