@@ -45,12 +45,13 @@ class SessionWindow {
     /// 슬롯 0이 드래그로 위치를 바꿀 때 저장 요청 (NSPoint(-1,-1) = 리셋)
     var onSaveOrigin:    ((NSPoint) -> Void)?
     var onRebuildMenu:   (() -> Void)?
-    /// 사용자가 직접 숨긴 상태가 아닐 때만 true — 활동 재개 시 자동 재표시 판단용
+    /// 전역(메뉴바) "부니 숨기기" 여부 — 활동 재개 시 자동 재표시 판단용
     var shouldAutoShow:  (() -> Bool)?
-    /// 패널 우클릭 메뉴의 "숨기기" — 메뉴바의 "부니 숨기기"와 동일하게 전체를
-    /// 숨기고 자동 재표시를 끈다 (이 세션만 숨기면 isManuallyHidden과 어긋나
-    /// 다른 상태 변화로 되살아나 버리는 문제가 있었음)
-    var onGlobalHideRequest: (() -> Void)?
+    /// 이 세션만 개별적으로 숨겨졌는지 — 패널 우클릭 "숨기기" 전용.
+    /// 전역 shouldAutoShow와 별개로 관리해, 이 캐릭터만 숨겨도 다른 세션이나
+    /// 상태 변화에 영향받지 않고, 상태가 바뀌어도 다시 저절로 나타나지 않는다.
+    /// showCompanion()이 호출되면(부니 불러오기 등) 자동으로 해제된다.
+    private var isManuallyHidden = false
     /// 다른 세션으로 전환 요청 (우클릭 메뉴 "다른 세션으로 전환") — 대상 세션 id 전달
     var onSwitchSession: ((String) -> Void)?
 
@@ -247,6 +248,8 @@ class SessionWindow {
     // MARK: - Show / Hide
 
     func showCompanion() {
+        // 명시적으로 다시 보이는 것이므로, 개별 숨김 상태였다면 해제한다
+        isManuallyHidden = false
         guard let screen = NSScreen.main else { return }
         guard panel?.isVisible != true, !controller.isSliding else { return }
 
@@ -271,6 +274,15 @@ class SessionWindow {
             panel.orderOut(nil); onRebuildMenu?(); return
         }
         slideOut { panel.orderOut(nil); self.onRebuildMenu?() }
+    }
+
+    /// 패널 우클릭 메뉴의 "숨기기" — 이 세션만 숨기고 다른 세션에는 영향 없음.
+    /// isManuallyHidden을 켜서, 이후 이 세션에 어떤 상태 변화가 와도
+    /// showCompanion()이 명시적으로 호출되기(부니 불러오기 등) 전까지는
+    /// 자동으로 다시 나타나지 않게 한다.
+    func hideThisCompanion() {
+        isManuallyHidden = true
+        hideCompanion()
     }
 
     private func slideOut(completion: @escaping () -> Void) {
@@ -488,8 +500,8 @@ class SessionWindow {
     // MARK: - Controller callbacks
 
     private func setupControllerCallbacks() {
-        // 메뉴바 "부니 숨기기"와 동일한 전체 숨김으로 위임 (isManuallyHidden 동기화)
-        controller.onHideRequest          = { [weak self] in self?.onGlobalHideRequest?() }
+        // 이 캐릭터만 숨김 — 다른 세션에는 영향 없음
+        controller.onHideRequest          = { [weak self] in self?.hideThisCompanion() }
         controller.onShowRequest          = { [weak self] in self?.showCompanion() }
         controller.onOpenClaudeRequest    = { [weak self] in self?.onOpenClaude?() }
         controller.onOpenSettingsRequest  = { [weak self] in self?.onOpenSettings?() }
@@ -582,6 +594,7 @@ class SessionWindow {
                 guard let self, state != .idle else { return }
                 guard self.panel?.isVisible != true, !self.controller.isSliding else { return }
                 guard self.shouldAutoShow?() ?? true else { return }
+                guard !self.isManuallyHidden else { return }
                 self.showCompanion()
             }
             .store(in: &cancellables)

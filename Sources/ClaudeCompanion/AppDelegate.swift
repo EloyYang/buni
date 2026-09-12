@@ -332,7 +332,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         win.onShowStatusBar = { [weak self] in self?.showStatusBar() }
         win.onRebuildMenu   = { [weak self] in self?.rebuildMenu() }
         win.shouldAutoShow  = { [weak self] in !(self?.isManuallyHidden ?? false) }
-        win.onGlobalHideRequest = { [weak self] in self?.hideAll() }
         win.onSwitchSession = { [weak self, weak win] targetId in
             guard let self, let win else { return }
             self.switchSession(win, to: targetId)
