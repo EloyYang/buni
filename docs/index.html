@@ -238,6 +238,39 @@
   .gauge i{ display:block; width:9px; height:14px; border-radius:2px; background:var(--line); }
   .gauge i.on1{ background:var(--leaf); } .gauge i.on2{ background:#e8c34a; } .gauge i.on3{ background:#e2603f; }
 
+  /* ── 기능 카드 안 마우스오버 예시 (상태 애니메이션 / 권한 요청 버블) ── */
+  .feature-demo{
+    max-height:0; opacity:0; overflow:hidden;
+    transition:max-height .32s ease, opacity .25s ease, margin-top .32s ease;
+  }
+  .feature:hover .feature-demo{ max-height:150px; opacity:1; margin-top:2px; }
+  .feature-hint{
+    font-family:var(--font-pixel); font-size:0.5rem; color:var(--muted);
+    letter-spacing:0.02em; margin-top:auto; padding-top:2px;
+  }
+  .feature:hover .feature-hint{ visibility:hidden; }
+
+  .state-demo-row{ display:flex; align-items:flex-end; gap:12px; padding-top:8px; }
+  .mini-caption{ font-family:var(--font-mono); font-size:0.68rem; color:var(--muted); padding-bottom:6px; }
+
+  .perm-demo-row{ display:flex; align-items:flex-end; gap:10px; padding-top:8px; }
+  .perm-mock{
+    font-family:var(--font-mono); background:#fff; border-radius:12px;
+    padding:9px 11px; width:150px; box-shadow:0 6px 16px rgba(0,0,0,0.3); flex:0 0 auto;
+  }
+  .perm-mock .pm-title{ display:flex; align-items:center; gap:4px; font-size:11px; font-weight:700; color:#161616; margin-bottom:6px; }
+  .perm-mock .pm-title span.chev{ margin-left:auto; color:#999; font-size:9px; }
+  .perm-mock .pm-cmd{
+    background:#efefef; color:#404040; border-radius:6px; padding:5px 7px;
+    font-size:9px; margin-bottom:7px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .perm-mock .pm-btns{ display:flex; gap:4px; }
+  .perm-mock .pm-btns span{
+    flex:1; text-align:center; border-radius:6px; padding:4px 0; font-size:9px; font-weight:700; color:#fff;
+  }
+  .pm-deny{ background:#d94033; } .pm-allow{ background:#33b359; } .pm-allow-all{ background:#4080e6; }
+  .perm-bunny{ flex:0 0 auto; }
+
   /* ── characters ──────────────────────────────────── */
   .chars{ display:flex; gap:14px; flex-wrap:wrap; justify-content:center; }
   .char-card{
@@ -582,8 +615,8 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
 
   // ── 기능 카드 ──
   var FEATURES = [
-    { title:'상태 애니메이션', desc:'생각중엔 타이핑, 완료되면 팔을 번쩍 — 상태마다 다른 몸짓.', icon:'anim' },
-    { title:'권한 요청 버블', desc:'도구 실행 허가가 필요하면 당근을 들고 물어봐요. 허용 · 전체 허용 · 거부.', icon:'carrot' },
+    { title:'상태 애니메이션', desc:'생각중엔 타이핑, 완료되면 팔을 번쩍 — 상태마다 다른 몸짓.', icon:'anim', demo:'state' },
+    { title:'권한 요청 버블', desc:'도구 실행 허가가 필요하면 당근을 들고 물어봐요. 허용 · 전체 허용 · 거부.', icon:'carrot', demo:'permission' },
     { title:'사용량 게이지 + 레벨', desc:'5시간 윈도우 사용률을 10칸 바로, 월간 누적 토큰으로 레벨업.', icon:'gauge' },
     { title:'캐릭터 6종', desc:'세션마다 다른 토끼를 배정해 한눈에 구분.', icon:'chars' },
     { title:'딴짓 방해모드', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', icon:'wander', badge:true },
@@ -600,13 +633,47 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
   };
 
   var grid = document.getElementById('featureGrid');
-  FEATURES.forEach(function(f){
+  FEATURES.forEach(function(f, fi){
     var el = document.createElement('div');
     el.className = 'feature';
+    if(f.demo) el.setAttribute('data-demo', f.demo);
     var svgIcon = '<svg class="ficon" viewBox="0 0 38 32">'+ICONS[f.icon]+'</svg>';
     var badge = f.badge ? '<span class="badge-new">NEW</span>' : '';
     var gaugeExtra = f.icon === 'gauge' ? '<div class="gauge"><i class="on1"></i><i class="on1"></i><i class="on1"></i><i class="on1"></i><i class="on2"></i><i class="on2"></i><i class="on3"></i><i></i><i></i><i></i></div>' : '';
-    el.innerHTML = svgIcon + badge + '<h3>'+f.title+'</h3><p>'+f.desc+'</p>' + gaugeExtra;
+    var hint = f.demo ? '<div class="feature-hint">MOUSE OVER →</div>' : '';
+    var demoHtml = '';
+    if(f.demo === 'state'){
+      demoHtml =
+        '<div class="feature-demo" data-demo-id="state-'+fi+'">' +
+          '<div class="state-demo-row">' +
+            '<div class="bunny-stage" id="miniStage-'+fi+'" data-state="idle">' +
+              '<svg class="bunny bunny-back"   id="miniBack-'+fi+'"   viewBox="0 0 70 78"></svg>' +
+              '<svg class="bunny bunny-laptop" id="miniLaptop-'+fi+'" viewBox="0 0 70 78"></svg>' +
+              '<svg class="bunny bunny-front"  id="miniFront-'+fi+'"  viewBox="0 0 70 78"></svg>' +
+              '<div class="accessory acc-prop"  id="miniProp-'+fi+'"></div>' +
+              '<div class="accessory acc-spark" id="miniSpark-'+fi+'"></div>' +
+            '</div>' +
+            '<div class="mini-caption" id="miniCaption-'+fi+'">대기중</div>' +
+          '</div>' +
+        '</div>';
+    } else if(f.demo === 'permission'){
+      demoHtml =
+        '<div class="feature-demo">' +
+          '<div class="perm-demo-row">' +
+            '<div class="bunny-stage perm-bunny" data-state="permission">' +
+              '<svg class="bunny bunny-back"  id="permBack-'+fi+'"  viewBox="0 0 70 78"></svg>' +
+              '<svg class="bunny bunny-front" id="permFront-'+fi+'" viewBox="0 0 70 78"></svg>' +
+              '<div class="accessory acc-prop" id="permProp-'+fi+'" style="opacity:1"></div>' +
+            '</div>' +
+            '<div class="perm-mock">' +
+              '<div class="pm-title">🔐 실행 허용? <span class="chev">⌄</span></div>' +
+              '<div class="pm-cmd">rm -rf node_modules</div>' +
+              '<div class="pm-btns"><span class="pm-deny">거부</span><span class="pm-allow">허용</span><span class="pm-allow-all">전체 허용</span></div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    }
+    el.innerHTML = svgIcon + badge + '<h3>'+f.title+'</h3><p>'+f.desc+'</p>' + gaugeExtra + hint + demoHtml;
     grid.appendChild(el);
   });
 
@@ -780,6 +847,66 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
       if(i < filledCount){ seg.className = 'on'; seg.style.setProperty('--seg-color', color); }
       segs.appendChild(seg);
     }
+  })();
+
+  // ── "상태 애니메이션" 기능 카드 — 마우스 올리면 상태 사이클 미리보기 ──
+  (function(){
+    var card = document.querySelector('.feature[data-demo="state"]');
+    if(!card) return;
+    var idx = 0; // FEATURES 배열에서 이 카드의 인덱스(state는 항상 0번째)
+    var mStage   = document.getElementById('miniStage-'+idx);
+    var mBack    = document.getElementById('miniBack-'+idx);
+    var mLaptop  = document.getElementById('miniLaptop-'+idx);
+    var mFront   = document.getElementById('miniFront-'+idx);
+    var mProp    = document.getElementById('miniProp-'+idx);
+    var mSpark   = document.getElementById('miniSpark-'+idx);
+    var mCaption = document.getElementById('miniCaption-'+idx);
+    if(!mStage) return;
+
+    buildRabbitBack(mBack, HERO_CH);
+    buildLaptop(mLaptop);
+    buildRabbitFront(mFront, HERO_CH);
+    mProp.innerHTML = propSVG(HERO_CH.prop);
+    placeAccessory(mProp, -4.0, -3.19, 1.5, 3.08);
+    placeAccessory(mSpark, 0, -2.6, 3.2, 1.8);
+
+    var MINI_STATES = [
+      { key:'thinking',   caption:'생각중' },
+      { key:'tool',       caption:'도구 사용' },
+      { key:'permission', caption:'권한 요청' },
+      { key:'done',       caption:'완료!' },
+    ];
+    var mIdx = 0, mTimer = null;
+    function stepMini(){
+      var s = MINI_STATES[mIdx % MINI_STATES.length];
+      mStage.setAttribute('data-state', s.key);
+      mCaption.textContent = s.caption;
+      mIdx++;
+      mTimer = setTimeout(stepMini, 1500);
+    }
+    card.addEventListener('mouseenter', function(){
+      if(reduceMotion) return;
+      mIdx = 0;
+      stepMini();
+    });
+    card.addEventListener('mouseleave', function(){
+      clearTimeout(mTimer);
+      mStage.setAttribute('data-state', 'idle');
+      mCaption.textContent = '대기중';
+    });
+  })();
+
+  // ── "권한 요청 버블" 기능 카드 — 실제 PermissionBubbleView.swift 모양 미리보기 ──
+  (function(){
+    var idx = 1; // FEATURES 배열에서 permission 카드 인덱스
+    var pBack  = document.getElementById('permBack-'+idx);
+    var pFront = document.getElementById('permFront-'+idx);
+    var pProp  = document.getElementById('permProp-'+idx);
+    if(!pBack) return;
+    buildRabbitBack(pBack, HERO_CH);
+    buildRabbitFront(pFront, HERO_CH);
+    pProp.innerHTML = propSVG(HERO_CH.prop);
+    placeAccessory(pProp, -4.0, -3.19, 1.5, 3.08);
   })();
 
   // ── OS 감지 + GitHub 최신 릴리즈 ──
