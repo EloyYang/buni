@@ -17,6 +17,7 @@ pyinstaller ^
     --onefile ^
     --windowed ^
     --name Buni ^
+    --icon "%~dp0buni_icon.ico" ^
     --hidden-import pystray ^
     --hidden-import PIL ^
     --hidden-import PIL.Image ^

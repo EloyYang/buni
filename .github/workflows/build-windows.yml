@@ -35,6 +35,7 @@ jobs:
             --onefile `
             --windowed `
             --name Buni-Windows `
+            --icon windows/buni_icon.ico `
             --hidden-import pystray `
             --hidden-import PIL `
             --hidden-import PIL.Image `

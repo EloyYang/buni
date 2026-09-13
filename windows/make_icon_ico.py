@@ -1,42 +1,39 @@
 #!/usr/bin/env python3
 """
-Buni 앱 아이콘 — 메뉴바 아이콘(MenuBarIcon.swift)과 동일한 9×9 픽셀
-토끼 얼굴 실루엣을 흰색으로, 배경은 브랜드 오렌지(#f28c2e)로 그린다.
-웹사이트 로고(.wordmark)와 동일한 배색·형태를 앱 아이콘에도 맞춘다.
+Buni Windows 앱 아이콘(.ico) 생성 — 맥 메뉴바 아이콘(MenuBarIcon.swift)과
+동일한 9×9 픽셀 토끼 얼굴 실루엣을 흰색으로, 배경은 브랜드 오렌지(#f28c2e)로.
+루트의 make_icon.py(macOS AppIcon용)와 동일한 디자인을 사용한다.
 
-사용: python3 make_icon.py <출력경로.png> <크기>
+사용: python3 make_icon_ico.py <출력경로.ico>
+빌드 의존성 없이(Pillow 불필요) 표준 PNG-in-ICO(Vista) 포맷으로 직접 패킹한다.
 """
 import sys, struct, zlib
 
-# ── 9×9 그리드 (MenuBarIcon.swift 원본과 동일) ──────────────────────
-#   X = 캐릭터(흰색)   . = 배경(오렌지, 눈·코는 이 색이 비치는 구멍)
 GRID = [
-    ".XX...XX.",  # 귀
-    ".XX...XX.",  # 귀
-    ".XX...XX.",  # 귀
-    ".XX...XX.",  # 귀 아래
-    ".XXXXXXX.",  # 머리
-    ".X.XXX.X.",  # 눈 (구멍)
-    ".XXX.XXX.",  # 코 (구멍)
-    ".XXXXXXX.",  # 얼굴
-    "..XXXXX..",  # 턱
+    ".XX...XX.",
+    ".XX...XX.",
+    ".XX...XX.",
+    ".XX...XX.",
+    ".XXXXXXX.",
+    ".X.XXX.X.",
+    ".XXX.XXX.",
+    ".XXXXXXX.",
+    "..XXXXX..",
 ]
 
-ORANGE = (242, 140, 46, 255)   # #f28c2e — 브랜드 캐럿 오렌지
+ORANGE = (242, 140, 46, 255)
 WHITE  = (255, 255, 255, 255)
 CLEAR  = (0, 0, 0, 0)
 
 GRID_ROWS = len(GRID)
 GRID_COLS = len(GRID[0])
-
-PAD_RATIO = 0.20  # 캐릭터 그리드 좌우/상하 각각 20% 여백
+PAD_RATIO = 0.20
 
 
 def png_bytes(size: int) -> bytes:
     W = H = size
 
     def in_rrect(x, y):
-        """macOS 앱 아이콘 스타일 둥근 사각형 마스크"""
         cx = (x + 0.5) / W * 2 - 1
         cy = (y + 0.5) / H * 2 - 1
         r, corner = 0.82, 0.20
@@ -79,9 +76,21 @@ def png_bytes(size: int) -> bytes:
             + chunk(b'IEND', b''))
 
 
+def ico_bytes(sizes) -> bytes:
+    images = [png_bytes(s) for s in sizes]
+    n = len(images)
+    header = struct.pack('<HHH', 0, 1, n)
+    entries = b''
+    offset = 6 + 16 * n
+    for s, img in zip(sizes, images):
+        wh = s if s < 256 else 0  # 0 means 256 in ICO format
+        entries += struct.pack('<BBBBHHII', wh, wh, 0, 0, 1, 32, len(img), offset)
+        offset += len(img)
+    return header + entries + b''.join(images)
+
+
 if __name__ == '__main__':
-    out  = sys.argv[1]
-    size = int(sys.argv[2])
+    out = sys.argv[1] if len(sys.argv) > 1 else 'buni_icon.ico'
     with open(out, 'wb') as f:
-        f.write(png_bytes(size))
-    print(f"  {size}×{size} → {out}")
+        f.write(ico_bytes([16, 32, 48, 64, 128, 256]))
+    print(f"  ICO → {out}")

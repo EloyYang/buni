@@ -27,6 +27,7 @@ OutputBaseFilename=Buni-Windows-Setup-{#AppVersion}
 Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=buni_icon.ico
 UninstallDisplayIcon={app}\Buni-Windows.exe
 UninstallDisplayName={#AppName}
 
