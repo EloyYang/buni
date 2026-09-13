@@ -67,6 +67,13 @@
   .btn-ghost{ background:transparent; border-color:var(--line); color:var(--ink); }
   .btn-ghost:hover{ border-color:var(--muted); }
   .btn-sm{ padding:8px 14px; font-size:0.85rem; }
+  .lang-toggle{
+    font-family:var(--font-mono); font-weight:600; font-size:0.76rem; letter-spacing:0.02em;
+    color:var(--muted); background:transparent; border:1px solid var(--line);
+    border-radius:8px; padding:6px 10px; cursor:pointer;
+    transition:color .15s, border-color .15s; white-space:nowrap;
+  }
+  .lang-toggle:hover{ color:var(--ink); border-color:var(--muted); }
 
   /* ── eyebrow / pixel label ───────────────────────── */
   .eyebrow{
@@ -359,10 +366,11 @@
       Buni
     </div>
     <nav class="nav-links">
-      <a href="#features">기능</a>
+      <a href="#features" data-ko="기능" data-en="Features">기능</a>
       <a href="https://github.com/EloyYang/buni" target="_blank" rel="noopener">GitHub</a>
     </nav>
-    <a class="btn btn-carrot btn-sm" href="#download">다운로드</a>
+    <button class="lang-toggle" id="langToggle" type="button" aria-label="Switch language">EN</button>
+    <a class="btn btn-carrot btn-sm" href="#download" data-ko="다운로드" data-en="Download">다운로드</a>
   </div>
 </header>
 
@@ -373,13 +381,13 @@
     <div class="hero-grid">
       <div>
         <span class="eyebrow">CLAUDE CODE COMPANION</span>
-        <h1>코드가 돌아가는 동안,<br><span class="hl">부니</span>가 화면 한켠을 지켜요.</h1>
-        <p class="lede">Claude Code가 생각하고, 도구를 쓰고, 권한을 요청할 때마다 — 픽셀토끼 부니가 화면 위에 떠서 지금 무슨 일이 벌어지고 있는지 몸짓으로 알려줍니다.</p>
+        <h1 data-ko-html="코드가 돌아가는 동안,&lt;br&gt;&lt;span class=&quot;hl&quot;&gt;부니&lt;/span&gt;가 화면 한켠을 지켜요." data-en-html="While your code runs,&lt;br&gt;&lt;span class=&quot;hl&quot;&gt;Buni&lt;/span&gt; keeps watch from the corner.">코드가 돌아가는 동안,<br><span class="hl">부니</span>가 화면 한켠을 지켜요.</h1>
+        <p class="lede" data-ko-html="Claude Code가 생각하고, 도구를 쓰고, 권한을 요청할 때마다&lt;br&gt;픽셀토끼 부니가 화면 위에 떠서 지금 무슨 일이 벌어지고 있는지 몸짓으로 알려줍니다." data-en-html="Whenever Claude Code is thinking, using a tool, or asking for permission,&lt;br&gt;Buni — a pixel rabbit — hops onto your screen and shows you what's going on.">Claude Code가 생각하고, 도구를 쓰고, 권한을 요청할 때마다<br>픽셀토끼 부니가 화면 위에 떠서 지금 무슨 일이 벌어지고 있는지 몸짓으로 알려줍니다.</p>
         <div class="hero-ctas">
-          <a class="btn btn-carrot" href="#download">지금 다운로드</a>
-          <a class="btn btn-ghost" href="https://github.com/EloyYang/buni" target="_blank" rel="noopener">GitHub에서 보기 ↗</a>
+          <a class="btn btn-carrot" href="#download" data-ko="지금 다운로드" data-en="Download now">지금 다운로드</a>
+          <a class="btn btn-ghost" href="https://github.com/EloyYang/buni" target="_blank" rel="noopener" data-ko="GitHub에서 보기 ↗" data-en="View on GitHub ↗">GitHub에서 보기 ↗</a>
         </div>
-        <p class="hero-note">macOS 13+ · Windows · <b>Claude Code</b> CLI 필요</p>
+        <p class="hero-note" data-ko-html="macOS 13+ · Windows · &lt;b&gt;Claude Code&lt;/b&gt; CLI 필요" data-en-html="macOS 13+ · Windows · &lt;b&gt;Claude Code&lt;/b&gt; CLI required">macOS 13+ · Windows · <b>Claude Code</b> CLI 필요</p>
       </div>
 
       <div class="demo-stage" id="demoStage" data-state="idle">
@@ -428,15 +436,15 @@
           <rect x="16" y="70" width="80" height="9" rx="2.5" fill="rgba(255,255,255,0.08)"/>
           <rect x="16" y="88" width="112" height="9" rx="2.5" fill="rgba(255,255,255,0.08)"/>
         </svg>
-        <div class="why-bubble">완료 ✓</div>
+        <div class="why-bubble" data-ko="완료 ✓" data-en="Done ✓">완료 ✓</div>
         <div class="why-bunny-wrap">
           <svg class="bunny" id="whyBunny" viewBox="0 0 70 78"></svg>
         </div>
       </div>
       <div>
-        <span class="tag">이래서 부니예요</span>
-        <h3>Claude Code가 일하는 동안, 딴 데 신경 써도 돼요</h3>
-        <p>터미널을 계속 들여다보고 있을 필요 없어요. 다른 창 보면서 딴 작업 하다가도 화면 구석의 부니만 곁눈질하면 지금 생각 중인지, 권한이 필요한지, 다 끝났는지 바로 알 수 있어요.</p>
+        <span class="tag" data-ko="이래서 부니예요" data-en="Why Buni">이래서 부니예요</span>
+        <h3 data-ko="Claude Code가 일하는 동안, 딴 데 신경 써도 돼요" data-en="Focus on other things while Claude Code works">Claude Code가 일하는 동안, 딴 데 신경 써도 돼요</h3>
+        <p data-ko-html="터미널을 계속 들여다보고 있을 필요 없어요.&lt;br&gt;다른 창 보면서 딴 작업 하다가도 화면 구석의 부니만 곁눈질하면 지금 생각 중인지, 권한이 필요한지, 다 끝났는지 바로 알 수 있어요." data-en-html="No need to keep staring at the terminal.&lt;br&gt;Glance at Buni in the corner while you work in another window, and you'll instantly know if it's thinking, needs permission, or just finished.">터미널을 계속 들여다보고 있을 필요 없어요.<br>다른 창 보면서 딴 작업 하다가도 화면 구석의 부니만 곁눈질하면 지금 생각 중인지, 권한이 필요한지, 다 끝났는지 바로 알 수 있어요.</p>
       </div>
     </div>
   </section>
@@ -444,9 +452,9 @@
   <!-- ═══ FEATURES ═══ -->
   <section id="features">
     <div class="section-head">
-      <span class="eyebrow">기능</span>
-      <h2>작지만, 할 건 다 합니다</h2>
-      <p>말풍선 하나, 게이지 바 하나에도 지금 세션이 뭘 하고 있는지가 담겨 있어요.</p>
+      <span class="eyebrow" data-ko="기능" data-en="Features">기능</span>
+      <h2 data-ko="작지만, 할 건 다 합니다" data-en="Small, but it does it all">작지만, 할 건 다 합니다</h2>
+      <p data-ko="말풍선 하나, 게이지 바 하나에도 지금 세션이 뭘 하고 있는지가 담겨 있어요." data-en="Even a single speech bubble or gauge bar tells you exactly what your session is doing.">말풍선 하나, 게이지 바 하나에도 지금 세션이 뭘 하고 있는지가 담겨 있어요.</p>
     </div>
     <div class="features" id="featureGrid"></div>
   </section>
@@ -454,9 +462,9 @@
   <!-- ═══ DOWNLOAD ═══ -->
   <section id="download">
     <div class="download-panel">
-      <span class="eyebrow">다운로드</span>
-      <h2 style="margin-top:14px; font-size:clamp(1.6rem,3vw,2.1rem);">지금 바로 데려오기</h2>
-      <p style="color:var(--muted); margin-top:10px;">GitHub Releases에서 최신 버전을 자동으로 가져옵니다.</p>
+      <span class="eyebrow" data-ko="다운로드" data-en="Download">다운로드</span>
+      <h2 style="margin-top:14px; font-size:clamp(1.6rem,3vw,2.1rem);" data-ko="지금 바로 데려오기" data-en="Get it now">지금 바로 데려오기</h2>
+      <p style="color:var(--muted); margin-top:10px;" data-ko="GitHub Releases에서 최신 버전을 자동으로 가져옵니다." data-en="Automatically pulls the latest version from GitHub Releases.">GitHub Releases에서 최신 버전을 자동으로 가져옵니다.</p>
 
       <div class="dl-grid" id="dlGrid">
         <div class="dl-card" id="dlMac">
@@ -465,7 +473,7 @@
             <span class="os-name">macOS</span>
           </div>
           <p class="meta" id="macMeta">불러오는 중…</p>
-          <a class="btn btn-carrot" id="macBtn" href="https://github.com/EloyYang/buni/releases/latest">macOS용 다운로드</a>
+          <a class="btn btn-carrot" id="macBtn" href="https://github.com/EloyYang/buni/releases/latest" data-ko="macOS용 다운로드" data-en="Download for macOS">macOS용 다운로드</a>
         </div>
         <div class="dl-card" id="dlWin">
           <div class="os-row">
@@ -473,8 +481,8 @@
             <span class="os-name">Windows</span>
           </div>
           <p class="meta" id="winMeta">불러오는 중…</p>
-          <a class="btn btn-carrot" id="winBtn" href="https://github.com/EloyYang/buni/releases/latest">Windows용 다운로드</a>
-          <a class="dl-secondary" id="winPortableBtn" href="https://github.com/EloyYang/buni/releases/latest" target="_blank" rel="noopener">설치 없이 포터블 exe로 받기 →</a>
+          <a class="btn btn-carrot" id="winBtn" href="https://github.com/EloyYang/buni/releases/latest" data-ko="Windows용 다운로드" data-en="Download for Windows">Windows용 다운로드</a>
+          <a class="dl-secondary" id="winPortableBtn" href="https://github.com/EloyYang/buni/releases/latest" target="_blank" rel="noopener" data-ko="설치 없이 포터블 exe로 받기 →" data-en="Get the portable exe (no install) →">설치 없이 포터블 exe로 받기 →</a>
         </div>
       </div>
 
@@ -487,7 +495,7 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
 
 <footer>
   <div class="wrap foot-inner">
-    <span>개인 비상업적 사용 무료 · 무단 배포·수정 금지 · © EloyYang</span>
+    <span data-ko="개인 비상업적 사용 무료 · 무단 배포·수정 금지 · © EloyYang" data-en="Free for personal, non-commercial use · No unauthorized distribution or modification · © EloyYang">개인 비상업적 사용 무료 · 무단 배포·수정 금지 · © EloyYang</span>
     <a href="https://github.com/EloyYang/buni" target="_blank" rel="noopener">github.com/EloyYang/buni</a>
   </div>
 </footer>
@@ -502,6 +510,9 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
   // 실제 RabbitCharacterView.swift의 p(=6.5)를 그대로 SCALE로 써서 1pt = 1px로
   // 렌더링한다 — 모니터 위에서 실제로 보이는 크기 그대로.
   var SCALE = 6.5, CX = 35, CY = 39;
+
+  // ── 언어 상태 (한국어 기본, localStorage에 기억 + 브라우저 언어로 최초 감지) ──
+  var LANG = 'ko';
 
   function partRect(cls, dx, dy, w, h, fill){
     var el = document.createElementNS(NS, 'rect');
@@ -621,22 +632,22 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
   // ── 캐릭터 6종 — 실제 CharacterStore.swift 이름 + 각 CharacterView.swift의
   // 고유 외형(귀 모양, 표정 포인트, 코 모양, 권한요청 때 드는 소품)까지 반영 ──
   var CHARACTERS = [
-    { name:'부니', desc:'흰토끼 · 기본', body:'#e9ecf3', accent:'#f2b8c6', face:'plain',    prop:'carrot' },
-    { name:'두니', desc:'갈색토끼',      body:'#996644', accent:'#c78a66', face:'brows',    prop:'carrot' },
-    { name:'푸니', desc:'핑크토끼',      body:'#fac7e0', accent:'#fff0f6', face:'blushBig', prop:'heart', noseHeart:true },
-    { name:'주니', desc:'주황토끼',      body:'#f28a1f', accent:'#ffd9a3', face:'cheek',    prop:'orange' },
-    { name:'누니', desc:'노란토끼',      body:'#f5db38', accent:'#fff6c2', face:'blushThin',prop:'star' },
-    { name:'우니', desc:'연두토끼',      body:'#73cc61', accent:'#c9f0b8', face:'plain',    prop:'leaf' }
+    { name:'부니', nameEn:'Buni', desc:'흰토끼 · 기본', body:'#e9ecf3', accent:'#f2b8c6', face:'plain',    prop:'carrot' },
+    { name:'두니', nameEn:'Duni', desc:'갈색토끼',      body:'#996644', accent:'#c78a66', face:'brows',    prop:'carrot' },
+    { name:'푸니', nameEn:'Puni', desc:'핑크토끼',      body:'#fac7e0', accent:'#fff0f6', face:'blushBig', prop:'heart', noseHeart:true },
+    { name:'주니', nameEn:'Juni', desc:'주황토끼',      body:'#f28a1f', accent:'#ffd9a3', face:'cheek',    prop:'orange' },
+    { name:'누니', nameEn:'Nuni', desc:'노란토끼',      body:'#f5db38', accent:'#fff6c2', face:'blushThin',prop:'star' },
+    { name:'우니', nameEn:'Uni',  desc:'연두토끼',      body:'#73cc61', accent:'#c9f0b8', face:'plain',    prop:'leaf' }
   ];
 
   // ── 기능 카드 ──
   var FEATURES = [
-    { title:'상태 애니메이션', desc:'생각중엔 타이핑, 완료되면 팔을 번쩍 — 상태마다 다른 몸짓.', icon:'anim', demo:'state' },
-    { title:'권한 요청 버블', desc:'도구 실행 허가가 필요하면 당근을 들고 물어봐요. 허용 · 전체 허용 · 거부.', icon:'carrot', demo:'permission' },
-    { title:'토큰 얼마나 남았지?', desc:'"지금 얼마나 썼지? 언제 다시 넉넉해지지?" — 터미널 안 보고도 한눈에 확인.', icon:'gauge', demo:'usage' },
-    { title:'캐릭터 6종', desc:'세션마다 다른 토끼를 배정해 한눈에 구분.', icon:'chars', demo:'chars' },
-    { title:'딴짓 방해모드', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', icon:'wander', badge:true, demo:'wander' },
-    { title:'SSH Remote 지원', desc:'VS Code(Cursor 포함)로 원격 서버에 붙어도 상태가 그대로 도착해요.', icon:'ssh' },
+    { title:'상태 애니메이션', titleEn:'State animations', desc:'생각중엔 타이핑, 완료되면 팔을 번쩍 — 상태마다 다른 몸짓.', descEn:'Typing while thinking, arms up when done — a different gesture for every state.', icon:'anim', demo:'state' },
+    { title:'권한 요청 버블', titleEn:'Permission bubble', desc:'도구 실행 허가가 필요하면 당근을 들고 물어봐요. 허용 · 전체 허용 · 거부.', descEn:'When a tool needs approval, Buni holds up a carrot and asks. Allow · Allow all · Deny.', icon:'carrot', demo:'permission' },
+    { title:'토큰 얼마나 남았지?', titleEn:'How much do I have left?', desc:'"지금 얼마나 썼지? 언제 다시 넉넉해지지?" — 터미널 안 보고도 한눈에 확인.', descEn:'"How much have I used? When do I get more?" — see it at a glance, no terminal required.', icon:'gauge', demo:'usage' },
+    { title:'캐릭터 6종', titleEn:'6 characters', desc:'세션마다 다른 토끼를 배정해 한눈에 구분.', descEn:'Each session gets a different rabbit, so you can tell them apart at a glance.', icon:'chars', demo:'chars' },
+    { title:'딴짓 방해모드', titleEn:'Nag mode', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', descEn:"If you're idle too long, Buni hops around your screen nagging you back to work.", icon:'wander', badge:true, demo:'wander' },
+    { title:'SSH Remote 지원', titleEn:'SSH remote support', desc:'VS Code(Cursor 포함)로 원격 서버에 붙어도 상태가 그대로 도착해요.', descEn:'Connect to a remote server via VS Code (or Cursor) — status still comes through.', icon:'ssh' },
   ];
 
   var ICONS = {
@@ -681,9 +692,9 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
               '<div class="accessory acc-prop" id="permProp-'+fi+'" style="opacity:1"></div>' +
             '</div>' +
             '<div class="perm-mock">' +
-              '<div class="pm-title">🔐 실행 허용? <span class="chev">⌄</span></div>' +
+              '<div class="pm-title" id="pmTitle-'+fi+'">🔐 실행 허용? <span class="chev">⌄</span></div>' +
               '<div class="pm-cmd">rm -rf node_modules</div>' +
-              '<div class="pm-btns"><span class="pm-deny">거부</span><span class="pm-allow">허용</span><span class="pm-allow-all">전체 허용</span></div>' +
+              '<div class="pm-btns"><span class="pm-deny" id="pmDeny-'+fi+'">거부</span><span class="pm-allow" id="pmAllow-'+fi+'">허용</span><span class="pm-allow-all" id="pmAllowAll-'+fi+'">전체 허용</span></div>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -691,7 +702,7 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
       var itemsHtml = CHARACTERS.map(function(ch, ci){
         return '<div class="chars-demo-item">' +
                  '<svg class="bunny" id="charsDemo-'+ci+'" viewBox="0 0 70 78"></svg>' +
-                 '<span class="cd-name">'+ch.name+'</span>' +
+                 '<span class="cd-name" id="charsName-'+ci+'">'+ch.name+'</span>' +
                '</div>';
       }).join('');
       demoHtml = '<div class="feature-demo"><div class="chars-demo-row">'+itemsHtml+'</div></div>';
@@ -703,7 +714,7 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
               '<svg class="bunny bunny-back"  id="wanderBack-'+fi+'"  viewBox="0 0 70 78"></svg>' +
               '<svg class="bunny bunny-front" id="wanderFront-'+fi+'" viewBox="0 0 70 78"></svg>' +
             '</div>' +
-            '<div class="wander-caption">깡총깡총…</div>' +
+            '<div class="wander-caption" id="wanderCaption-'+fi+'">깡총깡총…</div>' +
           '</div>' +
         '</div>';
     } else if(f.demo === 'usage'){
@@ -713,13 +724,13 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
             '<div class="ud-level">★ Lv.3</div>' +
             '<div class="ud-track"><div class="ud-segs" id="udSegs-'+fi+'"></div></div>' +
             '<div class="usage-callouts">' +
-              '<div class="usage-callout"><b>38%</b><span>남음</span></div>' +
-              '<div class="usage-callout"><b>↺ 3:47</b><span>후 리셋</span></div>' +
+              '<div class="usage-callout"><b>38%</b><span id="udLeftLabel-'+fi+'">남음</span></div>' +
+              '<div class="usage-callout"><b>↺ 3:47</b><span id="udResetLabel-'+fi+'">후 리셋</span></div>' +
             '</div>' +
           '</div>' +
         '</div>';
     }
-    el.innerHTML = svgIcon + badge + '<h3>'+f.title+'</h3><p>'+f.desc+'</p>' + hint + demoHtml;
+    el.innerHTML = svgIcon + badge + '<h3 id="featTitle-'+fi+'">'+f.title+'</h3><p id="featDesc-'+fi+'">'+f.desc+'</p>' + hint + demoHtml;
     grid.appendChild(el);
 
     if(f.demo === 'chars'){
@@ -865,11 +876,11 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
   })();
 
   var STATES = [
-    { key:'idle',       caption:'대기중',   bubble:'' },
-    { key:'thinking',   caption:'생각중',   bubble:'코딩중' },
-    { key:'tool',       caption:'도구 사용', bubble:'Edit' },
-    { key:'permission', caption:'권한 요청', bubble:'Bash 실행을\n허용할까요?' },
-    { key:'done',       caption:'완료!',    bubble:'완료 ✓' },
+    { key:'idle',       caption:{ko:'대기중',   en:'Idle'},        bubble:{ko:'', en:''} },
+    { key:'thinking',   caption:{ko:'생각중',   en:'Thinking'},    bubble:{ko:'코딩중', en:'Coding'} },
+    { key:'tool',       caption:{ko:'도구 사용', en:'Using tool'}, bubble:{ko:'Edit', en:'Edit'} },
+    { key:'permission', caption:{ko:'권한 요청', en:'Permission'}, bubble:{ko:'Bash 실행을\n허용할까요?', en:'Allow Bash\nto run?'} },
+    { key:'done',       caption:{ko:'완료!',    en:'Done!'},       bubble:{ko:'완료 ✓', en:'Done ✓'} },
   ];
   var stage = document.getElementById('demoStage');
   var caption = document.getElementById('demoCaption');
@@ -880,8 +891,8 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
   function stepState(){
     var s = STATES[idx % STATES.length];
     stage.setAttribute('data-state', s.key);
-    caption.textContent = s.caption;
-    bubbleText.textContent = s.bubble || ' ';
+    caption.textContent = s.caption[LANG];
+    bubbleText.textContent = s.bubble[LANG] || ' ';
     idx++;
   }
   stepState();
@@ -939,16 +950,16 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     placeAccessory(mSpark, 0, -2.6, 3.2, 1.8);
 
     var MINI_STATES = [
-      { key:'thinking',   caption:'생각중' },
-      { key:'tool',       caption:'도구 사용' },
-      { key:'permission', caption:'권한 요청' },
-      { key:'done',       caption:'완료!' },
+      { key:'thinking',   caption:{ko:'생각중', en:'Thinking'} },
+      { key:'tool',       caption:{ko:'도구 사용', en:'Using tool'} },
+      { key:'permission', caption:{ko:'권한 요청', en:'Permission'} },
+      { key:'done',       caption:{ko:'완료!', en:'Done!'} },
     ];
     var mIdx = 0, mTimer = null;
     function stepMini(){
       var s = MINI_STATES[mIdx % MINI_STATES.length];
       mStage.setAttribute('data-state', s.key);
-      mCaption.textContent = s.caption;
+      mCaption.textContent = s.caption[LANG];
       mIdx++;
       mTimer = setTimeout(stepMini, 1500);
     }
@@ -960,7 +971,7 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     card.addEventListener('mouseleave', function(){
       clearTimeout(mTimer);
       mStage.setAttribute('data-state', 'idle');
-      mCaption.textContent = '대기중';
+      mCaption.textContent = STATES[0].caption[LANG];
     });
   })();
 
@@ -990,6 +1001,25 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     return mb.toFixed(1)+' MB';
   }
 
+  // ── 다운로드 패널 메타 텍스트 — 언어 전환 시에도 최신 fetch 결과를
+  // 다시 그릴 수 있도록 상태를 따로 저장해둔다 ──
+  var dlInfo = { status:'loading' };
+  function renderDLMeta(){
+    var macMeta = document.getElementById('macMeta');
+    var winMeta = document.getElementById('winMeta');
+    if(dlInfo.status === 'loading'){
+      macMeta.textContent = LANG === 'en' ? 'Loading…' : '불러오는 중…';
+      winMeta.textContent = LANG === 'en' ? 'Loading…' : '불러오는 중…';
+    } else if(dlInfo.status === 'error'){
+      macMeta.textContent = LANG === 'en' ? 'Check GitHub Releases' : 'GitHub Releases에서 확인';
+      winMeta.textContent = LANG === 'en' ? 'Check GitHub Releases' : 'GitHub Releases에서 확인';
+    } else {
+      macMeta.textContent = 'v'+dlInfo.version + (dlInfo.macSize ? ' · '+dlInfo.macSize : '');
+      winMeta.textContent = 'v'+dlInfo.version + (dlInfo.winSize ? ' · '+dlInfo.winSize : '') +
+        (LANG === 'en' ? ' · Installer' : ' · 설치형');
+    }
+  }
+
   fetch('https://api.github.com/repos/EloyYang/buni/releases/latest')
     .then(function(r){ if(!r.ok) throw new Error('status '+r.status); return r.json(); })
     .then(function(data){
@@ -999,22 +1029,112 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
       var winPortable = assets.find(function(a){ return a.name === 'Buni-Windows.exe'; });
       var version = (data.tag_name || '').replace(/^v/,'');
 
-      if(mac){
-        document.getElementById('macBtn').href = mac.browser_download_url;
-        document.getElementById('macMeta').textContent = 'v'+version+' · '+fmtSize(mac.size);
-      }
-      if(winSetup){
-        document.getElementById('winBtn').href = winSetup.browser_download_url;
-        document.getElementById('winMeta').textContent = 'v'+version+' · '+fmtSize(winSetup.size)+' · 설치형';
-      }
-      if(winPortable){
-        document.getElementById('winPortableBtn').href = winPortable.browser_download_url;
-      }
+      dlInfo = { status:'ok', version:version, macSize: mac?fmtSize(mac.size):'', winSize: winSetup?fmtSize(winSetup.size):'' };
+
+      if(mac){ document.getElementById('macBtn').href = mac.browser_download_url; }
+      if(winSetup){ document.getElementById('winBtn').href = winSetup.browser_download_url; }
+      if(winPortable){ document.getElementById('winPortableBtn').href = winPortable.browser_download_url; }
+      renderDLMeta();
     })
     .catch(function(){
-      document.getElementById('macMeta').textContent = 'GitHub Releases에서 확인';
-      document.getElementById('winMeta').textContent = 'GitHub Releases에서 확인';
+      dlInfo = { status:'error' };
+      renderDLMeta();
     });
+
+  // ── 한/영 전환 ──
+  // 정적 텍스트는 data-ko/data-en(textContent) 또는 data-ko-html/data-en-html
+  // (innerHTML, <br>·<b> 등 포함) 속성으로 마크업에 미리 심어뒀고, JS로 그리는
+  // 동적 콘텐츠(기능 카드, 캐릭터 이름, 상태 말풍선 등)는 원본 데이터에 en 필드를
+  // 나란히 둬서 언어를 바꿀 때마다 다시 그린다.
+  var stateIdx  = FEATURES.findIndex(function(f){ return f.demo === 'state'; });
+  var permIdx   = FEATURES.findIndex(function(f){ return f.demo === 'permission'; });
+  var usageIdx  = FEATURES.findIndex(function(f){ return f.demo === 'usage'; });
+  var wanderIdx = FEATURES.findIndex(function(f){ return f.demo === 'wander'; });
+
+  function applyLang(lang){
+    LANG = lang;
+    document.documentElement.lang = lang;
+
+    var i, el;
+    var textEls = document.querySelectorAll('[data-ko]');
+    for(i=0; i<textEls.length; i++){
+      el = textEls[i];
+      var val = el.getAttribute('data-'+lang);
+      if(val !== null) el.textContent = val;
+    }
+    var htmlEls = document.querySelectorAll('[data-ko-html]');
+    for(i=0; i<htmlEls.length; i++){
+      el = htmlEls[i];
+      var hVal = el.getAttribute('data-'+lang+'-html');
+      if(hVal !== null) el.innerHTML = hVal;
+    }
+
+    FEATURES.forEach(function(f, fi){
+      var t = document.getElementById('featTitle-'+fi);
+      var d = document.getElementById('featDesc-'+fi);
+      if(t) t.textContent = lang === 'en' ? f.titleEn : f.title;
+      if(d) d.textContent = lang === 'en' ? f.descEn : f.desc;
+    });
+
+    CHARACTERS.forEach(function(ch, ci){
+      var n = document.getElementById('charsName-'+ci);
+      if(n) n.textContent = lang === 'en' ? ch.nameEn : ch.name;
+    });
+
+    if(permIdx > -1){
+      var pmTitle = document.getElementById('pmTitle-'+permIdx);
+      if(pmTitle) pmTitle.innerHTML = (lang === 'en' ? '🔐 Allow this? ' : '🔐 실행 허용? ') + '<span class="chev">⌄</span>';
+      var pmDeny = document.getElementById('pmDeny-'+permIdx); if(pmDeny) pmDeny.textContent = lang === 'en' ? 'Deny' : '거부';
+      var pmAllow = document.getElementById('pmAllow-'+permIdx); if(pmAllow) pmAllow.textContent = lang === 'en' ? 'Allow' : '허용';
+      var pmAllowAll = document.getElementById('pmAllowAll-'+permIdx); if(pmAllowAll) pmAllowAll.textContent = lang === 'en' ? 'Allow all' : '전체 허용';
+    }
+
+    if(wanderIdx > -1){
+      var wCap = document.getElementById('wanderCaption-'+wanderIdx);
+      if(wCap) wCap.textContent = lang === 'en' ? 'hop hop…' : '깡총깡총…';
+    }
+
+    if(stateIdx > -1){
+      var mCap = document.getElementById('miniCaption-'+stateIdx);
+      var mSt  = document.getElementById('miniStage-'+stateIdx);
+      if(mCap && mSt && mSt.getAttribute('data-state') === 'idle'){
+        mCap.textContent = STATES[0].caption[lang];
+      }
+    }
+
+    if(usageIdx > -1){
+      var udLeft = document.getElementById('udLeftLabel-'+usageIdx); if(udLeft) udLeft.textContent = lang === 'en' ? 'left' : '남음';
+      var udReset = document.getElementById('udResetLabel-'+usageIdx); if(udReset) udReset.textContent = lang === 'en' ? 'resets in' : '후 리셋';
+    }
+
+    var curState = STATES.filter(function(s){ return s.key === stage.getAttribute('data-state'); })[0];
+    if(curState){
+      caption.textContent = curState.caption[lang];
+      bubbleText.textContent = curState.bubble[lang] || '\xa0';
+    }
+
+    renderDLMeta();
+
+    var toggleBtn = document.getElementById('langToggle');
+    if(toggleBtn) toggleBtn.textContent = lang === 'en' ? '한국어' : 'EN';
+
+    try{ localStorage.setItem('buniLang', lang); }catch(e){}
+  }
+
+  var initialLang = 'ko';
+  try{
+    var saved = localStorage.getItem('buniLang');
+    if(saved === 'ko' || saved === 'en'){ initialLang = saved; }
+    else if(!/^ko/i.test(navigator.language || '')){ initialLang = 'en'; }
+  }catch(e){}
+  applyLang(initialLang);
+
+  var langToggleBtn = document.getElementById('langToggle');
+  if(langToggleBtn){
+    langToggleBtn.addEventListener('click', function(){
+      applyLang(LANG === 'en' ? 'ko' : 'en');
+    });
+  }
 
 })();
 </script>
