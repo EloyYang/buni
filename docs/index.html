@@ -271,18 +271,23 @@
   .pm-deny{ background:#d94033; } .pm-allow{ background:#33b359; } .pm-allow-all{ background:#4080e6; }
   .perm-bunny{ flex:0 0 auto; }
 
-  /* ── characters ──────────────────────────────────── */
-  .chars{ display:flex; gap:14px; flex-wrap:wrap; justify-content:center; }
-  .char-card{
-    background:var(--surface); border:1px solid var(--line); border-radius:16px;
-    width:148px; padding:20px 10px 16px; text-align:center;
-    display:flex; flex-direction:column; align-items:center; gap:10px;
-    cursor:default;
+  /* ── 캐릭터 6종 미리보기 (기능 카드 마우스오버) ── */
+  .chars-demo-row{ display:flex; gap:8px; padding-top:8px; justify-content:space-between; }
+  .chars-demo-item{ display:flex; flex-direction:column; align-items:center; gap:3px; }
+  .chars-demo-item svg.bunny{ width:34px; height:38px; overflow:visible; }
+  .chars-demo-item:hover svg.bunny{ animation:microhop 0.6s ease-out 1; }
+  .chars-demo-item .cd-name{ font-size:0.58rem; color:var(--muted); }
+
+  /* ── 딴짓 방해모드 미리보기 (기능 카드 마우스오버) ── */
+  .wander-demo{
+    position:relative; height:64px; border-radius:8px; margin-top:8px;
+    background:rgba(255,255,255,0.03); overflow:hidden;
   }
-  .char-card svg.bunny{ width:72px; height:80px; overflow:visible; }
-  .char-card:hover svg.bunny{ animation:microhop 0.6s ease-out 1; }
-  .char-card .cname{ font-weight:700; font-size:0.95rem; }
-  .char-card .cdesc{ font-size:0.78rem; color:var(--muted); }
+  .wander-demo .bunny-stage{ position:absolute; top:6px; width:44px; height:49px; left:6px; }
+  .wander-demo .bunny-stage svg.bunny{ animation:none; } /* 계속 위아래로 까닥이는 idlebob은 끄고 hop-once로만 튄다 */
+  .wander-demo.wandering .bunny-stage{ transition:left 0.9s cubic-bezier(.4,0,.2,1); }
+  .wander-demo .bunny-stage svg.bunny.hop-once{ animation:microhop 0.6s ease-out 1; }
+  .wander-caption{ position:absolute; right:8px; bottom:6px; font-family:var(--font-pixel); font-size:0.5rem; color:var(--muted); }
 
   /* ── download ────────────────────────────────────── */
   .download-panel{
@@ -335,7 +340,6 @@
     </div>
     <nav class="nav-links">
       <a href="#features">기능</a>
-      <a href="#characters">캐릭터</a>
       <a href="https://github.com/EloyYang/buni" target="_blank" rel="noopener">GitHub</a>
     </nav>
     <a class="btn btn-carrot btn-sm" href="#download">다운로드</a>
@@ -409,16 +413,6 @@
       <p>말풍선 하나, 게이지 바 하나에도 지금 세션이 뭘 하고 있는지가 담겨 있어요.</p>
     </div>
     <div class="features" id="featureGrid"></div>
-  </section>
-
-  <!-- ═══ CHARACTERS ═══ -->
-  <section id="characters">
-    <div class="section-head">
-      <span class="eyebrow">캐릭터 6종</span>
-      <h2>세션마다 다른 토끼를 배정하세요</h2>
-      <p>우클릭 → 캐릭터 변경. 마우스를 올려보면 인사해요.</p>
-    </div>
-    <div class="chars" id="charGrid"></div>
   </section>
 
   <!-- ═══ DOWNLOAD ═══ -->
@@ -599,27 +593,13 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     { name:'우니', desc:'연두토끼',      body:'#73cc61', accent:'#c9f0b8', face:'plain',    prop:'leaf' }
   ];
 
-  var charGrid = document.getElementById('charGrid');
-  CHARACTERS.forEach(function(ch){
-    var card = document.createElement('div');
-    card.className = 'char-card';
-    var svg = document.createElementNS(NS,'svg');
-    svg.setAttribute('class','bunny');
-    card.appendChild(svg);
-    var name = document.createElement('div'); name.className='cname'; name.textContent = ch.name;
-    var desc = document.createElement('div'); desc.className='cdesc'; desc.textContent = ch.desc;
-    card.appendChild(name); card.appendChild(desc);
-    charGrid.appendChild(card);
-    buildRabbitFull(svg, ch);
-  });
-
   // ── 기능 카드 ──
   var FEATURES = [
     { title:'상태 애니메이션', desc:'생각중엔 타이핑, 완료되면 팔을 번쩍 — 상태마다 다른 몸짓.', icon:'anim', demo:'state' },
     { title:'권한 요청 버블', desc:'도구 실행 허가가 필요하면 당근을 들고 물어봐요. 허용 · 전체 허용 · 거부.', icon:'carrot', demo:'permission' },
     { title:'사용량 게이지 + 레벨', desc:'5시간 윈도우 사용률을 10칸 바로, 월간 누적 토큰으로 레벨업.', icon:'gauge' },
-    { title:'캐릭터 6종', desc:'세션마다 다른 토끼를 배정해 한눈에 구분.', icon:'chars' },
-    { title:'딴짓 방해모드', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', icon:'wander', badge:true },
+    { title:'캐릭터 6종', desc:'세션마다 다른 토끼를 배정해 한눈에 구분.', icon:'chars', demo:'chars' },
+    { title:'딴짓 방해모드', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', icon:'wander', badge:true, demo:'wander' },
     { title:'SSH Remote 지원', desc:'VS Code(Cursor 포함)로 원격 서버에 붙어도 상태가 그대로 도착해요.', icon:'ssh' },
   ];
 
@@ -672,9 +652,63 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
             '</div>' +
           '</div>' +
         '</div>';
+    } else if(f.demo === 'chars'){
+      var itemsHtml = CHARACTERS.map(function(ch, ci){
+        return '<div class="chars-demo-item">' +
+                 '<svg class="bunny" id="charsDemo-'+ci+'" viewBox="0 0 70 78"></svg>' +
+                 '<span class="cd-name">'+ch.name+'</span>' +
+               '</div>';
+      }).join('');
+      demoHtml = '<div class="feature-demo"><div class="chars-demo-row">'+itemsHtml+'</div></div>';
+    } else if(f.demo === 'wander'){
+      demoHtml =
+        '<div class="feature-demo">' +
+          '<div class="wander-demo" id="wanderDemo-'+fi+'">' +
+            '<div class="bunny-stage" id="wanderStage-'+fi+'">' +
+              '<svg class="bunny bunny-back"  id="wanderBack-'+fi+'"  viewBox="0 0 70 78"></svg>' +
+              '<svg class="bunny bunny-front" id="wanderFront-'+fi+'" viewBox="0 0 70 78"></svg>' +
+            '</div>' +
+            '<div class="wander-caption">깡총깡총…</div>' +
+          '</div>' +
+        '</div>';
     }
     el.innerHTML = svgIcon + badge + '<h3>'+f.title+'</h3><p>'+f.desc+'</p>' + gaugeExtra + hint + demoHtml;
     grid.appendChild(el);
+
+    if(f.demo === 'chars'){
+      CHARACTERS.forEach(function(ch, ci){
+        buildRabbitFull(document.getElementById('charsDemo-'+ci), ch);
+      });
+    } else if(f.demo === 'wander'){
+      buildRabbitBack(document.getElementById('wanderBack-'+fi), CHARACTERS[0]);
+      buildRabbitFront(document.getElementById('wanderFront-'+fi), CHARACTERS[0]);
+
+      var wDemo  = document.getElementById('wanderDemo-'+fi);
+      var wStage = document.getElementById('wanderStage-'+fi);
+      var wPositions = [6, 60, 116, 60];
+      var wIdx = 0, wTimer = null;
+      function wStep(){
+        wStage.style.left = wPositions[wIdx % wPositions.length] + 'px';
+        var svgs = wStage.querySelectorAll('svg.bunny');
+        for(var k=0;k<svgs.length;k++){
+          svgs[k].classList.remove('hop-once');
+          void svgs[k].offsetWidth; // 리플로우 강제 — 애니메이션 재시작
+          svgs[k].classList.add('hop-once');
+        }
+        wIdx++;
+      }
+      el.addEventListener('mouseenter', function(){
+        if(reduceMotion) return;
+        wDemo.classList.add('wandering');
+        wStep();
+        wTimer = setInterval(wStep, 900);
+      });
+      el.addEventListener('mouseleave', function(){
+        clearInterval(wTimer);
+        wDemo.classList.remove('wandering');
+        wStage.style.left = '6px';
+      });
+    }
   });
 
   // ── 당근 노트북 SVG (LaptopView.swift 비율 참고) ──
