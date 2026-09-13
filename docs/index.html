@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buni for Claude Code</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&family=Press+Start+2P&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg: #14161a;
+    --surface: #1b1e25;
+    --surface-2: #23272f;
+    --line: #2c313b;
+    --ink: #eef1f6;
+    --muted: #8b93a6;
+    --carrot: #f28c2e;
+    --carrot-hi: #ffb066;
+    --leaf: #6bbf59;
+    --font-display: 'Fredoka', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+    --font-body: 'Manrope', -apple-system, 'Segoe UI', sans-serif;
+    --font-pixel: 'Press Start 2P', var(--font-display);
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  }
+
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--font-body);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{ color:inherit; }
+  h1,h2,h3{ font-family:var(--font-display); text-wrap:balance; margin:0; }
+  p{ margin:0; }
+  img{ max-width:100%; }
+  ::selection{ background:var(--carrot); color:#1a1206; }
+
+  .wrap{ max-width:1080px; margin:0 auto; padding:0 28px; }
+  section{ padding:96px 0; }
+  @media (max-width:640px){ section{ padding:64px 0; } .wrap{ padding:0 20px; } }
+
+  /* ── nav ─────────────────────────────────────────── */
+  header.nav{
+    position:sticky; top:0; z-index:40;
+    background:rgba(20,22,26,0.86);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav-inner{
+    max-width:1080px; margin:0 auto; padding:14px 28px;
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+  }
+  .wordmark{ display:flex; align-items:center; gap:10px; font-family:var(--font-display); font-weight:700; font-size:1.15rem; }
+  .wordmark svg{ width:30px; height:30px; display:block; }
+  .nav-links{ display:flex; align-items:center; gap:22px; font-size:0.92rem; color:var(--muted); }
+  .nav-links a{ text-decoration:none; transition:color .15s; white-space:nowrap; }
+  .nav-links a:hover{ color:var(--ink); }
+  @media (max-width:520px){ .nav-links{ display:none; } }
+  .btn{
+    font-family:var(--font-body); font-weight:700; font-size:0.92rem;
+    padding:10px 18px; border-radius:10px; border:1px solid transparent;
+    text-decoration:none; display:inline-flex; align-items:center; gap:8px;
+    cursor:pointer; transition:transform .15s ease, background .15s, border-color .15s;
+    white-space:nowrap;
+  }
+  .btn:active{ transform:translateY(1px); }
+  .btn-carrot{ background:var(--carrot); color:#1a1206; }
+  .btn-carrot:hover{ background:var(--carrot-hi); }
+  .btn-ghost{ background:transparent; border-color:var(--line); color:var(--ink); }
+  .btn-ghost:hover{ border-color:var(--muted); }
+  .btn-sm{ padding:8px 14px; font-size:0.85rem; }
+
+  /* ── eyebrow / pixel label ───────────────────────── */
+  .eyebrow{
+    font-family:var(--font-pixel); font-size:0.6rem; letter-spacing:0.04em;
+    color:var(--carrot); display:inline-flex; align-items:center; gap:10px;
+  }
+  .eyebrow::before{ content:''; width:14px; height:6px; background:var(--carrot); }
+
+  /* ── hero ────────────────────────────────────────── */
+  .hero{ padding:88px 0 60px; }
+  .hero-grid{ display:grid; grid-template-columns:1.05fr 0.95fr; gap:56px; align-items:center; }
+  @media (max-width:860px){ .hero-grid{ grid-template-columns:1fr; } }
+  .hero h1{ font-size:clamp(2.1rem, 4.6vw, 3.1rem); line-height:1.16; margin:18px 0 20px; }
+  .hero h1 .hl{ color:var(--carrot); }
+  .hero p.lede{ font-size:1.08rem; color:var(--muted); max-width:46ch; margin-bottom:30px; }
+  .hero-ctas{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  .hero-note{ margin-top:14px; font-family:var(--font-mono); font-size:0.8rem; color:var(--muted); }
+  .hero-note b{ color:var(--ink); font-weight:600; }
+
+  /* ── 모니터 목업: 실제 부니가 화면에서 얼마나 작게 보이는지 보여주기 위한
+     가상의 "내 모니터" — 캐릭터·말풍선·게이지바는 전부 실측 pt 그대로,
+     이 배경만 넓게 잡아 크기 대비가 드러나게 한다 ── */
+  .demo-stage{
+    position:relative; border-radius:14px; overflow:hidden;
+    background: linear-gradient(180deg, #1b1e26, #14161a 70%);
+    border:1px solid var(--line);
+    aspect-ratio: 16 / 10;
+  }
+  .demo-titlebar{ display:flex; gap:6px; padding:14px 16px 0; position:relative; z-index:1; }
+  .demo-titlebar span{ width:9px; height:9px; border-radius:50%; background:#3a3f4a; }
+  .demo-sidebar{
+    position:absolute; left:0; top:0; bottom:0; width:15%;
+    background:rgba(255,255,255,0.025); border-right:1px solid rgba(255,255,255,0.05);
+  }
+  .demo-codelines{
+    position:absolute; left:15%; right:0; top:34px; bottom:0; padding:14px 20px; opacity:0.55; pointer-events:none;
+  }
+  .demo-codelines i{ display:block; height:7px; border-radius:2px; margin-bottom:12px; background:rgba(255,255,255,0.06); }
+  .demo-codelines i.accent{ background:rgba(242,140,46,0.16); }
+  .demo-codelines i.leaf{ background:rgba(107,191,89,0.14); }
+
+  /* 화면 오른쪽, 세로 중간쯤에 떠 있는 위치 */
+  .demo-row{
+    position:absolute; top:50%; right:16px; z-index:1; transform:translateY(-50%);
+    display:flex; align-items:flex-start; gap:19px; /* 실제 HStack(spacing:19) */
+  }
+  .demo-char-col{ display:flex; flex-direction:column; align-items:center; }
+
+  /* 실제 ChatBubbleView.swift 수치 그대로: padding 14/10, radius 14,
+     꼬리 16×13을 14pt 바깥으로 밀어 2pt만 버블에 겹치게(이음매 없음) */
+  .speech-wrap{ position:relative; padding-bottom:6px; opacity:0; transform:translateX(4px); transition:opacity .25s, transform .25s; }
+  [data-state]:not([data-state="idle"]) .speech-wrap{ opacity:1; transform:translateX(0); }
+  .speech-bubble{
+    position:relative;
+    font-family:var(--font-mono); font-size:11px; font-weight:500; color:#161616;
+    background:#fff; padding:10px 14px; border-radius:14px; max-width:150px;
+    box-shadow:0 6px 16px rgba(0,0,0,0.35); white-space:pre-line; line-height:1.35;
+  }
+  .speech-tail{
+    position:absolute; right:-14px; top:50%; transform:translateY(-50%);
+    width:0; height:0; border-style:solid; border-width:6.5px 0 6.5px 16px;
+    border-color:transparent transparent transparent #fff;
+  }
+
+  /* 실제 characterView.frame(width:60, height:70) 그대로 — SCALE(=p=6.5)로
+     그린 viewBox(70×78)를 1pt = 1px로 그대로 옮긴다 */
+  .bunny-stage{ position:relative; width:70px; height:78px; }
+  .bunny-stage svg.bunny{ position:absolute; inset:0; width:100%; height:100%; display:block; overflow:visible; }
+  /* 실제 코드에서 노트북·소품도 bodyDY를 그대로 물려받아 캐릭터와 함께 움직이므로
+     동일한 idlebob/bighop 애니메이션을 공유시켜 따로 노는 것처럼 안 보이게 한다 */
+  .bunny-stage svg.bunny,
+  .bunny-stage .accessory{ animation:idlebob 2.6s ease-in-out infinite; }
+  .accessory{ position:absolute; opacity:0; transition:opacity .25s; pointer-events:none; }
+  .accessory svg{ display:block; width:100%; height:100%; }
+  /* z순서: back(팔·몸통) → 노트북(bunny-laptop) → front(머리·얼굴) → 당근류 프롭
+     — 실제 코드의 그리기 순서 그대로. 위치는 JS placeAccessory()가 p단위로 계산 */
+  .acc-prop{ z-index:4; }
+  .acc-spark{ z-index:4; }
+  .bunny-laptop{ z-index:2; opacity:0; transition:opacity .25s; }
+  [data-state="thinking"] .bunny-laptop,
+  [data-state="tool"] .bunny-laptop{ opacity:1; }
+  [data-state="permission"] .acc-prop{ opacity:1; }
+  [data-state="done"] .acc-prop{ opacity:1; }
+  [data-state="done"] .acc-spark{ opacity:1; }
+  [data-state="done"] .bunny-stage svg.bunny,
+  [data-state="done"] .bunny-stage .accessory{ animation:bighop 0.7s ease-out 1; }
+
+  /* 실제 VStack(spacing:-5) — 캐릭터와 게이지바가 살짝 겹친다 */
+  .usage-bar{ width:66px; margin-top:-5px; opacity:0; transition:opacity .3s; }
+  .demo-caption{
+    font-family:var(--font-mono); font-size:0.68rem; color:var(--muted);
+    position:absolute; left:16px; bottom:14px; z-index:1;
+  }
+
+  @keyframes idlebob{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-4px); } }
+  @keyframes bighop{ 0%{ transform:translateY(0); } 35%{ transform:translateY(-22px) scale(1.03,0.97); } 60%{ transform:translateY(0) scale(0.97,1.03); } 100%{ transform:translateY(0); } }
+  @keyframes microhop{ 0%,100%{ transform:translateY(0); } 40%{ transform:translateY(-10px); } 55%{ transform:translateY(0) scale(1.06,0.94); } 100%{ transform:translateY(0); } }
+  /* leftArmDX:+1.55p, base:1.00p±swing:0.60p (idle 1.1p 대비) — SCALE(6.5) 반영 */
+  @keyframes armTypeL{ 0%,100%{ transform:translate(10.1px,-4.6px); } 50%{ transform:translate(10.1px,3.3px); } }
+  @keyframes armTypeR{ 0%,100%{ transform:translate(-10.1px,3.3px); } 50%{ transform:translate(-10.1px,-4.6px); } }
+
+  /* ── 실제 캐릭터 뷰(각 *CharacterView.swift) 비율로 그린 몸통 ── */
+  svg.bunny rect{ shape-rendering:crispEdges; }
+  svg.bunny .eye{ transition:transform .1s; transform-box:fill-box; transform-origin:center; }
+  svg.bunny .ear{ transition:transform .18s; transform-box:fill-box; transform-origin:50% 100%; }
+  .blinking .eye{ transform:scaleY(0.14); }
+  .perking .ear-left{ transform:scaleY(0.5); }
+  [data-state="permission"] .eye, [data-state="done"] .eye{ transform:scaleY(1.5); }
+  .arm{ transition:transform .3s ease; transform-box:fill-box; transform-origin:center; }
+  [data-state="thinking"] .arm-left, [data-state="tool"] .arm-left{ animation:armTypeL 0.7s ease-in-out infinite; }
+  [data-state="thinking"] .arm-right, [data-state="tool"] .arm-right{ animation:armTypeR 0.7s ease-in-out infinite; }
+  /* leftArmDY:-2.8p — 실제 코드는 X는 그대로 두고 Y만 든다(옆으로 안 벌어짐) */
+  [data-state="permission"] .arm-left{ transform:translateY(-18.2px); }
+  [data-state="done"] .arm-left{ transform:translateY(-18.2px); }
+  [data-state="done"] .arm-right{ transform:translateY(-18.2px); }
+
+  /* ── 실제 UsageBarView.swift 그대로: 10칸 게이지 + ★ 레벨 + 리셋 카운트다운
+     (segmentH:9 segmentGap:2 borderW:1.5, 라벨 폰트 7pt — 전부 실측값) ── */
+  [data-state]:not([data-state="idle"]) .usage-bar{ opacity:1; }
+  .ub-level{ font-family:var(--font-mono); font-size:7px; font-weight:700; color:#f2cc26; text-align:left; padding:0 2px 2px; }
+  .ub-track{ border:1.5px solid rgba(255,255,255,0.55); border-radius:3px; padding:1.5px; }
+  .ub-segs{ display:flex; gap:2px; height:9px; }
+  .ub-segs i{ flex:1; border-radius:1px; background:rgba(255,255,255,0.10); position:relative; overflow:hidden; }
+  .ub-segs i.on{ background:var(--seg-color, var(--leaf)); }
+  .ub-segs i.on::after{ content:''; position:absolute; inset:0 0 auto; height:2px; background:rgba(255,255,255,0.28); }
+  .ub-foot{ display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:7px; color:rgba(255,255,255,0.45); padding:2px 2px 0; }
+
+  /* ── easter egg strip ────────────────────────────── */
+  .egg{
+    display:flex; gap:36px; align-items:center;
+    background:var(--surface); border:1px solid var(--line); border-radius:20px;
+    padding:32px 36px;
+  }
+  @media (max-width:700px){ .egg{ flex-direction:column; text-align:center; } }
+  .egg-art{ flex:0 0 auto; width:150px; }
+  .egg-art svg{ width:100%; height:auto; }
+  .egg h3{ font-size:1.35rem; margin-bottom:8px; }
+  .egg p{ color:var(--muted); max-width:52ch; }
+  .egg .tag{ font-family:var(--font-pixel); font-size:0.56rem; color:var(--leaf); display:block; margin-bottom:10px; }
+
+  /* ── section headers ─────────────────────────────── */
+  .section-head{ margin-bottom:44px; max-width:60ch; }
+  .section-head h2{ font-size:clamp(1.6rem,3vw,2.1rem); margin-top:12px; }
+  .section-head p{ color:var(--muted); margin-top:12px; font-size:1.02rem; }
+
+  /* ── features ────────────────────────────────────── */
+  .features{ display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  @media (max-width:860px){ .features{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:560px){ .features{ grid-template-columns:1fr; } }
+  .feature{
+    background:var(--surface); border:1px solid var(--line); border-radius:16px;
+    padding:22px 20px; display:flex; flex-direction:column; gap:12px;
+    transition:border-color .18s, transform .18s;
+  }
+  .feature:hover{ border-color:#3a4150; transform:translateY(-3px); }
+  .feature .ficon{ width:38px; height:38px; }
+  .feature h3{ font-size:1.05rem; }
+  .feature p{ color:var(--muted); font-size:0.92rem; }
+  .feature .badge-new{
+    font-family:var(--font-pixel); font-size:0.5rem; color:#1a1206; background:var(--carrot);
+    padding:4px 6px; border-radius:5px; align-self:flex-start;
+  }
+  .gauge{ display:flex; gap:3px; margin-top:2px; }
+  .gauge i{ display:block; width:9px; height:14px; border-radius:2px; background:var(--line); }
+  .gauge i.on1{ background:var(--leaf); } .gauge i.on2{ background:#e8c34a; } .gauge i.on3{ background:#e2603f; }
+
+  /* ── characters ──────────────────────────────────── */
+  .chars{ display:flex; gap:14px; flex-wrap:wrap; justify-content:center; }
+  .char-card{
+    background:var(--surface); border:1px solid var(--line); border-radius:16px;
+    width:148px; padding:20px 10px 16px; text-align:center;
+    display:flex; flex-direction:column; align-items:center; gap:10px;
+    cursor:default;
+  }
+  .char-card svg.bunny{ width:72px; height:80px; overflow:visible; }
+  .char-card:hover svg.bunny{ animation:microhop 0.6s ease-out 1; }
+  .char-card .cname{ font-weight:700; font-size:0.95rem; }
+  .char-card .cdesc{ font-size:0.78rem; color:var(--muted); }
+
+  /* ── download ────────────────────────────────────── */
+  .download-panel{
+    background:linear-gradient(160deg, var(--surface), var(--surface-2));
+    border:1px solid var(--line); border-radius:22px; padding:44px;
+  }
+  @media (max-width:640px){ .download-panel{ padding:28px 22px; } }
+  .dl-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:28px; }
+  @media (max-width:640px){ .dl-grid{ grid-template-columns:1fr; } }
+  .dl-card{
+    background:var(--bg); border:1px solid var(--line); border-radius:16px;
+    padding:22px; display:flex; flex-direction:column; gap:12px; position:relative;
+  }
+  .dl-card.is-detected{ border-color:var(--carrot); box-shadow:0 0 0 1px var(--carrot) inset; }
+  .dl-card .os-row{ display:flex; align-items:center; gap:10px; }
+  .dl-card .os-row svg{ width:22px; height:22px; }
+  .dl-card .os-name{ font-weight:700; font-size:1.05rem; }
+  .dl-card .rec{
+    font-family:var(--font-pixel); font-size:0.5rem; color:#1a1206; background:var(--carrot);
+    padding:3px 6px; border-radius:5px; margin-left:auto;
+  }
+  .dl-card .meta{ font-family:var(--font-mono); font-size:0.78rem; color:var(--muted); }
+  .dl-secondary{ font-size:0.82rem; color:var(--muted); text-decoration:underline; text-underline-offset:3px; }
+  .dl-secondary:hover{ color:var(--ink); }
+  .term{
+    margin-top:26px; background:var(--bg); border:1px solid var(--line); border-radius:12px;
+    padding:14px 18px; font-family:var(--font-mono); font-size:0.86rem; color:#c9e9b8;
+    overflow-x:auto; white-space:pre;
+  }
+  .term .p{ color:var(--muted); }
+
+  footer{ border-top:1px solid var(--line); padding:36px 0; }
+  .foot-inner{ display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; align-items:center; font-size:0.85rem; color:var(--muted); }
+  .foot-inner a{ text-decoration:underline; text-underline-offset:3px; }
+
+  @media (prefers-reduced-motion:reduce){
+    .bunny-stage svg.bunny{ animation:none !important; }
+    * { animation-duration:0.001ms !important; }
+  }
+</style>
+</head>
+<body>
+
+
+<header class="nav">
+  <div class="nav-inner">
+    <div class="wordmark">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#f28c2e"/><path d="M9 9c0-2 1-4 3-4s3 2 3 4" stroke="#1a1206" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="10.5" y="9" width="3" height="8" rx="1.4" fill="#1a1206"/></svg>
+      Buni
+    </div>
+    <nav class="nav-links">
+      <a href="#features">기능</a>
+      <a href="#characters">캐릭터</a>
+      <a href="https://github.com/EloyYang/buni" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <a class="btn btn-carrot btn-sm" href="#download">다운로드</a>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ═══ HERO ═══ -->
+  <section class="hero">
+    <div class="hero-grid">
+      <div>
+        <span class="eyebrow">CLAUDE CODE COMPANION</span>
+        <h1>코드가 돌아가는 동안,<br><span class="hl">부니</span>가 화면 한켠을 지켜요.</h1>
+        <p class="lede">Claude Code가 생각하고, 도구를 쓰고, 권한을 요청할 때마다 — 픽셀토끼 부니가 화면 위에 떠서 지금 무슨 일이 벌어지고 있는지 몸짓으로 알려줍니다.</p>
+        <div class="hero-ctas">
+          <a class="btn btn-carrot" href="#download">지금 다운로드</a>
+          <a class="btn btn-ghost" href="https://github.com/EloyYang/buni" target="_blank" rel="noopener">GitHub에서 보기 ↗</a>
+        </div>
+        <p class="hero-note">macOS 13+ · Windows · <b>Claude Code</b> CLI 필요</p>
+      </div>
+
+      <div class="demo-stage" id="demoStage" data-state="idle">
+        <div class="demo-sidebar"></div>
+        <div class="demo-codelines" id="demoCodelines"></div>
+        <div class="demo-titlebar"><span></span><span></span><span></span></div>
+        <div class="demo-row">
+          <div class="speech-wrap">
+            <div class="speech-bubble">
+              <span id="bubbleText">&nbsp;</span>
+              <div class="speech-tail"></div>
+            </div>
+          </div>
+          <div class="demo-char-col">
+            <div class="bunny-stage">
+              <svg class="bunny bunny-back"   id="heroBack"   viewBox="0 0 70 78"></svg>
+              <svg class="bunny bunny-laptop" id="heroLaptop" viewBox="0 0 70 78"></svg>
+              <svg class="bunny bunny-front"  id="heroFront"  viewBox="0 0 70 78"></svg>
+              <div class="accessory acc-prop"  id="accProp"></div>
+              <div class="accessory acc-spark" id="accSpark"></div>
+            </div>
+            <div class="usage-bar" id="usageBar">
+              <div class="ub-level">★ Lv.<span id="ubLevel">3</span></div>
+              <div class="ub-track"><div class="ub-segs" id="ubSegs"></div></div>
+              <div class="ub-foot"><span id="ubPercent">62%</span><span id="ubReset">↺ 3:47</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="demo-caption" id="demoCaption">대기중</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ EASTER EGG: carrot macbook ═══ -->
+  <section style="padding-top:0;">
+    <div class="egg">
+      <div class="egg-art" id="eggArt"></div>
+      <div>
+        <span class="tag">진짜로 이렇게 생겼어요</span>
+        <h3>맥북 로고, 사과 대신 한 입 베어문 당근</h3>
+        <p>부니가 "생각중"일 때 무릎 위에 올려두는 노트북입니다. 실제 앱 코드에 그대로 들어있는 디테일이에요 — 은색 뚜껑, 힌지, 키보드까지 전부 픽셀로 그렸습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ FEATURES ═══ -->
+  <section id="features">
+    <div class="section-head">
+      <span class="eyebrow">기능</span>
+      <h2>작지만, 할 건 다 합니다</h2>
+      <p>말풍선 하나, 게이지 바 하나에도 지금 세션이 뭘 하고 있는지가 담겨 있어요.</p>
+    </div>
+    <div class="features" id="featureGrid"></div>
+  </section>
+
+  <!-- ═══ CHARACTERS ═══ -->
+  <section id="characters">
+    <div class="section-head">
+      <span class="eyebrow">캐릭터 6종</span>
+      <h2>세션마다 다른 토끼를 배정하세요</h2>
+      <p>우클릭 → 캐릭터 변경. 마우스를 올려보면 인사해요.</p>
+    </div>
+    <div class="chars" id="charGrid"></div>
+  </section>
+
+  <!-- ═══ DOWNLOAD ═══ -->
+  <section id="download">
+    <div class="download-panel">
+      <span class="eyebrow">다운로드</span>
+      <h2 style="margin-top:14px; font-size:clamp(1.6rem,3vw,2.1rem);">지금 바로 데려오기</h2>
+      <p style="color:var(--muted); margin-top:10px;">GitHub Releases에서 최신 버전을 자동으로 가져옵니다.</p>
+
+      <div class="dl-grid" id="dlGrid">
+        <div class="dl-card" id="dlMac">
+          <div class="os-row">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.365 1.43c0 1.14-.415 2.06-1.246 2.756-.855.68-1.786 1.08-2.79.997-.09-1.1.42-2.19 1.11-2.87.72-.72 1.94-1.25 2.926-1.32.02.13.02.28 0 .437zm3.53 15.66c-.36.83-.53 1.2-.99 1.93-.65 1.04-1.57 2.33-2.71 2.34-1.02.01-1.28-.67-2.66-.66-1.38.01-1.67.67-2.69.66-1.14-.01-2.01-1.18-2.66-2.22-1.82-2.9-2.02-6.3-.9-8.11.8-1.29 2.06-2.05 3.24-2.05 1.2 0 1.96.68 2.95.68.96 0 1.55-.68 2.94-.68 1.05 0 2.16.57 2.95 1.56-2.6 1.42-2.18 5.14.48 6.55z"/></svg>
+            <span class="os-name">macOS</span>
+          </div>
+          <p class="meta" id="macMeta">불러오는 중…</p>
+          <a class="btn btn-carrot" id="macBtn" href="https://github.com/EloyYang/buni/releases/latest">macOS용 다운로드</a>
+        </div>
+        <div class="dl-card" id="dlWin">
+          <div class="os-row">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5l7.6-1.05v7.34H3V5.5zm8.6-1.18L21 3v9.8H11.6V4.32zM3 12.8h7.6v7.36L3 19.1V12.8zm8.6 0H21V21l-9.4-1.3V12.8z"/></svg>
+            <span class="os-name">Windows</span>
+          </div>
+          <p class="meta" id="winMeta">불러오는 중…</p>
+          <a class="btn btn-carrot" id="winBtn" href="https://github.com/EloyYang/buni/releases/latest">Windows용 다운로드</a>
+          <a class="dl-secondary" id="winPortableBtn" href="https://github.com/EloyYang/buni/releases/latest" target="_blank" rel="noopener">설치 없이 포터블 exe로 받기 →</a>
+        </div>
+      </div>
+
+      <div class="term">$ git clone https://github.com/EloyYang/buni.git
+$ cd buni <span class="p">&& bash install.sh</span></div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <span>개인 비상업적 사용 무료 · 무단 배포·수정 금지 · © EloyYang</span>
+    <a href="https://github.com/EloyYang/buni" target="_blank" rel="noopener">github.com/EloyYang/buni</a>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  // ── 실제 RabbitCharacterView.swift 비율 그대로 그리는 토끼 (p=6.5 단위계) ──
+  // 귀/몸통/팔/발/머리/눈/코 위치를 실제 오프셋(×p)에 스케일만 곱해 재현한다.
+  var NS = 'http://www.w3.org/2000/svg';
+  // 실제 RabbitCharacterView.swift의 p(=6.5)를 그대로 SCALE로 써서 1pt = 1px로
+  // 렌더링한다 — 모니터 위에서 실제로 보이는 크기 그대로.
+  var SCALE = 6.5, CX = 35, CY = 39;
+
+  function partRect(cls, dx, dy, w, h, fill){
+    var el = document.createElementNS(NS, 'rect');
+    el.setAttribute('x', (CX + dx*SCALE - w*SCALE/2).toFixed(1));
+    el.setAttribute('y', (CY + dy*SCALE - h*SCALE/2).toFixed(1));
+    el.setAttribute('width',  (w*SCALE).toFixed(1));
+    el.setAttribute('height', (h*SCALE).toFixed(1));
+    el.setAttribute('class', cls);
+    if(fill) el.setAttribute('fill', fill);
+    return el;
+  }
+
+  // 액세서리(당근류 소품·완료 반짝이) div를 캐릭터와 같은 좌표계(p단위)로
+  // 배치 — partRect와 동일한 변환을 써서 SCALE이 바뀌어도 항상 정렬이 맞는다.
+  function placeAccessory(el, dx, dy, wP, hP){
+    var w = wP*SCALE, h = hP*SCALE;
+    el.style.width  = w.toFixed(1) + 'px';
+    el.style.height = h.toFixed(1) + 'px';
+    el.style.left = (CX + dx*SCALE - w/2).toFixed(1) + 'px';
+    el.style.top  = (CY + dy*SCALE - h/2).toFixed(1) + 'px';
+  }
+
+  function ellipse(dx, dy, w, h, fill){
+    var el = document.createElementNS(NS, 'ellipse');
+    el.setAttribute('cx', (CX + dx*SCALE).toFixed(1));
+    el.setAttribute('cy', (CY + dy*SCALE).toFixed(1));
+    el.setAttribute('rx', (w*SCALE/2).toFixed(1));
+    el.setAttribute('ry', (h*SCALE/2).toFixed(1));
+    el.setAttribute('fill', fill);
+    return el;
+  }
+
+  // 귀 치수 — 각 *CharacterView.swift에 실제로 적힌 값 그대로
+  var EAR = {
+    '부니':{ w:1.6,  h:3.4, ox:1.6,  oy:3.5, rot:0 },
+    '두니':{ w:1.7,  h:3.0, ox:1.5,  oy:3.2, rot:0 },
+    '푸니':{ w:1.65, h:3.4, ox:1.55, oy:3.5, rot:0 },
+    '주니':{ w:1.6,  h:3.3, ox:1.7,  oy:3.4, rot:5 },
+    '누니':{ w:1.6,  h:3.8, ox:1.5,  oy:3.8, rot:0 },
+    '우니':{ w:1.8,  h:3.2, ox:1.5,  oy:3.3, rot:0 }
+  };
+
+  // 뒤 레이어: 귀·몸통·팔·발 (실제 코드에서 노트북보다 먼저 그려지는 부분)
+  function appendBackParts(svg, ch){
+    var body = ch.body, ear = EAR[ch.name];
+    [-1, 1].forEach(function(side){
+      var g = document.createElementNS(NS, 'g');
+      g.setAttribute('class', 'ear ear-' + (side < 0 ? 'left' : 'right'));
+      if(ear.rot) g.style.transform = 'rotate(' + (side*ear.rot) + 'deg)';
+      g.appendChild(partRect('', side*ear.ox, -ear.oy, ear.w, ear.h, body));
+      g.appendChild(partRect('', side*ear.ox, -ear.oy - 0.1, ear.w*0.5, ear.h*0.79, ch.accent));
+      svg.appendChild(g);
+    });
+    svg.appendChild(partRect('', 0, 1.5, 4.6, 2.5, body));
+    svg.appendChild(partRect('arm arm-left',  -2.68, 1.1, 1.5, 0.9, body));
+    svg.appendChild(partRect('arm arm-right',  2.68, 1.1, 1.5, 0.9, body));
+    svg.appendChild(partRect('', -1.2, 2.9, 1.5, 0.9, body));
+    svg.appendChild(partRect('',  1.2, 2.9, 1.5, 0.9, body));
+  }
+
+  // 앞 레이어: 머리·표정 포인트·눈·코 (노트북 위에 덮이는 부분)
+  function appendFrontParts(svg, ch){
+    var body = ch.body, accent = ch.accent;
+    svg.appendChild(partRect('', 0, -0.8, 5.6, 2.6, body));
+
+    if(ch.face === 'brows'){        // 두니 — 두꺼운 눈썹 + 볼 수염
+      var b1 = document.createElementNS(NS,'g'); b1.style.transform = 'rotate(-10deg)';
+      b1.appendChild(partRect('', -1.45, -1.35, 0.95, 0.22, '#2e1c10'));
+      svg.appendChild(b1);
+      var b2 = document.createElementNS(NS,'g'); b2.style.transform = 'rotate(10deg)';
+      b2.appendChild(partRect('',  1.45, -1.35, 0.95, 0.22, '#2e1c10'));
+      svg.appendChild(b2);
+    } else if(ch.face === 'blushBig'){   // 푸니 — 큰 볼 홍조
+      svg.appendChild(ellipse(-1.9, -0.30, 1.6, 1.0, accent));
+      svg.appendChild(ellipse( 1.9, -0.30, 1.6, 1.0, accent));
+    } else if(ch.face === 'blushThin'){  // 누니 — 옅은 볼 홍조
+      svg.appendChild(ellipse(-1.55, -0.42, 0.68, 0.28, accent));
+      svg.appendChild(ellipse( 1.55, -0.42, 0.68, 0.28, accent));
+    } else if(ch.face === 'cheek'){      // 주니 — 볼 터치
+      svg.appendChild(ellipse(-1.8, -0.35, 1.4, 1.0, accent));
+      svg.appendChild(ellipse( 1.8, -0.35, 1.4, 1.0, accent));
+    }
+
+    svg.appendChild(partRect('eye eye-left',  -1.4, -0.9, 0.65, 0.75, '#1a1206'));
+    svg.appendChild(partRect('eye eye-right',  1.4, -0.9, 0.65, 0.75, '#1a1206'));
+
+    if(ch.noseHeart){   // 푸니 — 하트 코
+      var nc = '#e8397a';
+      svg.appendChild(partRect('', -0.17, -0.39, 0.30, 0.30, nc));
+      svg.appendChild(partRect('',  0.17, -0.39, 0.30, 0.30, nc));
+      svg.appendChild(partRect('',  0,    -0.22, 0.52, 0.28, nc));
+      svg.appendChild(partRect('',  0,     0.00, 0.30, 0.24, nc));
+      svg.appendChild(partRect('',  0,     0.18, 0.16, 0.18, nc));
+    } else {
+      svg.appendChild(partRect('', 0, -0.25, 0.55, 0.4, accent));
+    }
+
+    if(ch.face === 'brows'){   // 두니 — 볼 수염 자국
+      svg.appendChild(partRect('', -0.85, -0.10, 0.18, 0.18, 'rgba(46,28,16,0.35)'));
+      svg.appendChild(partRect('',  0.85, -0.10, 0.18, 0.18, 'rgba(46,28,16,0.35)'));
+    }
+  }
+
+  function buildRabbitFull(svg, ch){
+    svg.setAttribute('viewBox', '0 0 70 78'); svg.innerHTML = '';
+    appendBackParts(svg, ch); appendFrontParts(svg, ch);
+  }
+  function buildRabbitBack(svg, ch){
+    svg.setAttribute('viewBox', '0 0 70 78'); svg.innerHTML = '';
+    appendBackParts(svg, ch);
+  }
+  function buildRabbitFront(svg, ch){
+    svg.setAttribute('viewBox', '0 0 70 78'); svg.innerHTML = '';
+    appendFrontParts(svg, ch);
+  }
+
+  // ── 캐릭터 6종 — 실제 CharacterStore.swift 이름 + 각 CharacterView.swift의
+  // 고유 외형(귀 모양, 표정 포인트, 코 모양, 권한요청 때 드는 소품)까지 반영 ──
+  var CHARACTERS = [
+    { name:'부니', desc:'흰토끼 · 기본', body:'#e9ecf3', accent:'#f2b8c6', face:'plain',    prop:'carrot' },
+    { name:'두니', desc:'갈색토끼',      body:'#996644', accent:'#c78a66', face:'brows',    prop:'carrot' },
+    { name:'푸니', desc:'핑크토끼',      body:'#fac7e0', accent:'#fff0f6', face:'blushBig', prop:'heart', noseHeart:true },
+    { name:'주니', desc:'주황토끼',      body:'#f28a1f', accent:'#ffd9a3', face:'cheek',    prop:'orange' },
+    { name:'누니', desc:'노란토끼',      body:'#f5db38', accent:'#fff6c2', face:'blushThin',prop:'star' },
+    { name:'우니', desc:'연두토끼',      body:'#73cc61', accent:'#c9f0b8', face:'plain',    prop:'leaf' }
+  ];
+
+  var charGrid = document.getElementById('charGrid');
+  CHARACTERS.forEach(function(ch){
+    var card = document.createElement('div');
+    card.className = 'char-card';
+    var svg = document.createElementNS(NS,'svg');
+    svg.setAttribute('class','bunny');
+    card.appendChild(svg);
+    var name = document.createElement('div'); name.className='cname'; name.textContent = ch.name;
+    var desc = document.createElement('div'); desc.className='cdesc'; desc.textContent = ch.desc;
+    card.appendChild(name); card.appendChild(desc);
+    charGrid.appendChild(card);
+    buildRabbitFull(svg, ch);
+  });
+
+  // ── 기능 카드 ──
+  var FEATURES = [
+    { title:'상태 애니메이션', desc:'생각중엔 타이핑, 완료되면 팔을 번쩍 — 상태마다 다른 몸짓.', icon:'anim' },
+    { title:'권한 요청 버블', desc:'도구 실행 허가가 필요하면 당근을 들고 물어봐요. 허용 · 전체 허용 · 거부.', icon:'carrot' },
+    { title:'사용량 게이지 + 레벨', desc:'5시간 윈도우 사용률을 10칸 바로, 월간 누적 토큰으로 레벨업.', icon:'gauge' },
+    { title:'캐릭터 6종', desc:'세션마다 다른 토끼를 배정해 한눈에 구분.', icon:'chars' },
+    { title:'딴짓 방해모드', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', icon:'wander', badge:true },
+    { title:'SSH Remote 지원', desc:'VS Code(Cursor 포함)로 원격 서버에 붙어도 상태가 그대로 도착해요.', icon:'ssh' },
+  ];
+
+  var ICONS = {
+    anim: '<circle cx="19" cy="19" r="16" fill="none" stroke="#f28c2e" stroke-width="2.4"/><path d="M12 19c2-5 4-5 7-5s5 0 7 5" stroke="#f28c2e" stroke-width="2.4" fill="none" stroke-linecap="round"/>',
+    carrot: '<path d="M19 6c0 4-2 7-2 7h4s-2-3-2-7z" fill="#6bbf59"/><path d="M19 13l6 6-3 12-9-3z" fill="#f28c2e"/>',
+    gauge: '<rect x="4" y="16" width="5" height="12" rx="1.5" fill="#6bbf59"/><rect x="12" y="10" width="5" height="18" rx="1.5" fill="#e8c34a"/><rect x="20" y="4" width="5" height="24" rx="1.5" fill="#e2603f"/><rect x="28" y="14" width="5" height="14" rx="1.5" fill="#2c313b"/>',
+    chars: '<circle cx="13" cy="19" r="8" fill="#f2a8c4"/><circle cx="26" cy="19" r="8" fill="#f2903a" opacity="0.9"/>',
+    wander: '<path d="M8 27c4-10 8-16 11-16s7 6 11 16" stroke="#f28c2e" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="3 5"/><circle cx="30" cy="10" r="3" fill="#f28c2e"/>',
+    ssh: '<rect x="6" y="9" width="26" height="18" rx="2.4" fill="none" stroke="#8b93a6" stroke-width="2.2"/><path d="M12 15l4 3.5-4 3.5" stroke="#6bbf59" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 22h6" stroke="#6bbf59" stroke-width="2.2" stroke-linecap="round"/>'
+  };
+
+  var grid = document.getElementById('featureGrid');
+  FEATURES.forEach(function(f){
+    var el = document.createElement('div');
+    el.className = 'feature';
+    var svgIcon = '<svg class="ficon" viewBox="0 0 38 32">'+ICONS[f.icon]+'</svg>';
+    var badge = f.badge ? '<span class="badge-new">NEW</span>' : '';
+    var gaugeExtra = f.icon === 'gauge' ? '<div class="gauge"><i class="on1"></i><i class="on1"></i><i class="on1"></i><i class="on1"></i><i class="on2"></i><i class="on2"></i><i class="on3"></i><i></i><i></i><i></i></div>' : '';
+    el.innerHTML = svgIcon + badge + '<h3>'+f.title+'</h3><p>'+f.desc+'</p>' + gaugeExtra;
+    grid.appendChild(el);
+  });
+
+  // ── 당근 노트북 SVG (LaptopView.swift 비율 참고) ──
+  function laptopSVG(scale){
+    scale = scale || 1;
+    var w = 120*scale, h = 96*scale;
+    return '<svg viewBox="0 0 120 96" width="'+w+'" height="'+h+'">' +
+      '<rect x="18" y="10" width="84" height="58" rx="4" fill="#c7cbd4"/>' +
+      '<rect x="18" y="10" width="84" height="8" rx="4" fill="#e4e7ee"/>' +
+      '<rect x="10" y="70" width="100" height="12" rx="4" fill="#a7acb8"/>' +
+      '<rect x="16" y="80" width="88" height="5" rx="2.5" fill="#82868f"/>' +
+      // carrot leaves
+      '<path d="M58 30l-4-9 8 3z" fill="#6bbf59"/>' +
+      '<path d="M62 30l4-9-8 3z" fill="#6bbf59"/>' +
+      '<rect x="57" y="24" width="6" height="7" fill="#6bbf59"/>' +
+      // carrot body (tapered stack)
+      '<rect x="47" y="31" width="26" height="6" fill="#f28c2e"/>' +
+      '<rect x="49" y="37" width="22" height="6" fill="#f28c2e"/>' +
+      '<rect x="51" y="43" width="18" height="6" fill="#f28c2e"/>' +
+      '<rect x="53" y="49" width="14" height="6" fill="#f28c2e"/>' +
+      '<rect x="55" y="55" width="10" height="6" fill="#f28c2e"/>' +
+      '<rect x="57" y="61" width="6" height="5" fill="#f28c2e"/>' +
+      // bite mark
+      '<rect x="66" y="35" width="9" height="8" fill="#c7cbd4"/>' +
+      '</svg>';
+  }
+  document.getElementById('eggArt').innerHTML = laptopSVG(1.25);
+
+  // ── 히어로용 노트북 — 캐릭터와 같은 좌표계(partRect)로 직접 그려서
+  // 실제 LaptopView.swift처럼 몸통·팔과 정확히 같은 자리(무릎 위)에 앉는다.
+  // (독립된 장식용 div였을 때는 얼굴을 가리는 등 정렬이 어긋났었음) ──
+  function buildLaptop(svg){
+    svg.setAttribute('viewBox', '0 0 70 78'); svg.innerHTML = '';
+    var silver = '#c7cbd4', silverHi = '#e4e7ee', silverDark = '#82868f', silverMid = '#a7acb8';
+    svg.appendChild(partRect('', 0, 1.48, 3.15, 2.15, silver));      // 뚜껑
+    svg.appendChild(partRect('', 0, 0.41, 3.15, 0.17, silverHi));    // 뚜껑 상단 하이라이트
+    svg.appendChild(partRect('', -1.52, 1.48, 0.12, 2.15, silverDark));
+    svg.appendChild(partRect('',  1.52, 1.48, 0.12, 2.15, silverDark));
+
+    // 당근 로고 (LaptopView.swift의 carrotLogoView, 뚜껑 중앙 y:1.42 기준)
+    var LY = 1.42;
+    var leaf1 = document.createElementNS(NS,'g'); leaf1.style.transform = 'rotate(-20deg)';
+    leaf1.appendChild(partRect('', -0.10, LY-0.56, 0.12, 0.28, '#3fa83f')); svg.appendChild(leaf1);
+    var leaf2 = document.createElementNS(NS,'g'); leaf2.style.transform = 'rotate(20deg)';
+    leaf2.appendChild(partRect('',  0.10, LY-0.56, 0.12, 0.28, '#3fa83f')); svg.appendChild(leaf2);
+    svg.appendChild(partRect('', 0, LY-0.52, 0.12, 0.24, '#3fa83f'));
+    [[0.52,-0.28,0.14],[0.46,-0.14,0.14],[0.40,0.00,0.14],[0.32,0.14,0.14],[0.22,0.28,0.14],[0.12,0.41,0.13]]
+      .forEach(function(row){ svg.appendChild(partRect('', 0, LY+row[1], row[0], row[2], '#f28c2e')); });
+    svg.appendChild(partRect('', 0.22, LY-0.20, 0.20, 0.18, silver)); // 한 입 베어문 자국
+
+    svg.appendChild(partRect('', 0, 2.64, 3.50, 0.20, silverDark));  // 힌지
+    svg.appendChild(partRect('', 0, 2.90, 3.80, 0.44, silverMid));   // 키보드 베이스
+    svg.appendChild(partRect('', 0, 3.13, 3.80, 0.16, silverDark));  // 앞면 두께
+    svg.appendChild(partRect('', 0, 2.82, 3.10, 0.13, '#767b85'));   // 키 배열 힌트
+    svg.appendChild(partRect('', 0, 3.02, 1.0,  0.22, '#767b85'));   // 트랙패드
+  }
+
+  // ── 권한요청/완료 때 드는 소품 — 캐릭터마다 다름(부니·두니=당근, 푸니=하트,
+  // 주니=오렌지, 누니=별, 우니=잎). 실제 각 *CharacterView.swift의 prop 뷰 참고 ──
+  function propSVG(type){
+    switch(type){
+      case 'carrot':
+        return '<svg viewBox="0 0 20 34"><path d="M6 8l-3-7 6 3z" fill="#6bbf59"/><path d="M14 8l3-7-6 3z" fill="#6bbf59"/>' +
+          '<rect x="7" y="6" width="6" height="6" fill="#6bbf59"/>' +
+          '<rect x="2" y="9" width="16" height="6" rx="1" fill="#f28c2e"/>' +
+          '<rect x="4" y="15" width="12" height="6" rx="1" fill="#f28c2e"/>' +
+          '<rect x="6" y="21" width="8" height="6" rx="1" fill="#f28c2e"/>' +
+          '<rect x="8" y="27" width="4" height="5" rx="1" fill="#f28c2e"/></svg>';
+      case 'heart':
+        return '<svg viewBox="0 0 28 26"><path d="M14 25C4 18 1 12 1 8a7 7 0 0113-3 7 7 0 0113 3c0 4-3 10-13 17z" fill="#e8397a"/>' +
+          '<path d="M6 9a4 4 0 014-4" stroke="#ff9dc0" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>';
+      case 'orange':
+        return '<svg viewBox="0 0 26 32"><path d="M13 6l2-5 1.2 3.6z" fill="#2e8b3d"/><circle cx="13" cy="19" r="11" fill="#ff9812"/>' +
+          '<circle cx="9" cy="14" r="2.6" fill="#fff" opacity="0.35"/></svg>';
+      case 'star':
+        return '<svg viewBox="0 0 28 28"><path d="M14 1l3.5 8.6 9.2.7-7 6 2.2 9-8-5-8 5 2.2-9-7-6 9.2-.7z" fill="#ffe01a"/></svg>';
+      case 'leaf':
+        return '<svg viewBox="0 0 22 32"><path d="M11 1C4 6 2 15 6 24c2 4 5 6 5 6s3-2 5-6c4-9 2-18-5-23z" fill="#3fa83f"/>' +
+          '<path d="M11 4v24" stroke="#2c7a2c" stroke-width="1.4" stroke-linecap="round"/></svg>';
+      default: return '';
+    }
+  }
+
+  // ── 완료 스파클 ──
+  document.getElementById('accSpark').innerHTML =
+    '<svg viewBox="0 0 70 40">' +
+    '<path d="M10 20l3-8 3 8 8 3-8 3-3 8-3-8-8-3z" fill="#f2d34e"/>' +
+    '<path d="M52 8l2-5 2 5 5 2-5 2-2 5-2-5-5-2z" fill="#f2d34e"/>' +
+    '<path d="M60 24l1.6-4 1.6 4 4 1.6-4 1.6-1.6 4-1.6-4-4-1.6z" fill="#f2d34e"/>' +
+    '</svg>';
+
+  // ── 히어로 데모 상태 사이클 ──
+  var HERO_CH = CHARACTERS[0]; // 부니
+  var heroBack   = document.getElementById('heroBack');
+  var heroLaptop = document.getElementById('heroLaptop');
+  var heroFront  = document.getElementById('heroFront');
+  var bunnyStage = document.querySelector('.bunny-stage');
+  buildRabbitBack(heroBack, HERO_CH);
+  buildLaptop(heroLaptop);
+  buildRabbitFront(heroFront, HERO_CH);
+  var accProp = document.getElementById('accProp');
+  accProp.innerHTML = propSVG(HERO_CH.prop);
+  // 실제 carrotView.offset(x:-4.0p, y:0.1p+leftArmDY(-2.8p)) 위치 그대로.
+  // carrotView 내부 도형은 y:-0.4875p만큼 아래로 치우쳐 있어(잎이 더 위로
+  // 뻗어 있음) 그 값까지 더해 실제 보이는 무게중심(-3.19p)에 맞췄다.
+  placeAccessory(accProp, -4.0, -3.19, 1.5, 3.08);
+  placeAccessory(document.getElementById('accSpark'), 0, -2.6, 3.2, 1.8);
+
+  // 가짜 코드 라인 (모니터 배경 — 장식용, 실제 코드와 무관)
+  (function(){
+    var el = document.getElementById('demoCodelines');
+    var widths = [78,55,68,40,72,50,60,35,66,48,58,30];
+    widths.forEach(function(w, i){
+      var line = document.createElement('i');
+      line.style.width = w + '%';
+      if(i === 2) line.className = 'accent';
+      if(i === 7) line.className = 'leaf';
+      el.appendChild(line);
+    });
+  })();
+
+  var STATES = [
+    { key:'idle',       caption:'대기중',   bubble:'' },
+    { key:'thinking',   caption:'생각중',   bubble:'코딩중' },
+    { key:'tool',       caption:'도구 사용', bubble:'Edit' },
+    { key:'permission', caption:'권한 요청', bubble:'Bash 실행을\n허용할까요?' },
+    { key:'done',       caption:'완료!',    bubble:'완료 ✓' },
+  ];
+  var stage = document.getElementById('demoStage');
+  var caption = document.getElementById('demoCaption');
+  var bubbleText = document.getElementById('bubbleText');
+  var idx = 0;
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function stepState(){
+    var s = STATES[idx % STATES.length];
+    stage.setAttribute('data-state', s.key);
+    caption.textContent = s.caption;
+    bubbleText.textContent = s.bubble || ' ';
+    idx++;
+  }
+  stepState();
+  if(!reduceMotion){ setInterval(stepState, 2200); }
+
+  // 눈 깜빡임 (권한요청/완료 중엔 눈이 커진 상태라 생략)
+  if(!reduceMotion){
+    setInterval(function(){
+      var s = stage.getAttribute('data-state');
+      if(s === 'permission' || s === 'done') return;
+      bunnyStage.classList.add('blinking');
+      setTimeout(function(){ bunnyStage.classList.remove('blinking'); }, 130);
+    }, 3400);
+
+    // 귀 쫑긋 (대기중일 때만, 실제 앱의 idle 애니메이션 재현)
+    setInterval(function(){
+      if(stage.getAttribute('data-state') !== 'idle') return;
+      bunnyStage.classList.add('perking');
+      setTimeout(function(){ bunnyStage.classList.remove('perking'); }, 220);
+    }, 2600);
+  }
+
+  // ── 사용량 게이지 바 (실제 UsageBarView.swift: 10칸, 초록→노랑→빨강 임계값) ──
+  (function(){
+    var totalSegments = 10, filledCount = 6; // 예시: 62% 사용
+    var segs = document.getElementById('ubSegs');
+    for(var i = 0; i < totalSegments; i++){
+      var ratio = (i + 1) / totalSegments;
+      var color = ratio <= 0.5 ? '#4ddb59' : ratio <= 0.75 ? '#f2cc26' : '#f2503a';
+      var seg = document.createElement('i');
+      if(i < filledCount){ seg.className = 'on'; seg.style.setProperty('--seg-color', color); }
+      segs.appendChild(seg);
+    }
+  })();
+
+  // ── OS 감지 + GitHub 최신 릴리즈 ──
+  var ua = navigator.userAgent || '';
+  var isWin = /Windows/i.test(ua);
+  var isMac = /Mac OS X|Macintosh/i.test(ua) && !isWin;
+  if(isWin){ document.getElementById('dlWin').classList.add('is-detected'); }
+  else if(isMac){ document.getElementById('dlMac').classList.add('is-detected'); }
+
+  function fmtSize(bytes){
+    if(!bytes) return '';
+    var mb = bytes/1024/1024;
+    return mb.toFixed(1)+' MB';
+  }
+
+  fetch('https://api.github.com/repos/EloyYang/buni/releases/latest')
+    .then(function(r){ if(!r.ok) throw new Error('status '+r.status); return r.json(); })
+    .then(function(data){
+      var assets = data.assets || [];
+      var mac = assets.find(function(a){ return /^Buni-macOS.*\.zip$/i.test(a.name); });
+      var winSetup = assets.find(function(a){ return /^Buni-Windows-Setup.*\.exe$/i.test(a.name); });
+      var winPortable = assets.find(function(a){ return a.name === 'Buni-Windows.exe'; });
+      var version = (data.tag_name || '').replace(/^v/,'');
+
+      if(mac){
+        document.getElementById('macBtn').href = mac.browser_download_url;
+        document.getElementById('macMeta').textContent = 'v'+version+' · '+fmtSize(mac.size);
+      }
+      if(winSetup){
+        document.getElementById('winBtn').href = winSetup.browser_download_url;
+        document.getElementById('winMeta').textContent = 'v'+version+' · '+fmtSize(winSetup.size)+' · 설치형';
+      }
+      if(winPortable){
+        document.getElementById('winPortableBtn').href = winPortable.browser_download_url;
+      }
+    })
+    .catch(function(){
+      document.getElementById('macMeta').textContent = 'GitHub Releases에서 확인';
+      document.getElementById('winMeta').textContent = 'GitHub Releases에서 확인';
+    });
+
+})();
+</script>
+
+</body>
+</html>
