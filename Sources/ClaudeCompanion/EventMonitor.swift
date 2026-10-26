@@ -10,6 +10,17 @@ private struct ClaudeEvent: Decodable {
     let id: String?
     let sessionStartTs: String?
     let ts: Double?   // Unix timestamp — thinking 이벤트 신선도 판단용
+    let file: String?      // background_start — 작업 출력 파일 경로
+    let ids: [String]?     // background — 아직 돌고 있는 작업 ID 목록
+    let dir: String?       // background — 세션 스크래치패드 경로
+}
+
+/// run_in_background로 띄워져 아직 돌고 있는 백그라운드 작업 하나
+private struct BackgroundTask {
+    let id: String
+    /// Claude Code가 실시간 출력을 쓰는 파일. 비어 있으면(원격 세션 등) 추적 불가.
+    var file: String
+    var desc: String
 }
 
 class EventMonitor {
@@ -32,16 +43,39 @@ class EventMonitor {
     /// 0보다 크면 오래 걸리는 도구가 실제로 돌고 있는 것이라 이벤트가 없어도 작업 중이다.
     private var pendingTools  = 0
 
+    /// 지금 실행 중인(아직 tool_done이 안 온) 도구 이름 — "확인 대기" 추정에 쓴다.
+    private var pendingToolName: String?
+    /// 이번 도구 실행에 대해 "확인이 필요한 것 같다" 안내를 이미 띄웠는지
+    private var waitHintShown = false
+    /// 도구가 시작된 뒤 이만큼(초) 아무 이벤트도 없으면, 클로드가 확인 창을 띄우고
+    /// 사용자를 기다리는 중으로 본다.
+    ///
+    /// 브라우저 사이트 권한("이 주소로 작업할까요?")이나 JavaScript 실행 확인처럼,
+    /// 클로드가 PreToolUse 훅을 쏜 **뒤에** 자체 확인 창을 띄우는 경우가 있다.
+    /// 그때는 훅 이벤트가 하나도 오지 않아(실측: 확인 창이 떠 있는 동안 기록 0건)
+    /// 부니가 알 방법이 이것뿐이다. 도구가 조용히 멈춰 있다는 사실로 역추정한다.
+    private let userWaitHintSeconds: TimeInterval = 20
+    /// 확인 요청(ask_user·확인 대기 추정) 버블을 이만큼(초) 조용하면 정리한다.
+    /// 이 버블은 승인 버튼이 없어 사용자가 터미널에서 답하는데, 답한 뒤에도
+    /// 후속 훅 이벤트(tool_done 등)가 안 오는 경우가 있어 버블이 영영 남았다.
+    private let askBubbleExpireSeconds: TimeInterval = 120
     /// 실행 중인 도구가 없는데 이 시간(초)만큼 새 이벤트가 없으면 대기 상태로 되돌린다.
     /// 훅이 누락되거나 세션이 조용히 끝났을 때 "도구 실행 중" 버블이 굳는 것을 방지.
     private let idleFallbackSeconds: TimeInterval = 300
 
-    /// "백그라운드 작업 중" 표시가 이 시간(초)만큼 갱신되지 않으면 대기로 되돌린다.
-    /// 훅에는 "백그라운드 작업이 끝났다"는 신호가 따로 없어(다음 Stop이 와야
-    /// background_tasks 최신 상태를 알 수 있음), 실제로는 끝났는데 문구만 계속
-    /// 남아있는 문제가 있었다. idleFallbackSeconds보다 짧게 잡아, 정보가 낡았다
-    /// 싶으면 "완료"로 단정하지 않고 그냥 조용한 대기 상태로 돌아간다.
+    /// 출력 파일을 추적할 수 없는 백그라운드 작업(원격 세션, 구버전 훅)에만 쓰는
+    /// 예비 타임아웃. 파일을 추적할 수 있으면 실제 종료 시점을 읽어서 판단하므로
+    /// 이 값은 쓰이지 않는다.
     private let backgroundWorkStaleSeconds: TimeInterval = 90
+
+    /// 아직 돌고 있는 백그라운드 작업 (id → 정보). queue에서만 접근한다.
+    private var backgroundTasks: [String: BackgroundTask] = [:]
+    /// Stop 훅이 백그라운드 작업 때문에 "완료" 표시를 미룬 상태 —
+    /// 마지막 작업까지 끝나면 그때 완료 버블을 띄운다.
+    private var completionDeferredByBackground = false
+
+    /// 5시간 한도에 걸려 있는지 (queue에서만 접근하는 사본 — controller를 교차 스레드로 읽지 않기 위해)
+    private var isLimitReachedSnapshot = false
 
     /// done(Stop 훅) 이벤트는 클로드가 한 번 응답을 마칠 때마다 매번 오므로,
     /// 그대로 바로 "완료했어요!"를 띄우면 아직 세션이 안 끝났는데(예: 클로드가
@@ -93,6 +127,7 @@ class EventMonitor {
         t.schedule(deadline: .now(), repeating: .milliseconds(500))
         t.setEventHandler { [weak self] in
             self?.pollFile()
+            self?.reapFinishedBackgroundTasks()
             self?.checkStaleness()
         }
         t.resume()
@@ -116,9 +151,19 @@ class EventMonitor {
         pendingCompletionWork?.cancel(); pendingCompletionWork = nil
     }
 
+    /// 작업을 하나 끝냈을 때 코인을 준다. 이미 완료 표시 중이면(같은 완료가
+    /// 두 경로로 들어오는 경우) 중복 지급하지 않는다.
+    private func rewardIfNewCompletion() {
+        if case .completed = controller.state { return }
+        ShopStore.shared.rewardCompletion()
+    }
+
     private func updateMonthlyTokens() {
         let total = TokenUsageReader.readThisMonth()
-        DispatchQueue.main.async { self.controller.monthlyTokens = total }
+        DispatchQueue.main.async {
+            self.controller.monthlyTokens = total
+            ShopStore.shared.updateLevel(fromTokens: total)
+        }
     }
 
     // MARK: - 서버 플랜 사용량
@@ -164,15 +209,101 @@ class EventMonitor {
                 return fmt.date(from: s)
             }()
         }
+        // 한도에 걸린 동안에는 세션을 살려둬야 리셋을 알려줄 수 있다 (checkStaleness에서 사용)
+        let wasLimited = isLimitReachedSnapshot
+        isLimitReachedSnapshot = utilization >= 100
+        // 한도 → 한도 해제로 바뀐 순간 한 번만 알린다
+        let justReset = wasLimited && utilization < 100
+
         DispatchQueue.main.async {
-            // 한도 창이 새로 시작됐거나 아직 한도 전이면 숨김 상태 해제
-            // (다음 한도 도달 때 안내 버블이 다시 뜨도록)
-            if self.controller.serverResetsAt != resetsAt || utilization < 100 {
-                self.controller.limitNoticeDismissed = false
-            }
             self.controller.serverUtilization = utilization
             self.controller.serverResetsAt    = resetsAt
+            // 숨김은 "이번 한도 창이 리셋될 때까지"라 시간이 지나면 저절로 풀린다.
+            // (예전에는 여기서 resets_at이 조금만 달라져도 숨김을 풀어버려,
+            //  숨긴 안내가 잠시 뒤 다시 뜨는 문제가 있었다)
+            self.controller.refreshLimitNoticeDismissal()
+            if justReset { self.controller.announceLimitReset() }
         }
+    }
+
+    // MARK: - 백그라운드 작업 추적
+    //
+    // Claude Code는 run_in_background로 띄운 작업의 출력을
+    // <스크래치패드>/tasks/<작업ID>.output 에 실시간으로 쓰고, 끝나면 파일 끝에
+    // "[exited with code N]" (강제 종료면 "[killed]") 을 붙인다. 훅에는 종료 신호가
+    // 없지만 이 마커를 보면 실제 종료 시점을 정확히 알 수 있다.
+
+    /// Stop 훅이 알려준 "아직 돌고 있는 작업" 목록에 맞춰 추적 목록을 갱신한다.
+    private func reconcileBackgroundTasks(ids: [String]?, dir: String?,
+                                          desc: String?, count: Int) {
+        let fallbackDesc = (desc?.isEmpty == false) ? desc! : L.t("백그라운드 작업", "Background task")
+
+        guard let ids, !ids.isEmpty else {
+            // 구버전 훅이라 작업 ID가 없다 — 파일 추적을 못 하므로 타임아웃에 맡긴다
+            if backgroundTasks.isEmpty {
+                backgroundTasks["_untracked"] = BackgroundTask(id: "_untracked",
+                                                               file: "", desc: fallbackDesc)
+            }
+            return
+        }
+
+        var next: [String: BackgroundTask] = [:]
+        for id in ids {
+            var task = backgroundTasks[id] ?? BackgroundTask(id: id, file: "", desc: fallbackDesc)
+            if task.file.isEmpty, let dir, !dir.isEmpty {
+                task.file = "\(dir)/tasks/\(id).output"
+            }
+            next[id] = task
+        }
+        backgroundTasks = next   // Stop에 없는 작업은 이미 끝난 것
+    }
+
+    private func backgroundLabel() -> String {
+        let base = backgroundTasks.values.first?.desc ?? L.t("백그라운드 작업", "Background task")
+        let n    = backgroundTasks.count
+        return n > 1 ? L.t("⏳ \(base) 외 \(n - 1)건", "⏳ \(base) +\(n - 1) more") : "⏳ \(base)"
+    }
+
+    /// 출력 파일에 종료 마커가 찍힌 작업을 추적 목록에서 걷어낸다.
+    private func reapFinishedBackgroundTasks() {
+        guard !backgroundTasks.isEmpty else { return }
+
+        let finished = backgroundTasks.values
+            .filter { !$0.file.isEmpty && Self.isTaskFinished(file: $0.file) }
+            .map(\.id)
+        guard !finished.isEmpty else { return }
+
+        for id in finished { backgroundTasks.removeValue(forKey: id) }
+
+        let remaining   = backgroundTasks.count
+        let label       = backgroundLabel()
+        let showDone    = remaining == 0 && completionDeferredByBackground
+        if remaining == 0 { completionDeferredByBackground = false }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // 백그라운드 표시 중일 때만 건드린다 — 그사이 새 작업이 시작됐으면 그대로 둔다
+            guard case .backgroundWork = self.controller.state else { return }
+            if remaining > 0 {
+                self.controller.update(to: .backgroundWork(label))
+            } else if showDone {
+                self.rewardIfNewCompletion()
+                self.controller.update(to: .completed)
+            } else {
+                self.controller.update(to: .ready)
+            }
+        }
+    }
+
+    /// 파일 끝에 Claude Code가 붙이는 종료 마커가 있으면 끝난 작업
+    private static func isTaskFinished(file: String) -> Bool {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: file),
+              let size  = attrs[.size] as? Int, size > 0,
+              let fh    = FileHandle(forReadingAtPath: file) else { return false }
+        defer { fh.closeFile() }
+        fh.seek(toFileOffset: UInt64(max(0, size - 256)))
+        let tail = String(data: fh.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return tail.contains("[exited with code") || tail.contains("[killed]")
     }
 
     // MARK: - 세션 종료 감지
@@ -184,23 +315,67 @@ class EventMonitor {
     private func checkStaleness() {
         let quietFor = Date().timeIntervalSince(lastEventDate)
 
+        // 도구가 시작됐는데 한참 아무 소식이 없다 = 클로드가 확인 창을 띄우고
+        // 기다리는 중일 가능성이 높다. 훅이 오지 않는 확인 창(브라우저 사이트
+        // 권한 등)을 사용자에게 알리는 유일한 방법이라 여기서 추정한다.
+        // Bash처럼 원래 오래 도는 도구까지 잡으면 오탐이 잦아, 보통 몇 초 안에
+        // 끝나는 MCP 도구에만 적용한다.
+        if pendingTools > 0, !waitHintShown, quietFor > userWaitHintSeconds,
+           let tool = pendingToolName, Self.mayPromptWithoutHook(tool) {
+            waitHintShown = true
+            let label: String = formatToolName(tool.lowercased())
+            let suffix: String = L.t(" — 클로드 창에서 확인을 기다리는 중일 수 있어요",
+                                     " — Claude may be waiting for your confirmation")
+            let hint: String = label + suffix
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                switch self.controller.state {
+                case .toolUse, .toolRead, .thinking:
+                    self.controller.pendingPermissionId = nil
+                    self.controller.update(to: .permission(hint))
+                default:
+                    break
+                }
+            }
+        }
+
+        // 승인 버튼 없는 확인 버블(ask_user·확인 대기 추정)은 터미널에서 답해도
+        // 후속 이벤트가 안 올 수 있어, 한동안 조용하면 스스로 정리한다.
+        if quietFor > askBubbleExpireSeconds {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard case .permission = self.controller.state,
+                      self.controller.pendingPermissionId == nil else { return }
+                self.controller.update(to: .ready)
+            }
+        }
+
         // 진행 중인 작업이 없는데 작업 상태로 남아 있으면 대기 상태로 되돌린다.
         // 오래 걸리는 도구가 실행 중(tool_use 후 tool_done 미도착)이면 이벤트가
         // 없는 게 정상이므로 건드리지 않는다.
         if pendingTools == 0 {
+            // 출력 파일을 추적 중인 작업이 하나라도 있으면, 조용하다고 해서 끝난 게
+            // 아니다(오래 걸리는 빌드 등) — 실제 종료는 reap 쪽이 판단한다.
+            let hasTrackedBackground = backgroundTasks.values.contains { !$0.file.isEmpty }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 switch self.controller.state {
                 case .thinking, .toolUse, .toolRead:
                     if quietFor > self.idleFallbackSeconds { self.controller.update(to: .ready) }
                 case .backgroundWork:
-                    if quietFor > self.backgroundWorkStaleSeconds { self.controller.update(to: .ready) }
+                    if !hasTrackedBackground, quietFor > self.backgroundWorkStaleSeconds {
+                        self.controller.update(to: .ready)
+                    }
                 default:
                     break   // 완료·권한·알림 버블은 사용자가 확인해야 하므로 유지
                 }
             }
         }
 
+        // 오래 도는 백그라운드 작업이 남아 있으면 조용해도 세션이 끝난 게 아니다
+        guard backgroundTasks.isEmpty else { return }
+        // 한도에 걸려 대기 중인 세션도 살려둔다 — 리셋되면 다시 알려줘야 하므로
+        guard !isLimitReachedSnapshot else { return }
         guard quietFor > 1800 else { return }
         fireSessionEnded()
     }
@@ -245,6 +420,8 @@ class EventMonitor {
             // 안 끝났는데 중간에 완료 문구가 떴다 사라지는 것 방지
             pendingCompletionWork?.cancel(); pendingCompletionWork = nil
             pendingTools += 1
+            pendingToolName = event.tool
+            waitHintShown   = false
             let raw      = (event.tool ?? "tool").lowercased()
             let toolName = formatToolName(raw)
             let isRead   = ["read", "grep", "websearch", "webfetch", "glob"].contains(raw)
@@ -265,6 +442,8 @@ class EventMonitor {
         case "tool_done":
             if isReplaying { break }
             pendingTools = max(0, pendingTools - 1)
+            if pendingTools == 0 { pendingToolName = nil }
+            waitHintShown = false
             controller.update(to: .thinking)  // 도구 완료 후 항상 thinking(타이핑)으로 복귀
         case "thinking":
             // 30초 이내의 이벤트는 replay 중에도 처리 — 새 세션 시작 시 토큰 소비 구간부터 모션 적용
@@ -272,6 +451,11 @@ class EventMonitor {
             if isReplaying && isStale { break }
             pendingCompletionWork?.cancel(); pendingCompletionWork = nil
             pendingTools = 0   // 새 턴 시작 — 이전 턴에서 남은 카운트 정리
+            pendingToolName = nil
+            waitHintShown   = false
+            // 새 턴이 시작됐으니 "백그라운드 끝나면 완료 띄우기"는 더 이상 유효하지 않다
+            // (안 끄면 작업 중에 난데없이 완료 버블이 뜬다)
+            completionDeferredByBackground = false
             switch controller.state {
             case .ready, .completed:
                 controller.update(to: .thinking)
@@ -282,10 +466,28 @@ class EventMonitor {
         case "done":
             if isReplaying { break }   // 과거 done 재생 시 세션 조기 제거 방지
             pendingTools = 0
+            pendingToolName = nil
+            waitHintShown   = false
+            // Stop이 백그라운드 작업 없이 done을 보냈다 = 남은 작업이 없다는 뜻
+            backgroundTasks.removeAll()
+            completionDeferredByBackground = false
             pendingCompletionWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in self?.controller.update(to: .completed) }
+            let work = DispatchWorkItem { [weak self] in
+                self?.rewardIfNewCompletion()
+                self?.controller.update(to: .completed)
+            }
             pendingCompletionWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + completionDebounceSeconds, execute: work)
+
+        case "background_start":
+            // PostToolUse에서 온 "백그라운드 작업이 시작됐다" 신호.
+            // 클로드는 아직 작업 중이므로 버블은 그대로 두고, 추적 목록에만 넣는다.
+            // (버블 전환은 턴이 끝나는 Stop 시점의 background 이벤트가 담당)
+            if isReplaying { break }
+            let id = (event.id?.isEmpty == false) ? event.id! : UUID().uuidString
+            backgroundTasks[id] = BackgroundTask(id: id,
+                                                 file: event.file ?? "",
+                                                 desc: event.message ?? L.t("백그라운드 작업", "Background task"))
 
         case "background":
             // Stop 훅이 왔지만 run_in_background로 띄운 작업이 아직 돌고 있는 경우 —
@@ -293,21 +495,35 @@ class EventMonitor {
             if isReplaying { break }
             pendingTools = 0
             pendingCompletionWork?.cancel(); pendingCompletionWork = nil
-            let count = event.count ?? 1
-            let base  = event.message ?? "백그라운드 작업"
-            let label = count > 1 ? "\(base) 외 \(count - 1)건" : base
-            controller.update(to: .backgroundWork("⏳ \(label)"))
+            // Stop이 알려준 목록이 가장 정확하므로 그것으로 맞춘다
+            reconcileBackgroundTasks(ids: event.ids, dir: event.dir,
+                                     desc: event.message, count: event.count ?? 1)
+            completionDeferredByBackground = true
+            let label = backgroundLabel()
+            DispatchQueue.main.async { [weak self] in
+                self?.controller.update(to: .backgroundWork(label))
+            }
         case "notification":
             let notifStale = event.ts.map { Date().timeIntervalSince1970 - $0 > 30 } ?? true
             if isReplaying && notifStale { break }
             if case .permission = controller.state, controller.pendingPermissionId == nil { break }
-            controller.update(to: .notification(event.message ?? "알림"), autohideAfter: 5)
+            controller.update(to: .notification(event.message ?? L.t("알림", "Notification")), autohideAfter: 5)
         case "permission":
             if isReplaying { break }   // 과거 이벤트 재생으로 지난 권한 버블이 되살아나는 것 방지
-            controller.update(to: .permission(event.message ?? "권한 요청"))
+            controller.update(to: .permission(event.message ?? L.t("권한 요청", "Permission request")))
         case "ask_user":
-            if isReplaying { break }   // 이미 답한 확인 요청이 재시작 때 다시 뜨는 것 방지
-            let msg = event.message ?? "터미널에서 선택해 주세요"
+            // 이미 답한 확인 요청이 재시작 때 되살아나는 건 막되, 방금 온 질문은
+            // 재생 중이라도 띄운다 — 완료 버블을 닫아 세션이 사라진 뒤 클로드가
+            // "다음엔 뭘 할까요?"를 물으면 세션이 새로 감지되면서 첫 폴링이
+            // 재생 모드라, 예전에는 그 질문이 통째로 무시됐다.
+            let askStale = event.ts.map { Date().timeIntervalSince1970 - $0 > 30 } ?? true
+            if isReplaying && askStale { break }
+            // 질문 내용이 비어 올 수도 있다(구버전 훅, 질문 텍스트가 없는 경우) —
+            // ?? 는 빈 문자열을 걸러내지 못해 예전엔 빈 버블이 떴다.
+            let asked = (event.message ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let msg = asked.isEmpty
+                ? L.t("터미널에서 선택해 주세요", "Please choose in the terminal")
+                : asked
             DispatchQueue.main.async {
                 self.controller.pendingPermissionId = nil
                 self.controller.update(to: .permission(msg))
@@ -349,24 +565,33 @@ class EventMonitor {
         }
     }
 
+    /// 훅 없이 클로드가 자체 확인 창을 띄울 수 있는 도구인지.
+    /// MCP 도구(브라우저 등)는 보통 몇 초 안에 끝나므로, 오래 멈춰 있으면
+    /// 확인 창을 기다리는 중으로 봐도 오탐이 적다. Bash처럼 원래 오래 도는
+    /// 도구는 제외해서 빌드·설치 중에 엉뚱한 안내가 뜨지 않게 한다.
+    private static func mayPromptWithoutHook(_ tool: String) -> Bool {
+        tool.hasPrefix("mcp__")
+    }
+
     private func formatToolName(_ raw: String) -> String {
         // MCP 도구는 mcp__<서버>__<도구> 형태라 그대로 쓰면 말풍선이 지저분해진다
         if raw.hasPrefix("mcp__") {
             let parts = raw.components(separatedBy: "__")
             let tool  = parts.count > 2 ? parts[2...].joined(separator: " ") : raw
-            return "\(tool.replacingOccurrences(of: "_", with: " ")) 실행 중"
+            let name = tool.replacingOccurrences(of: "_", with: " ")
+            return L.t("\(name) 실행 중", "Running \(name)")
         }
         switch raw.lowercased() {
-        case "bash":      return "터미널 명령 실행 중"
-        case "read":      return "파일 읽는 중"
-        case "write":     return "파일 쓰는 중"
-        case "edit":      return "파일 수정 중"
-        case "glob":      return "파일 검색 중"
-        case "grep":      return "코드 검색 중"
-        case "websearch": return "웹 검색 중"
-        case "webfetch":  return "페이지 읽는 중"
-        case "todowrite": return "할 일 정리 중"
-        default:          return "\(raw) 실행 중"
+        case "bash":      return L.t("터미널 명령 실행 중", "Running command")
+        case "read":      return L.t("파일 읽는 중", "Reading file")
+        case "write":     return L.t("파일 쓰는 중", "Writing file")
+        case "edit":      return L.t("파일 수정 중", "Editing file")
+        case "glob":      return L.t("파일 검색 중", "Finding files")
+        case "grep":      return L.t("코드 검색 중", "Searching code")
+        case "websearch": return L.t("웹 검색 중", "Searching the web")
+        case "webfetch":  return L.t("페이지 읽는 중", "Reading page")
+        case "todowrite": return L.t("할 일 정리 중", "Updating to-dos")
+        default:          return L.t("\(raw) 실행 중", "Running \(raw)")
         }
     }
 

@@ -2,9 +2,11 @@ import SwiftUI
 
 struct ChatBubbleView: View {
     let message: String
+    /// 캐릭터가 화면 왼쪽에 있으면 true — 이때는 꼬리가 왼쪽(캐릭터 쪽)을 향한다
+    var flipped: Bool = false
 
     var body: some View {
-        ZStack(alignment: .trailing) {
+        SpeechBubbleShell(flipped: flipped) {
             // Main bubble — 내용에 맞게 줄어들고 최대 너비 제한
             Text(message)
                 .font(.system(.callout, design: .monospaced))
@@ -21,12 +23,26 @@ struct ChatBubbleView: View {
                         .fill(Color.white)
                         .shadow(color: .black.opacity(0.18), radius: 8, x: -2, y: 3)
                 )
+        }
+    }
+}
 
-            // Tail pointing right toward character (버블 오른쪽 중앙)
+/// 말풍선 공통 틀 — 내용 + 캐릭터를 가리키는 꼬리를 붙여준다.
+/// flipped == true(캐릭터가 화면 왼쪽에 있을 때)면 꼬리와 정렬을 반대쪽(왼쪽)으로 뒤집는다.
+struct SpeechBubbleShell<Content: View>: View {
+    var flipped: Bool = false
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        ZStack(alignment: flipped ? .leading : .trailing) {
+            content()
+
+            // 캐릭터가 있는 쪽을 향하는 꼬리 (버블 왼쪽/오른쪽 중앙)
             SpeechTail()
                 .fill(Color.white)
                 .frame(width: 16, height: 13)
-                .offset(x: 14, y: 0)
+                .scaleEffect(x: flipped ? -1 : 1, y: 1)
+                .offset(x: flipped ? -14 : 14, y: 0)
         }
         // 핵심: 부모가 제안하는 너비를 무시하고 내용물의 이상적 크기 사용
         .fixedSize(horizontal: true, vertical: false)

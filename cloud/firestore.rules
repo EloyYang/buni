@@ -1,0 +1,21 @@
+rules_version = '2';
+
+// 부니 계정 연동용 Firestore 보안 규칙.
+// 로그인한 사용자는 **자기 문서(users/{본인 uid})만** 읽고 쓰고 지울 수 있다.
+// 그 밖의 모든 경로는 기본적으로 막힌다.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+
+      // 앱이 쓰는 필드만 허용하고 크기·값 범위를 제한한다 (엉뚱한 데이터를 쌓지 못하게)
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(
+             ['coins', 'owned', 'equipped', 'equippedUpdatedAt', 'tokens', 'schema', 'updatedAt'])
+        && request.resource.data.coins is int
+        && request.resource.data.coins >= 0
+        && request.resource.data.owned is list
+        && request.resource.data.owned.size() <= 300;
+    }
+  }
+}

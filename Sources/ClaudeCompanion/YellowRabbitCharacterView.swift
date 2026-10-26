@@ -4,6 +4,7 @@ import SwiftUI
 /// 특징: 느린 뜨개질, 드문 idle 애니메이션, 별 들기
 struct YellowRabbitCharacterView: View {
     @EnvironmentObject var ctrl: CompanionController
+    @Environment(\.tryOn) private var tryOn
     @Environment(\.colorScheme) private var colorScheme
 
     private let p: CGFloat = 6.5
@@ -36,6 +37,9 @@ struct YellowRabbitCharacterView: View {
 
     var body: some View {
         ZStack {
+            // ── 꾸미기 아이템: 뒤쪽(망토·날개)
+            EquipmentBackLayer(character: .yellowRabbit, bodyDY: bodyDY)
+
             // ── 귀 (길고 여유로운)
             ZStack {
                 px(w: 1.6, h: 3.8, c: bodyColor)
@@ -56,6 +60,9 @@ struct YellowRabbitCharacterView: View {
             // ── 몸통
             px(w: 4.5, h: 2.5, c: bodyColor).offset(y: p * 1.5 + bodyDY)
 
+            // ── 꾸미기 아이템: 옷 (몸통 위 · 팔과 노트북 아래)
+            EquipmentOutfitLayer(character: .yellowRabbit, bodyDY: bodyDY)
+
             // ── 왼팔
             armView(outlined: showKnitting)
                 .offset(x: -p * 2.65 + leftArmDX, y: p * 1.1 + leftArmDY + bodyDY)
@@ -63,7 +70,7 @@ struct YellowRabbitCharacterView: View {
                 .animation(.easeInOut(duration: 0.35), value: leftArmDY)
 
             // ── 별 (권한/완료 시)
-            if showProp {
+            if showProp && !ShopStore.shared.hasCustomWeapon(for: .yellowRabbit, tryOn: tryOn) {   // 무기를 들었으면 소품 대신 그 무기
                 starView
                     .offset(x: -p * 3.8, y: p * 0.0 + leftArmDY + bodyDY)
                     .animation(.easeOut(duration: 0.35), value: leftArmDY)
@@ -78,7 +85,8 @@ struct YellowRabbitCharacterView: View {
 
             // ── 맥북 타이핑 (생각중 — 팔 위에 그려서 팔이 맥북에 가려짐)
             if showKnitting {
-                LaptopView(p: p, bodyDY: bodyDY)
+                WorkToolView(character: .yellowRabbit, p: p, bodyDY: bodyDY,
+                             leftArmDY: leftArmDY, rightArmDY: rightArmDY)
                     .transition(.opacity)
             }
 
@@ -126,6 +134,9 @@ struct YellowRabbitCharacterView: View {
                 .fill(noseColor)
                 .frame(width: p * 0.58, height: p * 0.40)
                 .offset(y: -p * 0.24 + bodyDY)
+
+            // ── 꾸미기 아이템: 앞쪽(모자·안경·무기) — bodyDY를 받아 머리와 같이 들썩인다
+            EquipmentFrontLayer(character: .yellowRabbit, bodyDY: bodyDY)
         }
         .offset(x: bodyDX)
         .animation(.easeInOut(duration: 0.25), value: bodyDX)
@@ -133,8 +144,19 @@ struct YellowRabbitCharacterView: View {
         .shadow(color: colorScheme == .light ? Color.black.opacity(0.30) : .clear,
                 radius: 1.5, x: 0, y: 0)
         .onChange(of: ctrl.state)     { newState in applyAnimation(newState) }
+        .onChange(of: ctrl.touchTick) { _ in reactToTouch() }
+        .onChange(of: ctrl.isShowingWeapon) { reactToWeaponShow($0) }
         .onChange(of: ctrl.isSliding) { sliding in
-            sliding ? startSlideHop() : stopSlideHop()
+            if sliding {
+                // 뛰어오는(가는) 동안에는 코딩·읽기 모션을 내려놓고 깡총 뛰기만 한다
+                if showKnitting { stopKnitting() }
+                if showReading  { stopReading() }
+                startSlideHop()
+            } else {
+                stopSlideHop()
+                // 도착한 뒤에 지금 상태의 작업 모션을 시작
+                resumeWorkMotion()
+            }
         }
         .onAppear {
             applyAnimation(ctrl.state)
@@ -195,6 +217,38 @@ struct YellowRabbitCharacterView: View {
 
     // MARK: - 상태 애니메이션
 
+    /// 대기 중에 무기를 꺼내 보여줄 때 — 오른팔을 들어 올렸다가 내린다
+    private func reactToWeaponShow(_ showing: Bool) {
+        if showing {
+            withAnimation(.easeOut(duration: 0.3)) { rightArmDY = -p * 1.6 }
+        } else if case .ready = ctrl.state {
+            withAnimation(.easeInOut(duration: 0.3)) { rightArmDY = 0 }
+        }
+    }
+
+    /// 쓰다듬기 반응 — 귀는 쫑긋, 몸은 간지러워 몸을 비튼다
+    private func reactToTouch() {
+        switch ctrl.lastTouchRegion {
+        case .ear:
+            withAnimation(.easeIn(duration: 0.08)) { earFoldScale = 0.45 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.35)) { earFoldScale = 1.0 }
+            }
+        case .body:
+            // 간지러움 — 눈을 질끈 감고 몸을 좌우로 떤다
+            blinking = true
+            let wiggle: [CGFloat] = [-3, 3, -2.2, 2.2, -1.2, 0]
+            for (i, dx) in wiggle.enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08 * Double(i)) {
+                    bodyDX = dx
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08 * Double(wiggle.count) + 0.12) {
+                blinking = false
+            }
+        }
+    }
+
     private func applyAnimation(_ state: CompanionState) {
         withAnimation(.easeOut(duration: 0.30)) { wideEyes = false; eyeLookUp = false }
         if case .permission = state { } else {
@@ -253,8 +307,18 @@ struct YellowRabbitCharacterView: View {
 
     // MARK: - 뜨개질 (느림 — 0.46s)
 
+    /// 슬라이드가 끝났을 때 현재 상태에 맞는 작업 모션만 다시 켠다.
+    /// (applyAnimation 전체를 다시 부르면 대기 상태의 아이들 루프가 중복 예약된다)
+    private func resumeWorkMotion() {
+        switch ctrl.state {
+        case .thinking, .toolUse, .backgroundWork: startKnitting()
+        case .toolRead:                            startReading()
+        default: break
+        }
+    }
+
     private func startKnitting() {
-        guard !showKnitting else { return }
+        guard !showKnitting, !ctrl.isSliding else { return }
         withAnimation(.easeOut(duration: 0.40)) {
             leftArmDX  =  p * 1.55; rightArmDX  = -p * 1.55
             leftArmDY =  p * 1.00; rightArmDY =  p * 1.00
@@ -265,6 +329,7 @@ struct YellowRabbitCharacterView: View {
     }
 
     private func stepKnitting() {
+        guard showKnitting else { return }
         switch ctrl.state { case .thinking, .toolUse, .backgroundWork: break; default: return }
         knittingPhase.toggle()
         let base: CGFloat = p * 1.00; let swing: CGFloat = p * 0.60
@@ -291,7 +356,7 @@ struct YellowRabbitCharacterView: View {
     // MARK: - 문서 읽기 (여유롭게 — 1.5s)
 
     private func startReading() {
-        guard !showReading else { return }
+        guard !showReading, !ctrl.isSliding else { return }
         withAnimation(.easeOut(duration: 0.40)) {
             leftArmDX  =  p * 1.55; rightArmDX  = -p * 1.55
             leftArmDY  =  p * 0.25; rightArmDY  =  p * 0.25
@@ -303,7 +368,7 @@ struct YellowRabbitCharacterView: View {
     }
 
     private func stepReading() {
-        guard case .toolRead = ctrl.state else { return }
+        guard case .toolRead = ctrl.state, showReading else { return }
         readingStep += 1
         if readingStep % 3 == 0 {
             throwAndReplaceDoc()
@@ -318,7 +383,7 @@ struct YellowRabbitCharacterView: View {
     }
 
     private func throwAndReplaceDoc() {
-        guard case .toolRead = ctrl.state else { return }
+        guard case .toolRead = ctrl.state, showReading else { return }
         // 팔을 위로 들며 서류 던지기 + 문서 동시에 fade-out
         withAnimation(.easeOut(duration: 0.18)) {
             leftArmDY  = -p * 0.30
@@ -330,12 +395,12 @@ struct YellowRabbitCharacterView: View {
         docVisible  = false  // 동시에 fade-out
         // 날아간 후: offset 즉시 스냅 (throwing=false, animation=nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
-            guard case .toolRead = self.ctrl.state else { return }
+            guard case .toolRead = self.ctrl.state, self.showReading else { return }
             self.throwingDoc = false  // 즉시 원위치로 스냅 (애니메이션 없음)
         }
         // 짧은 갭 후 새 문서 fade-in
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.33) {
-            guard case .toolRead = self.ctrl.state else { return }
+            guard case .toolRead = self.ctrl.state, self.showReading else { return }
             self.docVisible = true
             withAnimation(.easeOut(duration: 0.28)) {
                 self.leftArmDY  =  self.p * 0.25

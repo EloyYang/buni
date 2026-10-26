@@ -8,6 +8,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let hotkeyMonitor = HotkeyMonitor()
     private var settingsWindow: NSWindow?
+    private var shopWindow: NSWindow?
     private var cancellables = Set<AnyCancellable>()
     private var availableUpdate: String? = nil
 
@@ -31,39 +32,68 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// TCP로 수신된 원격 세션 ID — Claude 프로세스 없이도 유지
     private var remoteSessionIds: Set<String> = []
 
-    // ── 사용자가 명시적으로 숨긴 상태 — true이면 새 세션도 자동 표시하지 않음
-    private var isManuallyHidden = false
+    // ── 사용자가 "숨기기"를 누른 뒤인지. true인 동안에는 새로 만들어지는 패널
+    // (Claude만 켜져 있을 때 뜨는 레거시 대기 세션 포함)도 자동으로 나타나지
+    // 않는다 — 숨겼는데 진행 중인 세션도 없이 부니가 다시 튀어나오던 문제.
+    // 어느 세션이든 실제로 작업을 시작하면(SessionWindow.onRunStart) 풀린다.
+    private var hiddenUntilNextRunStart = false
 
-    // ── 위치 영속성 (슬롯 0 전용)
-    private var savedOrigin: NSPoint? {
-        get {
-            guard UserDefaults.standard.object(forKey: "panel.x") != nil else { return nil }
-            let p = NSPoint(x: UserDefaults.standard.double(forKey: "panel.x"),
-                             y: UserDefaults.standard.double(forKey: "panel.y"))
-            // 외장 모니터 분리 등으로 화면 구성이 바뀌어 저장된 위치가 모든 화면
-            // 밖으로 완전히 벗어난 경우, 화면 밖에 갇히지 않도록 저장값을 버리고
-            // 기본 위치(우측 상단)를 쓴다.
-            let panelRect = NSRect(x: p.x, y: p.y, width: 320, height: 200)
-            let onAnyScreen = NSScreen.screens.contains { $0.frame.intersects(panelRect) }
-            guard onAnyScreen else {
-                UserDefaults.standard.removeObject(forKey: "panel.x")
-                UserDefaults.standard.removeObject(forKey: "panel.y")
-                return nil
-            }
-            return p
+    // ── 위치 영속성 (슬롯별로 저장 — 세션이 어느 슬롯에 배정되든 이전에
+    // 지정한 위치에서 다시 나타나게 한다. 예전에는 슬롯 0만 저장해서, 세션이
+    // 다른 슬롯에 배정되면 위치가 초기화되는 문제가 있었다.)
+    private func savedOrigin(forSlot slot: Int) -> NSPoint? {
+        let xKey = "panel.\(slot).x", yKey = "panel.\(slot).y"
+        // 슬롯 0은 구버전(panel.x/panel.y)에 저장된 위치도 그대로 이어받는다
+        let useLegacy = slot == 0
+            && UserDefaults.standard.object(forKey: xKey) == nil
+            && UserDefaults.standard.object(forKey: "panel.x") != nil
+        let readX = useLegacy ? "panel.x" : xKey
+        let readY = useLegacy ? "panel.y" : yKey
+        guard UserDefaults.standard.object(forKey: readX) != nil else { return nil }
+        let p = NSPoint(x: UserDefaults.standard.double(forKey: readX),
+                         y: UserDefaults.standard.double(forKey: readY))
+        // 저장된 위치에서 "캐릭터"가 실제로 보이는지 확인한다.
+        // 패널(320x200) 중 눈에 보이는 건 캐릭터 영역뿐이라, 패널이 화면에 걸쳐
+        // 있어도 캐릭터만 화면 밖이면 부니가 사라진 것처럼 보인다. 외장 모니터
+        // 분리처럼 화면 구성이 바뀐 경우도 여기서 함께 걸러진다.
+        // 저장값은 항상 말풍선 반전 전(캐릭터가 패널 오른쪽 끝) 기준이다.
+        let characterRect = NSRect(x: p.x + PanelMetrics.characterOffsetX(flipped: false),
+                                   y: p.y,
+                                   width: PanelMetrics.characterAreaWidth,
+                                   height: PanelMetrics.height)
+        let characterVisible = NSScreen.screens.contains { screen in
+            let hit = screen.frame.intersection(characterRect)
+            return hit.width >= 40 && hit.height >= 40
         }
-        set {
-            if let p = newValue, p.x >= 0 {
-                UserDefaults.standard.set(Double(p.x), forKey: "panel.x")
-                UserDefaults.standard.set(Double(p.y), forKey: "panel.y")
-            } else {
-                UserDefaults.standard.removeObject(forKey: "panel.x")
-                UserDefaults.standard.removeObject(forKey: "panel.y")
-            }
+        guard characterVisible else {
+            setSavedOrigin(nil, forSlot: slot)
+            return nil
+        }
+        return p
+    }
+
+    private func setSavedOrigin(_ origin: NSPoint?, forSlot slot: Int) {
+        let xKey = "panel.\(slot).x", yKey = "panel.\(slot).y"
+        if let p = origin, p.x >= 0 {
+            UserDefaults.standard.set(Double(p.x), forKey: xKey)
+            UserDefaults.standard.set(Double(p.y), forKey: yKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: xKey)
+            UserDefaults.standard.removeObject(forKey: yKey)
+        }
+        // 구버전 슬롯 0 전용 키는 더 이상 쓰지 않으므로 정리
+        if slot == 0 {
+            UserDefaults.standard.removeObject(forKey: "panel.x")
+            UserDefaults.standard.removeObject(forKey: "panel.y")
         }
     }
 
     // MARK: - Launch
+
+    /// 켜둔 채 종료되면 맥이 영영 안 자게 되므로 반드시 되돌린다
+    func applicationWillTerminate(_ notification: Notification) {
+        AwakeManager.shared.restoreOnQuit()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         HookInstaller.ensureInstalled()
@@ -72,9 +102,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             setupStatusBar()
         }
         setupHotkeyMonitor()
+        ShopStore.shared.$coins
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildMenu() }
+            .store(in: &cancellables)
         setupSettingsCallbacks()
         setupUpdateChecker()
         startSessionScanner()
+        // 선택 기능 — 서버 설정이 있고 이전에 로그인해 둔 사람만 조용히 이어진다
+        Task { @MainActor in CloudSync.shared.start() }
     }
 
     private func setupSocketServer() {
@@ -278,7 +315,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(characterToUse.rawValue, forKey: "character.session.\(id)")
         UserDefaults.standard.set(characterToUse.rawValue, forKey: "character.lastUsed")
 
-        let origin = slot == 0 ? savedOrigin : nil
+        let origin = savedOrigin(forSlot: slot)
         let win = SessionWindow(sessionId: id, slot: slot,
                                 eventFile: fileURL.path,
                                 savedOrigin: origin)
@@ -286,8 +323,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         sessions[id] = win
         slotOwner[slot] = id
         sessionOrder.insert(id, at: 0)
-        // 사용자가 명시적으로 숨긴 상태라면 새 세션도 표시하지 않음
-        win.setup(autoShow: !isManuallyHidden)
+        // 사용자가 숨긴 직후라면 새 패널도 조용히 대기시킨다 —
+        // 이 세션이 실제로 작업을 시작할 때 비로소 나타난다.
+        if hiddenUntilNextRunStart { win.markHiddenUntilNextStart() }
+        win.setup(autoShow: !hiddenUntilNextRunStart)
         rebuildMenu()
         syncHotkeyPermissionState()
     }
@@ -331,7 +370,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         win.onOpenSettings  = { [weak self] in self?.openSettings() }
         win.onShowStatusBar = { [weak self] in self?.showStatusBar() }
         win.onRebuildMenu   = { [weak self] in self?.rebuildMenu() }
-        win.shouldAutoShow  = { [weak self] in !(self?.isManuallyHidden ?? false) }
+        win.shouldAutoShow  = { [weak self] in !(self?.hiddenUntilNextRunStart ?? false) }
+        win.onUserHide      = { [weak self] in self?.hiddenUntilNextRunStart = true }
+        win.onRunStart      = { [weak self] in self?.hiddenUntilNextRunStart = false }
         win.onSwitchSession = { [weak self, weak win] targetId in
             guard let self, let win else { return }
             self.switchSession(win, to: targetId)
@@ -343,8 +384,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { self?.removeStaledSession(id: win.sessionId) }
         }
         win.onSaveOrigin = { [weak self] origin in
-            guard win.slot == 0 else { return }
-            self?.savedOrigin = origin
+            self?.setSavedOrigin(origin, forSlot: win.slot)
         }
     }
 
@@ -354,7 +394,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for (sid, win) in sessions {
             win.controller.switchTargets = sessions.compactMap { (otherSid, otherWin) -> SessionSwitchTarget? in
                 guard otherSid != sid else { return nil }
-                let label = otherWin.controller.memo.isEmpty ? "세션 \(otherWin.slot + 1)" : otherWin.controller.memo
+                let label = otherWin.controller.memo.isEmpty
+                    ? L.t("세션 \(otherWin.slot + 1)", "Session \(otherWin.slot + 1)")
+                    : otherWin.controller.memo
                 return SessionSwitchTarget(id: otherSid, label: label)
             }.sorted { $0.label < $1.label }
         }
@@ -444,7 +486,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
 
         if let ver = availableUpdate {
-            let item = NSMenuItem(title: "🆕 업데이트 v\(ver) — 다운로드",
+            let item = NSMenuItem(title: L.t("🆕 업데이트 v\(ver) — 다운로드", "🆕 Update v\(ver) — download"),
                                   action: #selector(downloadUpdate), keyEquivalent: "")
             item.target = self; menu.addItem(item); menu.addItem(.separator())
         }
@@ -452,7 +494,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 전체 허용 모드 상태 표시
         let anyAlwaysApprove = sessions.values.contains { $0.controller.alwaysApprove }
         if anyAlwaysApprove {
-            let item = NSMenuItem(title: "⚡ 전체 허용 모드 켜짐 — 클릭하여 끄기",
+            let item = NSMenuItem(title: L.t("⚡ 전체 허용 모드 켜짐 — 클릭하여 끄기",
+                                             "⚡ Approve-all is ON — click to turn off"),
                                   action: #selector(disableAlwaysApprove), keyEquivalent: "")
             item.target = self; menu.addItem(item); menu.addItem(.separator())
         }
@@ -461,28 +504,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 종료 감지) 숨겨졌을 때 "불러오기" 항목 자체가 안 보여서 — 그걸
         // 보이게 하려고 전체를 숨겼다가 다시 불러와야 하는 번거로움이 생김.
         // 항상 둘 다 보여주고 각각 명시적으로 동작하게 한다.
-        menu.addItem(NSMenuItem(title: "전체 부니 숨기기",
+        menu.addItem(NSMenuItem(title: L.t("전체 부니 숨기기", "Hide all Buni"),
                                 action: #selector(hideAllMenuAction), keyEquivalent: "h"))
-        menu.addItem(NSMenuItem(title: "전체 부니 불러오기",
+        menu.addItem(NSMenuItem(title: L.t("전체 부니 불러오기", "Show all Buni"),
                                 action: #selector(showAllMenuAction), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Claude 열기",
+        menu.addItem(NSMenuItem(title: L.t("Claude 열기", "Open Claude"),
                                 action: #selector(openClaude), keyEquivalent: "o"))
-        menu.addItem(NSMenuItem(title: "위치 초기화",
+        menu.addItem(NSMenuItem(title: L.t("위치 초기화", "Reset position"),
                                 action: #selector(resetPosition), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "단축키 설정...",
+        menu.addItem(NSMenuItem(title: L.t("설정...", "Settings..."),
                                 action: #selector(openSettings), keyEquivalent: ","))
 
-        let focusItem = NSMenuItem(title: "딴짓 방해모드",
+        let shopItem = NSMenuItem(title: L.t("🛍 부니 상점  (🪙 \(ShopStore.shared.coins))",
+                                             "🛍 Buni Shop  (🪙 \(ShopStore.shared.coins))"),
+                                  action: #selector(openShop), keyEquivalent: "")
+        shopItem.target = self
+        menu.addItem(shopItem)
+
+        menu.addItem(buildKeepAwakeMenuItem())
+
+        let focusItem = NSMenuItem(title: L.t("딴짓 방해모드", "Distraction mode"),
                                    action: #selector(toggleFocusMode), keyEquivalent: "")
         focusItem.state = FocusModeStore.shared.enabled ? .on : .off
         menu.addItem(focusItem)
 
-        let loginItem = NSMenuItem(title: "부팅 시 자동 실행",
+        let loginItem = NSMenuItem(title: L.t("부팅 시 자동 실행", "Launch at login"),
                                    action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.state = isLaunchAtLoginEnabled ? .on : .off
         menu.addItem(loginItem)
 
-        menu.addItem(NSMenuItem(title: "메뉴바 아이콘 숨기기",
+        menu.addItem(NSMenuItem(title: L.t("메뉴바 아이콘 숨기기", "Hide menu bar icon"),
                                 action: #selector(hideStatusBar), keyEquivalent: ""))
         menu.addItem(.separator())
 
@@ -491,13 +542,124 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         verItem.isEnabled = false
         menu.addItem(verItem)
 
-        menu.addItem(NSMenuItem(title: "종료",
+        menu.addItem(NSMenuItem(title: L.t("종료", "Quit"),
                                 action: #selector(NSApplication.terminate(_:)),
                                 keyEquivalent: "q"))
         for item in menu.items where item.action != #selector(NSApplication.terminate(_:)) {
             item.target = self
         }
         statusItem?.menu = menu
+    }
+
+    // MARK: - 덮개 닫아도 계속 실행
+
+    /// 맥북 덮개를 닫아도 Claude가 계속 돌게 하는 메뉴.
+    /// 시스템 절전을 끄는 일이라 상태와 남은 시간을 항상 보이게 하고,
+    /// 권한 등록 전에는 안내 항목만 띄운다.
+    private func buildKeepAwakeMenuItem() -> NSMenuItem {
+        let awake = AwakeManager.shared
+        let title: String
+        if awake.isActive {
+            let remain = awake.statusText
+            title = L.t("☕️ 덮개 닫아도 실행 중 — \(remain)",
+                        "☕️ Staying awake — \(remain)")
+        } else {
+            title = L.t("덮개 닫아도 계속 실행", "Keep running with lid closed")
+        }
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let sub  = NSMenu()
+
+        if !awake.isHelperInstalled {
+            let setup = NSMenuItem(title: L.t("권한 설정하기… (최초 1회)", "Set up permission… (one time)"),
+                                   action: #selector(installAwakeHelper), keyEquivalent: "")
+            setup.target = self
+            sub.addItem(setup)
+            let note = NSMenuItem(title: L.t("덮개를 닫아도 자지 않으려면 관리자 권한이 필요해요",
+                                             "Admin rights are needed to stay awake with the lid closed"),
+                                  action: nil, keyEquivalent: "")
+            note.isEnabled = false
+            sub.addItem(note)
+            item.submenu = sub
+            return item
+        }
+
+        let durations: [(String, String, TimeInterval?)] = [
+            ("30분",    "30 min", 30 * 60),
+            ("1시간",   "1 hour", 60 * 60),
+            ("2시간",   "2 hours", 2 * 3600),
+            ("4시간",   "4 hours", 4 * 3600),
+            ("무제한",  "No limit", nil),
+        ]
+        for (ko, en, seconds) in durations {
+            let m = NSMenuItem(title: L.t(ko, en), action: #selector(startKeepAwake(_:)), keyEquivalent: "")
+            m.target = self
+            m.representedObject = seconds.map { NSNumber(value: $0) } ?? NSNull()
+            sub.addItem(m)
+        }
+        sub.addItem(.separator())
+
+        let off = NSMenuItem(title: L.t("지금 끄기", "Turn off now"),
+                             action: #selector(stopKeepAwake), keyEquivalent: "")
+        off.target = self
+        off.isEnabled = awake.isActive
+        sub.addItem(off)
+
+        let sched = NSMenuItem(title: awake.scheduleEnabled
+                                 ? L.t("시간대 예약 켜짐 (\(AwakeManager.hhmm(awake.scheduleStartMinute))~\(AwakeManager.hhmm(awake.scheduleEndMinute)))",
+                                       "Schedule on (\(AwakeManager.hhmm(awake.scheduleStartMinute))–\(AwakeManager.hhmm(awake.scheduleEndMinute)))")
+                                 : L.t("시간대 예약 설정…", "Set daily schedule…"),
+                               action: #selector(openSettings), keyEquivalent: "")
+        sched.target = self
+        sub.addItem(sched)
+
+        if let err = awake.lastError {
+            let e = NSMenuItem(title: "⚠️ " + err, action: nil, keyEquivalent: "")
+            e.isEnabled = false
+            sub.addItem(e)
+        }
+        item.submenu = sub
+        return item
+    }
+
+    @objc private func startKeepAwake(_ sender: NSMenuItem) {
+        let seconds = (sender.representedObject as? NSNumber)?.doubleValue
+        AwakeManager.shared.enable(duration: seconds)
+        rebuildMenu()
+    }
+
+    @objc private func stopKeepAwake() {
+        AwakeManager.shared.disable()
+        rebuildMenu()
+    }
+
+    @objc private func installAwakeHelper() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = L.t("덮개 닫아도 계속 실행", "Keep running with lid closed")
+        alert.informativeText = L.t(
+            "맥북은 덮개를 닫으면 바로 잠들기 때문에, 이를 막으려면 관리자 권한이 한 번 필요합니다.\n\n"
+            + "확인을 누르면 비밀번호를 물어보고, 절전을 켜고 끄는 명령 두 개만 비밀번호 없이 쓸 수 있도록 등록합니다. "
+            + "그 외의 권한은 주지 않으며, 설정에서 언제든 해제할 수 있어요.\n\n"
+            + "덮개를 닫은 채 오래 돌리면 가방 안에서 열이 오를 수 있으니 시간을 정해두는 걸 권합니다.",
+            "A MacBook sleeps as soon as the lid closes, so preventing that needs admin rights once.\n\n"
+            + "Click OK to enter your password; only the two commands that turn sleep off and on are registered "
+            + "for password-free use. Nothing else is granted, and you can remove it anytime in Settings.\n\n"
+            + "Running for long with the lid closed can get hot in a bag — setting a time limit is recommended.")
+        alert.addButton(withTitle: L.t("확인", "OK"))
+        alert.addButton(withTitle: L.t("취소", "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        AwakeManager.shared.installHelper { [weak self] ok, message in
+            self?.rebuildMenu()
+            let done = NSAlert()
+            done.messageText = ok ? L.t("설정 완료", "All set")
+                                  : L.t("설정하지 못했어요", "Setup failed")
+            done.informativeText = ok
+                ? L.t("이제 메뉴에서 시간을 골라 켜고 끌 수 있어요.",
+                      "You can now turn it on and off from the menu.")
+                : (message ?? "")
+            done.runModal()
+        }
     }
 
     @objc private func downloadUpdate() { UpdateChecker.openReleasePage() }
@@ -527,15 +689,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showAllMenuAction() { showAll() }
 
     /// 전체 숨김 — 메뉴바의 "전체 부니 숨기기".
-    /// isManuallyHidden을 켜서, 이후 어떤 상태 변화나 새 Claude 세션이 와도
-    /// "전체 부니 불러오기"를 누르기 전까지는 자동으로 다시 나타나지 않게 한다.
+    /// 각 패널은 "그 세션이 새로 시작될 때"까지 숨어 있고(진행 중에 숨겼다면 그
+    /// 작업이 끝나고 다음 작업이 시작될 때), 그 사이에 새로 만들어지는 패널도
+    /// 나타나지 않는다. "전체 부니 불러오기"를 누르면 즉시 다시 보인다.
     func hideAll() {
-        isManuallyHidden = true
-        sessions.values.forEach { $0.hideCompanion() }
+        hiddenUntilNextRunStart = true
+        sessions.values.forEach { $0.hideThisCompanion() }
     }
 
     func showAll() {
-        isManuallyHidden = false
+        hiddenUntilNextRunStart = false
         sessions.values.forEach { $0.showCompanion() }
     }
 
@@ -543,20 +706,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Claude.app"))
     }
 
+    @objc func openShop() {
+        if let win = shopWindow, win.isVisible {
+            win.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return
+        }
+        let win = NSWindow(contentViewController: NSHostingController(rootView: ShopView()))
+        win.styleMask = [.titled, .closable, .resizable]
+        win.setContentSize(NSSize(width: 440, height: 600))
+        win.contentMinSize = NSSize(width: 420, height: 520)
+        win.title = L.t("부니 상점", "Buni Shop")
+        win.backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1)
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        shopWindow = win
+    }
+
     @objc func openSettings() {
         if let win = settingsWindow, win.isVisible {
             win.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return
         }
-        let hostingView = NSHostingView(rootView: ShortcutSettingsView())
-        hostingView.autoresizingMask = [.width, .height]
-        let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 310, height: 240),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        win.title = "단축키 설정"
-        win.contentView = hostingView
+        // 창에 올리기 전의 fittingSize는 실제보다 작게 나와 내용이 잘렸다.
+        // 크기 계산은 NSHostingController에 맡기고, 넉넉한 기본 크기 + 스크롤로
+        // 설정 항목이 늘어도 잘리지 않게 한다.
+        let hosting = NSHostingController(rootView: ShortcutSettingsView())
+        let win = NSWindow(contentViewController: hosting)
+        win.styleMask = [.titled, .closable, .resizable]
+        win.setContentSize(NSSize(width: 400, height: 560))
+        win.contentMinSize = NSSize(width: 380, height: 360)
+        win.title = L.t("설정", "Settings")
         win.backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1)
         win.isReleasedWhenClosed = false
         win.center()
@@ -566,7 +745,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func resetPosition() {
-        sessions.values.first { $0.slot == 0 }?.controller.onResetPositionRequest?()
+        // 모든 슬롯이 위치를 저장하므로, 메뉴의 "위치 초기화"도 떠 있는
+        // 세션 전부를 기본 위치로 되돌린다.
+        sessions.values.forEach { $0.controller.onResetPositionRequest?() }
     }
 
     // MARK: - 부팅 시 자동 실행
@@ -632,6 +813,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                                 hide: hide, alwaysApprove: alwaysApprove)
         }
         .store(in: &cancellables)
+
+        // 메뉴바 메뉴는 AppKit이라 SwiftUI처럼 저절로 다시 그려지지 않는다 —
+        // 언어가 바뀌면 직접 다시 만들어 준다.
+        LanguageStore.shared.$current
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildMenu() }
+            .store(in: &cancellables)
     }
 
     // MARK: - Update checker
@@ -642,7 +831,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.availableUpdate = ver
             self.rebuildMenu()
             self.sessions.values.forEach {
-                $0.controller.update(to: .notification("🆕 Buni v\(ver) 업데이트"), autohideAfter: 8)
+                $0.controller.update(to: .notification(L.t("🆕 Buni v\(ver) 업데이트",
+                                                          "🆕 Buni v\(ver) available")),
+                                     autohideAfter: 8)
             }
         }
         UpdateChecker.shared.startPeriodicCheck()

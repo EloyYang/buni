@@ -31,6 +31,15 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 # ── 3. 바이너리 복사
 cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+# ── 계정 연동 설정(선택) — 저장소 루트에 cloud-config.json이 있으면 앱 안에 넣는다.
+# 없으면 그냥 넘어가고, 그 경우 계정 연동 기능은 꺼진 채로 앱이 동작한다.
+if [ -f "$SCRIPT_DIR/cloud-config.json" ]; then
+    cp "$SCRIPT_DIR/cloud-config.json" "$APP_BUNDLE/Contents/Resources/cloud-config.json"
+    echo "✓ cloud-config.json 포함됨 (계정 연동 켜짐)"
+else
+    echo "- cloud-config.json 없음 (계정 연동은 꺼진 채로 빌드)"
+fi
 echo "✓ 바이너리 복사됨"
 
 # ── 4. Info.plist 생성

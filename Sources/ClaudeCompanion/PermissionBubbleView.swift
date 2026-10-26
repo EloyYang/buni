@@ -5,16 +5,19 @@ struct PermissionBubbleView: View {
     let onApprove: () -> Void
     let onApproveAll: () -> Void
     let onDeny: () -> Void
+    /// 캐릭터가 화면 왼쪽에 있으면 true — 이때는 꼬리가 왼쪽(캐릭터 쪽)을 향한다
+    var flipped: Bool = false
 
+    @ObservedObject private var lang = LanguageStore.shared
     @State private var isExpanded = false
 
     var body: some View {
-        ZStack(alignment: .trailing) {
+        SpeechBubbleShell(flipped: flipped) {
             VStack(alignment: .leading, spacing: 8) {
                 // 제목 + 펼치기 토글
                 HStack(spacing: 5) {
                     Text("🔐")
-                    Text("실행 허용?")
+                    Text(L.t("실행 허용?", "Run this?"))
                         .font(.system(.callout, design: .monospaced))
                         .fontWeight(.bold)
                         .foregroundColor(.black)
@@ -57,9 +60,9 @@ struct PermissionBubbleView: View {
 
                 // 버튼 행
                 HStack(spacing: 6) {
-                    permissionButton("거부",   color: Color(red: 0.85, green: 0.25, blue: 0.20), action: onDeny)
-                    permissionButton("허용",   color: Color(red: 0.20, green: 0.70, blue: 0.35), action: onApprove)
-                    permissionButton("전체 허용", color: Color(red: 0.25, green: 0.50, blue: 0.90), action: onApproveAll)
+                    permissionButton(L.t("거부", "Deny"),   color: Color(red: 0.85, green: 0.25, blue: 0.20), action: onDeny)
+                    permissionButton(L.t("허용", "Allow"),   color: Color(red: 0.20, green: 0.70, blue: 0.35), action: onApprove)
+                    permissionButton(L.t("전체 허용", "Allow all"), color: Color(red: 0.25, green: 0.50, blue: 0.90), action: onApproveAll)
                 }
             }
             .padding(.horizontal, 14)
@@ -70,14 +73,7 @@ struct PermissionBubbleView: View {
                     .fill(Color.white)
                     .shadow(color: .black.opacity(0.20), radius: 8, x: -2, y: 3)
             )
-
-            // 말풍선 꼬리
-            SpeechTail()
-                .fill(Color.white)
-                .frame(width: 16, height: 13)
-                .offset(x: 14, y: 0)
         }
-        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func permissionButton(_ title: String, color: Color, action: @escaping () -> Void) -> some View {
