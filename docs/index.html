@@ -646,7 +646,10 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     { title:'권한 요청 버블', titleEn:'Permission bubble', desc:'도구 실행 허가가 필요하면 당근을 들고 물어봐요. 허용 · 전체 허용 · 거부.', descEn:'When a tool needs approval, Buni holds up a carrot and asks. Allow · Allow all · Deny.', icon:'carrot', demo:'permission' },
     { title:'토큰 얼마나 남았지?', titleEn:'How much do I have left?', desc:'"지금 얼마나 썼지? 언제 다시 넉넉해지지?" — 터미널 안 보고도 한눈에 확인.', descEn:'"How much have I used? When do I get more?" — see it at a glance, no terminal required.', icon:'gauge', demo:'usage' },
     { title:'캐릭터 6종', titleEn:'6 characters', desc:'세션마다 다른 토끼를 배정해 한눈에 구분.', descEn:'Each session gets a different rabbit, so you can tell them apart at a glance.', icon:'chars', demo:'chars' },
-    { title:'딴짓 방해모드', titleEn:'Nag mode', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', descEn:"If you're idle too long, Buni hops around your screen nagging you back to work.", icon:'wander', badge:true, demo:'wander' },
+    { title:'부니 상점', titleEn:'Buni Shop', desc:'작업이 끝날 때마다 코인이 쌓여요. 모자·옷·날개, 검과 지팡이까지 — 캐릭터마다 따로 꾸미고, 사기 전에 입어볼 수도 있어요.', descEn:'Every finished task earns coins. Hats, outfits, wings, swords and staffs — dress each rabbit separately, and try things on before you buy.', icon:'shop', badge:true },
+    { title:'덮개 닫아도 계속 실행', titleEn:'Keep running, lid closed', desc:'노트북 덮개를 닫아도 Claude가 계속 일해요. 시간을 정하거나 시간대를 예약하면 알아서 켜고 꺼져요.', descEn:'Close the lid and Claude keeps working. Pick a duration or schedule it — it switches itself on and off.', icon:'awake', badge:true },
+    { title:'다른 PC와 연동', titleEn:'Sync across PCs', desc:'선택 사항이에요. Google로 로그인하면 코인·아이템·레벨이 다른 PC에서도 그대로 이어져요. 안 해도 모든 기능을 쓸 수 있어요.', descEn:'Optional. Sign in with Google and your coins, items and level follow you to other PCs. Everything works without it.', icon:'sync', badge:true },
+    { title:'딴짓 방해모드', titleEn:'Nag mode', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', descEn:"If you're idle too long, Buni hops around your screen nagging you back to work.", icon:'wander', demo:'wander' },
     { title:'SSH Remote 지원', titleEn:'SSH remote support', desc:'VS Code(Cursor 포함)로 원격 서버에 붙어도 상태가 그대로 도착해요.', descEn:'Connect to a remote server via VS Code (or Cursor) — status still comes through.', icon:'ssh' },
   ];
 
@@ -656,6 +659,9 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     gauge: '<rect x="4" y="16" width="5" height="12" rx="1.5" fill="#6bbf59"/><rect x="12" y="10" width="5" height="18" rx="1.5" fill="#e8c34a"/><rect x="20" y="4" width="5" height="24" rx="1.5" fill="#e2603f"/><rect x="28" y="14" width="5" height="14" rx="1.5" fill="#2c313b"/>',
     chars: '<circle cx="13" cy="19" r="8" fill="#f2a8c4"/><circle cx="26" cy="19" r="8" fill="#f2903a" opacity="0.9"/>',
     wander: '<path d="M8 27c4-10 8-16 11-16s7 6 11 16" stroke="#f28c2e" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="3 5"/><circle cx="30" cy="10" r="3" fill="#f28c2e"/>',
+    shop: '<path d="M8 12h22l-2 16H10z" fill="none" stroke="#f28c2e" stroke-width="2.4" stroke-linejoin="round"/><path d="M14 12c0-5 2-7 5-7s5 2 5 7" stroke="#f28c2e" stroke-width="2.4" fill="none" stroke-linecap="round"/><circle cx="19" cy="20" r="3" fill="#e8c34a"/>',
+    awake: '<rect x="8" y="7" width="22" height="14" rx="2" fill="none" stroke="#8b93a6" stroke-width="2.2"/><path d="M4 26h30" stroke="#8b93a6" stroke-width="2.4" stroke-linecap="round"/><path d="M22 10a4.5 4.5 0 1 0 3.5 7.5A5.5 5.5 0 0 1 22 10z" fill="#e8c34a"/>',
+    sync: '<path d="M11 25a6 6 0 0 1-.5-12 8 8 0 0 1 15.2 1.5A5 5 0 0 1 26 25z" fill="none" stroke="#6bbf59" stroke-width="2.4" stroke-linejoin="round"/><path d="M15 19l3 3 6-6" stroke="#6bbf59" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
     ssh: '<rect x="6" y="9" width="26" height="18" rx="2.4" fill="none" stroke="#8b93a6" stroke-width="2.2"/><path d="M12 15l4 3.5-4 3.5" stroke="#6bbf59" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 22h6" stroke="#6bbf59" stroke-width="2.2" stroke-linecap="round"/>'
   };
 
