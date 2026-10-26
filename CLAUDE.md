@@ -16,7 +16,11 @@ Buni/
 │   ├── ChatBubbleView.swift    # 상태 말풍선
 │   └── ...
 ├── windows/
-│   └── buni.py                # Windows Tkinter 단일 파일 앱
+│   ├── buni.py                # Windows Tkinter 앱 (세션 창·트레이·상점 창)
+│   ├── buni_shop.py           # 상점 로직 (코인·레벨·카탈로그·캐릭터별 착용)
+│   ├── buni_items.py          # 아이템·무기·작업 도구 그리기 (Painter)
+│   ├── buni_cloud.py          # Google 로그인 + Firestore 동기화 (선택 기능)
+│   └── buni_awake.py          # 덮개 닫아도 계속 실행 (powercfg)
 ├── build_app.sh               # macOS 빌드 스크립트
 ├── release.sh                 # GitHub 릴리스 스크립트 (./release.sh <버전>)
 ├── install.sh                 # Claude Code 훅 설치

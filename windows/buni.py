@@ -12,6 +12,9 @@ import json, time, os, sys, math, glob, random, re, base64, shutil, uuid
 import ctypes, datetime, queue
 from pathlib import Path
 
+import buni_shop
+import buni_items
+
 # ── Pixel unit (matches macOS p = 6.5)
 P = 6.5
 
@@ -34,13 +37,14 @@ CHARACTERS = {
     'yellowRabbit': ('#F5DB38', '#FFF5B8', '#FFF2BF', {'blush': True}),
     'greenRabbit':  ('#73CC61', '#C7F2AD', '#D1F2C7', {}),
 }
+#    (한국어, English) — 표시 언어에 따라 골라 쓴다 (char_display_name)
 CHAR_DISPLAY_NAMES = {
-    'rabbit':       '부니 (흰토끼)',
-    'brownRabbit':  '두니 (갈색토끼)',
-    'pinkRabbit':   '푸니 (핑크토끼)',
-    'orangeRabbit': '주니 (주황토끼)',
-    'yellowRabbit': '누니 (노란토끼)',
-    'greenRabbit':  '우니 (연두토끼)',
+    'rabbit':       ('부니 (흰토끼)',   'Buni (white)'),
+    'brownRabbit':  ('두니 (갈색토끼)', 'Duni (brown)'),
+    'pinkRabbit':   ('푸니 (핑크토끼)', 'Puni (pink)'),
+    'orangeRabbit': ('주니 (주황토끼)', 'Juni (orange)'),
+    'yellowRabbit': ('누니 (노란토끼)', 'Nuni (yellow)'),
+    'greenRabbit':  ('우니 (연두토끼)', 'Uni (green)'),
 }
 
 # ── Tool classification: read tools → toolRead state
@@ -67,6 +71,68 @@ TAB_GREEN  = '#47BF59'
 _TEMP      = Path(os.environ.get('TEMP', os.environ.get('TMP', 'C:/temp')))
 STATE_FILE = Path.home() / 'AppData' / 'Roaming' / 'Buni' / 'state.json'
 PID_FILE   = _TEMP / 'buni.pid'
+
+
+# ══════════════════════════════════════════════════════════════
+# 표시 언어 (한국어 / English)
+# ══════════════════════════════════════════════════════════════
+# buni.py는 앱으로도, Claude Code 훅(--hook)으로도 실행되는데 훅은 별도
+# 프로세스라 앱 메모리를 못 본다. 그래서 언어는 state.json에서 직접 읽는다.
+
+_LANG = {'value': None}
+
+
+def _detect_system_lang() -> str:
+    """시스템 언어가 한국어면 'ko', 아니면 'en'."""
+    try:
+        import locale
+        loc = (locale.getdefaultlocale()[0] or '')
+    except Exception:
+        loc = ''
+    if not loc:
+        loc = os.environ.get('LANG', '')
+    return 'ko' if loc.lower().startswith('ko') else 'en'
+
+
+def get_lang() -> str:
+    """현재 표시 언어 ('ko' | 'en'). 저장값 → 없으면 시스템 언어."""
+    if _LANG['value'] is None:
+        saved = None
+        try:
+            if STATE_FILE.exists():
+                saved = json.loads(
+                    STATE_FILE.read_text(encoding='utf-8')).get('language')
+        except Exception:
+            saved = None
+        _LANG['value'] = saved if saved in ('ko', 'en') else _detect_system_lang()
+    return _LANG['value']
+
+
+def set_lang(lang: str):
+    """언어를 바꾸고 state.json에 저장한다 (훅 프로세스도 같은 파일을 읽는다)."""
+    _LANG['value'] = 'en' if lang == 'en' else 'ko'
+    try:
+        data = {}
+        if STATE_FILE.exists():
+            data = json.loads(STATE_FILE.read_text(encoding='utf-8'))
+        data['language'] = _LANG['value']
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False),
+                              encoding='utf-8')
+    except Exception:
+        pass
+
+
+def t(ko: str, en: str) -> str:
+    """문구가 수십 개뿐이라 별도 키 없이 두 언어를 나란히 적는다."""
+    return en if get_lang() == 'en' else ko
+
+
+def char_display_name(char_id: str) -> str:
+    names = CHAR_DISPLAY_NAMES.get(char_id)
+    if not names:
+        return char_id
+    return names[1] if get_lang() == 'en' else names[0]
 
 # ══════════════════════════════════════════════════════════════
 # Claude Code 훅 자동 설치 (최초 실행 시 1회, 멱등)
@@ -438,7 +504,7 @@ def _run_hook(hook_type: str):
             emit({'type': 'done'})
 
     elif hook_type == 'notification':
-        msg = d.get('message', '알림')[:120]
+        msg = d.get('message', t(t('알림', 'Notification'), 'Notification'))[:120]
         emit({'type': 'notification', 'message': msg, 'ts': time.time()})
 
     elif hook_type == 'pretool':
@@ -454,17 +520,23 @@ def _run_hook(hook_type: str):
                      (perm_mode == 'acceptEdits' and tool in EDIT_TOOLS))
 
         if tool == 'AskUserQuestion':
-            # 터미널에 선택지가 나타날 예정 → 부니에 확인 요청 버블 표시
-            emit({'type': 'ask_user', 'message': ''})
+            # 터미널에 선택지가 나타날 예정 → 부니에 확인 요청 버블 표시.
+            # 질문 내용까지 같이 보내야 터미널을 안 보고도 뭘 묻는지 알 수 있다.
+            qs = inp.get('questions') or []
+            q  = qs[0] if isinstance(qs, list) and qs and isinstance(qs[0], dict) else {}
+            question = str(q.get('question') or q.get('header') or '').strip()[:120]
+            if len(qs) > 1:
+                question = f'{question} (+{len(qs) - 1})'
+            emit({'type': 'ask_user', 'message': question, 'ts': time.time()})
         elif tool in SAFE or is_remote or skip_gate:
             emit({'type': 'tool_use', 'tool': tool})
         else:
             if tool == 'Bash':
                 msg = inp.get('command', '')[:200]
             elif tool == 'Write':
-                msg = f"[파일 쓰기] {inp.get('file_path', inp.get('path',''))}"[:200]
+                msg = f"{t('[파일 쓰기]', '[Write]')} {inp.get('file_path', inp.get('path',''))}"[:200]
             elif tool in ('Edit', 'MultiEdit'):
-                msg = f"[파일 수정] {inp.get('file_path', inp.get('path',''))}"[:200]
+                msg = f"{t('[파일 수정]', '[Edit]')} {inp.get('file_path', inp.get('path',''))}"[:200]
             else:
                 fv  = next(iter(inp.values()), '') if inp else ''
                 msg = f'[{tool}] {fv}'[:200] if fv else tool
@@ -487,7 +559,7 @@ def _run_hook(hook_type: str):
                 time.sleep(0.5)
 
             if not approved:
-                print(json.dumps({'decision': 'block', 'reason': '사용자가 거부했습니다.'}))
+                print(json.dumps({'decision': 'block', 'reason': t('사용자가 거부했습니다.', 'The user denied this.')}))
                 sys.exit(2)
 
             _write({'type': 'tool_use', 'tool': tool})
@@ -835,14 +907,15 @@ class ShortcutSettingsWindow:
     """전역 단축키 설정 다이얼로그."""
 
     ACTIONS = [
-        ('approve',        '권한 허락'),
-        ('always_approve', '전체 허용'),
-        ('deny',           '권한 거부'),
-        ('hide',           '숨기기/보이기'),
+        ('approve',        ('권한 허락',     'Approve')),
+        ('always_approve', (t('전체 허용', 'Allow all'),     'Approve all')),
+        ('deny',           ('권한 거부',     'Deny')),
+        ('hide',           ('숨기기/보이기', 'Hide / show')),
     ]
 
     def __init__(self, parent: tk.Tk, persist: 'PersistenceManager',
-                 hotkey_mgr: GlobalHotkeyManager):
+                 hotkey_mgr: GlobalHotkeyManager, manager: 'BuniManager | None' = None):
+        self._manager   = manager
         self._parent    = parent
         self._persist   = persist
         self._hotkey    = hotkey_mgr
@@ -890,22 +963,41 @@ class ShortcutSettingsWindow:
 
         win = tk.Toplevel(self._parent)
         self._win = win
-        win.title('단축키 설정')
+        win.title(t('설정', 'Settings'))
         win.resizable(False, False)
         win.configure(bg='#1E1E24')
         win.protocol('WM_DELETE_WINDOW', self._close)
         win.attributes('-topmost', True)
 
-        tk.Label(win, text='단축키 설정', bg='#1E1E24', fg='white',
+        tk.Label(win, text=t('설정', 'Settings'), bg='#1E1E24', fg='white',
                  font=('Malgun Gothic', 13, 'bold')).grid(
             row=0, column=0, columnspan=3, pady=(16,4), padx=20, sticky='w')
         tk.Frame(win, bg='#3A3A44', height=1).grid(
             row=1, column=0, columnspan=3, sticky='ew', padx=16, pady=(0,10))
 
-        for i, (action, label) in enumerate(self.ACTIONS):
-            tk.Label(win, text=label, bg='#1E1E24', fg='#CCCCCC',
+        # ── 언어 선택
+        tk.Label(win, text=t('언어', 'Language'), bg='#1E1E24', fg='#CCCCCC',
+                 font=('Malgun Gothic', 10), width=11, anchor='w').grid(
+            row=2, column=0, padx=(20,8), pady=6, sticky='w')
+        lang_box = tk.Frame(win, bg='#1E1E24')
+        lang_box.grid(row=2, column=1, columnspan=2, padx=4, pady=6, sticky='w')
+        self._lang_btns = {}
+        for col, (code, name) in enumerate((('ko', '한국어'), ('en', 'English'))):
+            b = tk.Button(lang_box, text=name, relief='flat',
+                          font=('Malgun Gothic', 9), width=8, cursor='hand2',
+                          activeforeground='white',
+                          command=lambda c=code: self._set_lang(c))
+            b.grid(row=0, column=col, padx=(0 if col == 0 else 4, 0))
+            self._lang_btns[code] = b
+        self._refresh_lang_btns()
+
+        tk.Frame(win, bg='#3A3A44', height=1).grid(
+            row=3, column=0, columnspan=3, sticky='ew', padx=16, pady=(8,8))
+
+        for i, (action, labels) in enumerate(self.ACTIONS):
+            tk.Label(win, text=t(*labels), bg='#1E1E24', fg='#CCCCCC',
                      font=('Malgun Gothic', 10), width=11, anchor='w').grid(
-                row=2+i, column=0, padx=(20,8), pady=6, sticky='w')
+                row=4+i, column=0, padx=(20,8), pady=6, sticky='w')
 
             btn = tk.Button(win, text=self._btn_text(action),
                             bg='#2A2A34', fg='white', relief='flat',
@@ -913,23 +1005,26 @@ class ShortcutSettingsWindow:
                             activebackground='#3A3A50', activeforeground='white',
                             cursor='hand2',
                             command=lambda a=action: self._toggle_record(a))
-            btn.grid(row=2+i, column=1, padx=4, pady=6)
+            btn.grid(row=4+i, column=1, padx=4, pady=6)
             self._btns[action] = btn
 
             tk.Button(win, text='✕', bg='#1E1E24', fg='#FF6666', relief='flat',
                       font=('Consolas', 10), activebackground='#1E1E24',
                       activeforeground='#FF4444', cursor='hand2',
                       command=lambda a=action: self._clear(a)).grid(
-                row=2+i, column=2, padx=(2,16), pady=6)
+                row=4+i, column=2, padx=(2,16), pady=6)
 
-        r = 2 + len(self.ACTIONS)
+        r = 4 + len(self.ACTIONS)
+        if self._manager:
+            r = self._build_extra_sections(win, r)
         tk.Frame(win, bg='#3A3A44', height=1).grid(
             row=r, column=0, columnspan=3, sticky='ew', padx=16, pady=(8,4))
-        tk.Label(win, text='단축키는 전역으로 동작합니다.',
+        tk.Label(win, text=t('단축키는 전역으로 동작합니다.',
+                      'Shortcuts work system-wide.'),
                  bg='#1E1E24', fg='#555566',
                  font=('Malgun Gothic', 8)).grid(
             row=r+1, column=0, columnspan=2, padx=20, sticky='w', pady=(4,0))
-        tk.Button(win, text='닫기', bg='#3377E0', fg='white', relief='flat',
+        tk.Button(win, text=t('닫기', 'Close'), bg='#3377E0', fg='white', relief='flat',
                   font=('Malgun Gothic', 10), activebackground='#2255BB',
                   activeforeground='white', cursor='hand2', padx=12, pady=3,
                   command=self._close).grid(
@@ -941,9 +1036,204 @@ class ShortcutSettingsWindow:
         w, h   = win.winfo_reqwidth(),    win.winfo_reqheight()
         win.geometry(f'+{(sw-w)//2}+{(sh-h)//2}')
 
+    # ── 계정 연동 · 덮개 닫아도 계속 실행 ────────────────────
+    def _build_extra_sections(self, win, r: int) -> int:
+        """설정 창 아래쪽 두 구역. 다음 빈 행 번호를 돌려준다."""
+        import buni_awake
+        BG, DIM = '#1E1E24', '#8A8A98'
+        mgr = self._manager
+
+        def sep(row):
+            tk.Frame(win, bg='#3A3A44', height=1).grid(
+                row=row, column=0, columnspan=3, sticky='ew', padx=16, pady=(8, 6))
+
+        # ── 계정 연동 (선택)
+        sep(r); r += 1
+        tk.Label(win, text=t('계정 연동 (선택)', 'Account sync (optional)'), bg=BG, fg='white',
+                 font=('Malgun Gothic', 10, 'bold')).grid(
+            row=r, column=0, columnspan=3, padx=20, sticky='w'); r += 1
+        self._acct = tk.Frame(win, bg=BG)
+        self._acct.grid(row=r, column=0, columnspan=3, sticky='ew', padx=20, pady=(2, 2)); r += 1
+
+        # ── 덮개 닫아도 계속 실행
+        sep(r); r += 1
+        tk.Label(win, text=t('덮개 닫아도 계속 실행', 'Keep running with lid closed'), bg=BG, fg='white',
+                 font=('Malgun Gothic', 10, 'bold')).grid(
+            row=r, column=0, columnspan=3, padx=20, sticky='w'); r += 1
+        awake = mgr.awake
+        if not awake.supported:
+            tk.Label(win, text=t('Windows에서만 쓸 수 있어요', 'Only available on Windows'),
+                     bg=BG, fg=DIM, font=('Malgun Gothic', 8)).grid(
+                row=r, column=0, columnspan=3, padx=20, sticky='w'); r += 1
+            self._awake_lbl = None
+            return r
+        self._awake_lbl = tk.Label(win, bg=BG, font=('Malgun Gothic', 9), anchor='w')
+        self._awake_lbl.grid(row=r, column=0, columnspan=3, padx=20, pady=(2, 4), sticky='w'); r += 1
+
+        row = tk.Frame(win, bg=BG)
+        row.grid(row=r, column=0, columnspan=3, padx=20, sticky='w'); r += 1
+        for i, (minutes, ko, en) in enumerate(buni_awake.DURATIONS):
+            tk.Button(row, text=t(ko, en), bg='#2A2A34', fg='white', relief='flat', bd=0,
+                      font=('Malgun Gothic', 8), padx=7, pady=3, cursor='hand2',
+                      activebackground='#3A3A50', activeforeground='white',
+                      command=lambda m=minutes: awake.enable(m)).grid(
+                row=0, column=i, padx=(0 if i == 0 else 3, 0))
+        self._awake_off = tk.Button(
+            row, text=t('끄기', 'Off'), bg='#8A3A3A', fg='white', relief='flat', bd=0,
+            font=('Malgun Gothic', 8), padx=7, pady=3, cursor='hand2',
+            activebackground='#A04848', activeforeground='white', command=awake.disable)
+        self._awake_off.grid(row=0, column=len(buni_awake.DURATIONS), padx=(8, 0))
+
+        # 시간대 예약 — 매일 같은 시간에 자동으로 켜고 끈다
+        sch = tk.Frame(win, bg=BG)
+        sch.grid(row=r, column=0, columnspan=3, padx=20, pady=(8, 0), sticky='w'); r += 1
+        self._sch_var = tk.BooleanVar(value=awake.schedule_enabled)
+        tk.Checkbutton(sch, text=t('시간대 예약', 'Schedule'), variable=self._sch_var,
+                       bg=BG, fg='#CCCCCC', selectcolor='#2A2A34', activebackground=BG,
+                       activeforeground='white', font=('Malgun Gothic', 9),
+                       command=self._apply_schedule).pack(side='left')
+
+        def spin(parent, hi, init):
+            var = tk.StringVar(value=f'{init:02d}')
+            sp = tk.Spinbox(parent, from_=0, to=hi, width=3, textvariable=var, wrap=True,
+                            format='%02.0f', bg='#2A2A34', fg='white', relief='flat',
+                            buttonbackground='#2A2A34', insertbackground='white',
+                            font=('Consolas', 10), command=self._apply_schedule)
+            sp.bind('<Return>', lambda e: self._apply_schedule())
+            sp.bind('<FocusOut>', lambda e: self._apply_schedule())
+            return var, sp
+        sh, sm = divmod(awake.schedule_start, 60)
+        eh, em = divmod(awake.schedule_end, 60)
+        self._sh, w1 = spin(sch, 23, sh); self._sm, w2 = spin(sch, 59, sm)
+        self._eh, w3 = spin(sch, 23, eh); self._em, w4 = spin(sch, 59, em)
+        w1.pack(side='left', padx=(10, 0)); tk.Label(sch, text=':', bg=BG, fg='#CCCCCC').pack(side='left'); w2.pack(side='left')
+        tk.Label(sch, text=' ~ ', bg=BG, fg='#CCCCCC').pack(side='left')
+        w3.pack(side='left'); tk.Label(sch, text=':', bg=BG, fg='#CCCCCC').pack(side='left'); w4.pack(side='left')
+
+        self._awake_note = tk.Label(
+            win, bg=BG, fg='#555566', font=('Malgun Gothic', 8), justify='left', anchor='w',
+            text=t('덮개를 닫아도 잠들지 않도록 전원 옵션의 "덮개 닫을 때" 동작을 잠시 바꿉니다.\n'
+                   '끄거나 부니를 종료하면 원래대로 되돌려요.',
+                   'Temporarily sets the power plan\'s "when I close the lid" action to do nothing.\n'
+                   'It is restored when you turn it off or quit Buni.'))
+        self._awake_note.grid(row=r, column=0, columnspan=3, padx=20, pady=(6, 0), sticky='w'); r += 1
+
+        self.refresh_dynamic()
+        self._status_tick()
+        return r
+
+    def _apply_schedule(self):
+        try:
+            start = int(self._sh.get()) * 60 + int(self._sm.get())
+            end   = int(self._eh.get()) * 60 + int(self._em.get())
+        except ValueError:
+            return
+        self._manager.awake.set_schedule(enabled=bool(self._sch_var.get()), start=start, end=end)
+
+    def _status_tick(self):
+        """"N분 남음" 문구를 주기적으로 갱신 — 창이 열려 있는 동안만."""
+        if self.is_open():
+            self.refresh_dynamic()
+            self._win.after(30_000, self._status_tick)
+
+    def refresh_dynamic(self):
+        """로그인 상태·절전 방지 상태가 바뀌면 그 부분만 다시 맞춘다 (입력 중인 칸은 건드리지 않는다)."""
+        if not (self._manager and self.is_open() and getattr(self, '_acct', None)):
+            return
+        BG, DIM = '#1E1E24', '#8A8A98'
+        mgr, cloud = self._manager, self._manager.cloud
+        for w in self._acct.winfo_children():
+            w.destroy()
+
+        if not cloud.is_configured:
+            tk.Label(self._acct, bg=BG, fg=DIM, font=('Malgun Gothic', 8), justify='left', anchor='w',
+                     text=t('서버 설정(cloud-config.json)이 없어서 쓸 수 없어요.\n'
+                            '로컬로는 모든 기능을 그대로 쓸 수 있어요.',
+                            'Server config (cloud-config.json) not found.\n'
+                            'Everything still works locally.')).pack(anchor='w')
+        elif cloud.is_signed_in:
+            name = (cloud.user or {}).get('name') or ''
+            tk.Label(self._acct, bg=BG, fg='#4DC780', font=('Malgun Gothic', 9, 'bold'),
+                     text=t('☁ 연동됨', '☁ Synced') + (f' — {name}' if name else '')).pack(anchor='w')
+            row = tk.Frame(self._acct, bg=BG); row.pack(anchor='w', pady=(4, 0))
+            # 같은 줄에 나란히
+            for txt, cmd, color in ((t('지금 동기화', 'Sync now'),
+                                     lambda: threading.Thread(target=cloud.sync_now, daemon=True).start(), '#2A2A34'),
+                                    (t('로그아웃', 'Sign out'), cloud.sign_out, '#2A2A34'),
+                                    (t('서버 데이터 삭제', 'Delete server data'), self._confirm_delete, '#6A3A3A')):
+                tk.Button(row, text=txt, bg=color, fg='white', relief='flat', bd=0,
+                          font=('Malgun Gothic', 9), padx=10, pady=3, cursor='hand2',
+                          activebackground='#3A3A50', activeforeground='white',
+                          command=cmd).pack(side='left', padx=(0, 6))
+        else:
+            tk.Label(self._acct, bg=BG, fg=DIM, font=('Malgun Gothic', 8), justify='left', anchor='w',
+                     text=t('다른 PC에서도 같은 캐릭터·레벨을 이어가려면 로그인하세요.\n'
+                            '안 해도 모든 기능을 그대로 쓸 수 있어요.',
+                            'Sign in to carry your characters and level to other PCs.\n'
+                            'Everything works without it.')).pack(anchor='w')
+            b = tk.Button(self._acct, text=t('Google로 로그인', 'Sign in with Google'),
+                          bg='#3377E0', fg='white', relief='flat', bd=0, font=('Malgun Gothic', 9),
+                          padx=12, pady=4, cursor='hand2', activebackground='#2255BB',
+                          activeforeground='white', command=mgr.cloud_sign_in_ui,
+                          state='disabled' if cloud.busy else 'normal')
+            b.pack(anchor='w', pady=(6, 0))
+        if cloud.message:
+            tk.Label(self._acct, text=cloud.message, bg=BG, fg='#D9B25A', font=('Malgun Gothic', 8),
+                     wraplength=330, justify='left', anchor='w').pack(anchor='w', pady=(4, 0))
+
+        a = mgr.awake
+        lbl = getattr(self, '_awake_lbl', None)
+        if lbl is not None:
+            if a.is_active:
+                lbl.config(text=t(f'● 실행 중 — {a.status_text()}', f'● ON — {a.status_text()}'), fg='#4DC780')
+            else:
+                lbl.config(text=t('○ 꺼짐', '○ Off'), fg='#8A8A98')
+            if a.last_error:
+                lbl.config(text='⚠️ ' + a.last_error, fg='#E6665A')
+            self._awake_off.config(state='normal' if a.is_active else 'disabled')
+            self._sch_var.set(a.schedule_enabled)
+
+    def _confirm_delete(self):
+        from tkinter import messagebox
+        if messagebox.askokcancel(t('서버 데이터 삭제', 'Delete server data'),
+                                  t('서버에 저장된 코인·아이템·착용 정보를 지울까요?\n(이 PC의 데이터는 그대로예요)',
+                                    'Delete the coins, items and outfits stored on the server?\n(Data on this PC is kept)'),
+                                  parent=self._win):
+            threading.Thread(target=self._manager.cloud.delete_server_data, daemon=True).start()
+
+    # ── 언어 ──────────────────────────────────────────────
+    def _refresh_lang_btns(self):
+        """선택된 언어 버튼만 강조."""
+        cur = get_lang()
+        for code, b in getattr(self, '_lang_btns', {}).items():
+            on = (code == cur)
+            b.config(bg='#3377E0' if on else '#2A2A34',
+                     fg='white' if on else '#AAAAAA',
+                     activebackground='#2255BB' if on else '#3A3A50')
+
+    def _set_lang(self, code: str):
+        """언어를 바꾸고 설정 창·트레이 메뉴를 새 언어로 다시 만든다.
+        (부니 우클릭 메뉴는 열 때마다 새로 만들어져 자동 반영된다)"""
+        if code == get_lang():
+            return
+        set_lang(code)
+        # 설정 창은 자기 문구도 바뀌어야 하므로 통째로 다시 그린다
+        try:
+            if self._win and self._win.winfo_exists():
+                self._win.destroy()
+        except Exception:
+            pass
+        self._win = None
+        self._btns = {}
+        self._build()
+        cb = getattr(self, 'on_language_changed', None)
+        if cb:
+            try: cb()
+            except Exception: pass
+
     def _btn_text(self, action: str) -> str:
         v = self._shortcuts.get(action)
-        return GlobalHotkeyManager.label(v[0], v[1]) if v else '(없음)'
+        return GlobalHotkeyManager.label(v[0], v[1]) if v else t('(없음)', '(none)')
 
     def _toggle_record(self, action: str):
         if self._recording == action:
@@ -951,7 +1241,8 @@ class ShortcutSettingsWindow:
         if self._recording:
             self._stop_record(self._recording)
         self._recording = action
-        self._btns[action].config(text='키 입력 대기...', bg='#4A3A00', fg='#FFDD00')
+        self._btns[action].config(text=t('키 입력 대기...', 'Press a key...'),
+                                  bg='#4A3A00', fg='#FFDD00')
         self._win.bind('<KeyPress>', self._on_key)
         self._win.focus_force()
 
@@ -984,7 +1275,7 @@ class ShortcutSettingsWindow:
         if self._recording == action:
             self._stop_record(action)
         self._shortcuts[action] = None
-        self._btns[action].config(text='(없음)')
+        self._btns[action].config(text=t('(없음)', '(none)'))
         self._save()
 
     def _close(self):
@@ -1119,288 +1410,77 @@ class PersistenceManager:
 
 
 # ══════════════════════════════════════════════════════════════
-class SessionWindow:
-    """One Toplevel window per active Claude session."""
+class CharacterDrawMixin:
+    """캐릭터 그림 — 실제 세션 창(SessionWindow)과 상점 미리보기가 함께 쓴다.
 
-    def __init__(self, manager: 'BuniManager', session_id: str, slot: int,
-                 event_file: Path, persist: PersistenceManager):
-        self.manager    = manager
-        self.session_id = session_id
-        self.slot       = slot
-        self.event_file = event_file
-        self.persist    = persist
+    쓰는 쪽이 갖춰야 하는 것: cv, cx, cy, character, state, shop, try_on,
+    body_dx/dy, larm/rarm dx/dy, show_laptop, show_reading, show_carrot,
+    doc_visible, throw_dx/dy, blinking, wide_eyes, ear_scale,
+    showing_weapon, weapon_swing
+    """
 
-        # ── Toplevel
-        self.win = tk.Toplevel(manager.root)
-        self._setup_window()
-        self.cv = tk.Canvas(self.win, width=WIN_W, height=WIN_H,
-                            bg=TRANSP, highlightthickness=0)
-        self.cv.pack()
+    def _equip(self, slot: str):
+        """지금 이 자리에 보여줄 아이템 id — 입어보는 중이면 그것, 아니면 실제 착용 상태."""
+        return self.shop.resolved(slot, self.character, self.try_on)
 
-        # ── Character & memo
-        self.character: str = self._load_character()
-        self.memo, self.memo_is_auto = self._load_memo()
+    def _hold(self):
+        """무기를 어디에 쥐고 있는지 — 작업 중엔 오른손, 완료·권한 요청엔 들어 올린 왼손,
+        대기 중 꺼내 보여줄 땐 들어 올린 오른손."""
+        st = self.state
+        if st in ('thinking', 'toolUse', 'toolRead', 'backgroundWork'):
+            return buni_items.HOLD_RIGHT
+        if st in ('completed', 'permission', 'ask_user'):
+            return buni_items.HOLD_RAISED_LEFT
+        if self.showing_weapon:
+            return buni_items.HOLD_SHOW_OFF
+        return None
 
-        # ── Body/arm animation floats
-        self.body_dy  = 0.0;  self.body_dx  = 0.0
-        self.larm_dx  = 0.0;  self.larm_dy  = 0.0
-        self.rarm_dx  = 0.0;  self.rarm_dy  = 0.0
+    def _painter(self):
+        return buni_items.Painter(self.cv, self.cx, self.cy, dx=self.body_dx, dy=self.body_dy)
 
-        # ── Laptop typing state
-        self.show_laptop  = False
-        self.laptop_phase = False
+    def _needs_anim(self) -> bool:
+        """시간에 따라 계속 바뀌는 그림(무기 흔들림·뜨개질·후광 등)이 있는지."""
+        weapon = self._equip('weapon')
+        if self._hold() and weapon and weapon != 'carrot':
+            return True
+        if self.show_laptop and self._equip('tool') in buni_items.ANIMATED_TOOLS:
+            return True
+        return self._equip('head') in buni_items.ANIMATED_HEAD
 
-        # ── Document reading state
-        self.show_reading = False
-        self._reading_step = 0
-        self.throw_dx  = 0.0;  self.throw_dy = 0.0
-        self.doc_visible  = True
-
-        # ── Eyes
-        self.blinking   = False
-        self.wide_eyes  = False
-
-        # ── App state
-        self.state          = 'idle'
-        self.msg: str | None = None
-        self.perm_id: str | None   = None
-        self.perm_cmd: str | None  = None
-        self.always_approve = self._load_always_approve()
-        # 한도 도달 안내를 사용자가 직접 숨긴 상태 — 다음 한도 창이 시작되면 해제
-        self._limit_notice_dismissed = False
-        self._limit_win: tk.Toplevel | None = None
-        self._limit_job = None
-        # 진행 중인(끝나지 않은) 도구 실행 수 — tool_use +1 / tool_done -1.
-        # 0보다 크면 오래 걸리는 도구가 실행 중이라 이벤트가 없어도 정상이다.
-        self._pending_tools = 0
-        # 뒤늦게 도착하는 지연 전환이 최신 이벤트를 덮어쓰지 않도록 순번을 올린다
-        self._event_seq = 0
-
-        # ── Usage
-        self._usage                = 0.0
-        self._session_start: datetime.datetime | None = None
-        self._monthly_tokens: int  = 0
-        self._server_utilization: float | None        = None
-        self._server_resets_at: datetime.datetime | None = None
-
-        # ── After handles
-        self._laptop_job   = None
-        self._reading_job  = None
-        self._blink_job    = None
-        self._idle_job     = None
-        self._title_job    = None
-        # done(Stop 훅)은 클로드가 한 번 응답을 마칠 때마다 매번 와서, 그대로 바로
-        # "완료했어요!"를 띄우면 세션이 아직 안 끝났는데(곧바로 다음 턴이 이어지는
-        # 경우) 중간에 완료 문구가 떴다 사라지는 것처럼 보인다. 잠깐 기다렸다가
-        # 그 사이 새 작업이 시작되면 취소한다.
-        self._completion_job = None
-        self._completion_debounce_ms = 3000
-        # "백그라운드 작업 중" 표시가 이만큼(초) 갱신되지 않으면 대기로 되돌린다.
-        # idle 폴백(300초)보다 짧게 잡아, 실제로는 끝났는데 문구만 남는 것을 방지.
-        self._background_stale_seconds = 90
-        self._perm_win:        tk.Toplevel | None = None
-        self._completion_win: tk.Toplevel | None = None
-        self._ask_user_win:   tk.Toplevel | None = None
-        self._destroyed    = False
-
-        # ── File monitoring
-        self._file_offset = 0
-        self._is_replaying = True   # 첫 poll에서 기존 이벤트 재생 중 — done/thinking 건너뜀
-        self._last_event_time = time.time()
-        self._init_file_offset()
-
-        # ── HWND (after window is mapped)
-        self._hwnd: int | None = None
-        self.win.after(300, self._init_hwnd)
-
-        # ── Position & initial draw
-        self._position_window()
-        self._draw()
-
-        # ── Bindings
-        self._build_menu()
-        self.cv.bind('<Button-3>',        self._show_menu)
-        self.cv.bind('<Double-Button-1>', lambda _: self._open_claude())
-        self.cv.bind('<ButtonPress-1>',   self._drag_press)
-        self.cv.bind('<B1-Motion>',       self._drag_motion)
-        self.cv.bind('<ButtonRelease-1>', self._drag_release)
-        self._drag_start: tuple | None = None
-
-        # ── Start
-        self._apply_state('ready')
-        self._schedule_blink()
-        self._schedule_idle_hop()
-        self._tick_bar_refresh()
-        self._schedule_title_sync()
-
-    # ── Persistence ───────────────────────────────────────────
-
-    def _load_character(self) -> str:
-        char = (self.persist.get(f'character.session.{self.session_id}') or
-                self.persist.get(f'character.slot.{self.slot}') or 'rabbit')
-        return char if char in CHARACTERS else 'rabbit'
-
-    def _load_memo(self) -> tuple[str, bool]:
-        """(메모, 자동연동여부) 반환.
-        이 세션에 사용자가 직접 지정한 메모가 있으면(빈 문자열 = 직접 지운
-        상태 포함) 그대로 쓰고 자동 연동을 끈다. 없으면 슬롯 메모를 임시로
-        보여주되 자동 상태로 두어, 곧 세션 이름을 읽어오면 대체되게 한다."""
-        ks = f'memo.session.{self.session_id}'
-        if self.persist.get(ks) is not None:
-            return (self.persist.get(ks) or '', False)
-        return (self.persist.get(f'memo.slot.{self.slot}') or '', True)
-
-    def _load_always_approve(self) -> bool:
-        ks = f'alwaysApprove.session.{self.session_id}'
-        if self.persist.get(ks) is not None:
-            return bool(self.persist.get(ks))
-        return bool(self.persist.get(f'alwaysApprove.slot.{self.slot}', False))
-
-    def _save_always_approve(self):
-        self.persist.set(f'alwaysApprove.session.{self.session_id}', self.always_approve)
-        self.persist.set(f'alwaysApprove.slot.{self.slot}', self.always_approve)
-
-    def _save_character(self):
-        self.persist.set(f'character.session.{self.session_id}', self.character)
-        self.persist.set(f'character.slot.{self.slot}', self.character)
-
-    def _save_memo(self):
-        ks = f'memo.session.{self.session_id}'
-        kl = f'memo.slot.{self.slot}'
-        if self.memo:
-            self.persist.set(ks, self.memo)
-            self.persist.set(kl, self.memo)
-        else:
-            # 빈 문자열을 남겨 "사용자가 직접 지웠음"을 표시 — 키를 지우면
-            # 다음 실행 때 세션 이름이 다시 채워져 버린다.
-            self.persist.set(ks, '')
-            self.persist.remove(kl)
-
-    # ── 세션 이름 → 메모 자동 연동 ──────────────────────────────
-
-    def _schedule_title_sync(self):
-        if self.session_id in ('legacy', 'windows-default'):
-            return
-        self._sync_session_title()
-
-    def _sync_session_title(self):
-        if self._destroyed:
-            return
-        title = _read_session_title(self.session_id)
-        if title and self.memo_is_auto and self.memo != title:
-            self.memo = title
-            self._draw()
-        self._title_job = self.win.after(15_000, self._sync_session_title)
-
-    # ── Window setup ──────────────────────────────────────────
-
-    def _setup_window(self):
-        w = self.win
-        w.overrideredirect(True)
-        w.wm_attributes('-topmost', True)
-        w.wm_attributes('-transparentcolor', TRANSP)
-        w.config(bg=TRANSP)
-        w.resizable(False, False)
-        w.title(f'Buni-{self.slot}')
-
-    def _position_window(self):
-        sw = self.win.winfo_screenwidth()
-        sh = self.win.winfo_screenheight()
-        if self.slot == 0:
-            saved = self.persist.get('window_pos')
-            if saved and isinstance(saved, (list, tuple)) and len(saved) == 2:
-                try:
-                    x, y = int(saved[0]), int(saved[1])
-                    # 모니터 구성이 바뀌어(외장 모니터 분리 등) 저장된 위치가
-                    # 현재 화면 밖으로 완전히 벗어났으면 버리고 기본 위치를 쓴다
-                    on_screen = (x + WIN_W > 0 and x < sw and
-                                 y + WIN_H > 0 and y < sh)
-                    if on_screen:
-                        self.win.geometry(f'{WIN_W}x{WIN_H}+{x}+{y}')
-                        return
-                    self.persist.remove('window_pos')
-                except Exception:
-                    pass
-        # Top-right corner, slots stack downward
-        x = sw - WIN_W - 10
-        y = 50 + self.slot * SLOT_STEP
-        self.win.geometry(f'{WIN_W}x{WIN_H}+{x}+{y}')
-
-    def _init_hwnd(self):
-        try:
-            self._hwnd = _get_hwnd(self.win)
-            _set_click_through(self._hwnd, True)
-        except Exception:
-            pass
-        # <Enter>/<Leave>는 WS_EX_TRANSPARENT 상태에서 OS 이벤트가 도달하지 않아
-        # 절대 발생하지 않음 → 30ms 폴링으로 마우스 위치를 직접 확인
-        self._poll_click_through()
-
-    def _poll_click_through(self):
-        """30ms마다 마우스가 창 위에 있는지 확인해 클릭 투과를 토글."""
-        if self._destroyed or not self._hwnd:
-            return
-        try:
-            mx = self.win.winfo_pointerx()
-            my = self.win.winfo_pointery()
-            wx = self.win.winfo_rootx()
-            wy = self.win.winfo_rooty()
-            over = wx <= mx < wx + WIN_W and wy <= my < wy + WIN_H
-            _set_click_through(self._hwnd, not over)
-        except Exception:
-            pass
-        self.win.after(30, self._poll_click_through)
-
-    # ── Drag ─────────────────────────────────────────────────
-
-    def _drag_press(self, e: tk.Event):
-        self._drag_start = (e.x_root, e.y_root,
-                            self.win.winfo_x(), self.win.winfo_y())
-        if self._hwnd:
-            _set_click_through(self._hwnd, False)
-
-    def _drag_motion(self, e: tk.Event):
-        if not self._drag_start:
-            return
-        sx, sy, wx, wy = self._drag_start
-        new_x = wx + e.x_root - sx
-        new_y = wy + e.y_root - sy
-        self.win.geometry(f'+{new_x}+{new_y}')
-        # 권한 팝업도 같이 이동
-        if self._perm_win and self._perm_win.winfo_exists():
-            self._reposition_perm_popup(new_x, new_y)
-
-    def _reposition_perm_popup(self, win_x: int, win_y: int):
-        """캐릭터 창 좌표(win_x, win_y) 기준으로 권한 팝업 재배치."""
-        if not (self._perm_win and self._perm_win.winfo_exists()):
-            return
-        try:
-            BW, TAIL_W = 230, 15
-            ph = self._perm_win.winfo_height()
-            if ph < 10:
-                ph = 156  # 초기 렌더 전 폴백 높이
-            tail_tip_x = int(CHAR_CX - P * 5) + 9 - 30
-            px = win_x + tail_tip_x - (BW + TAIL_W)
-            py = win_y + int(CHAR_CY - P * 3.5) - ph // 2
-            self._perm_win.geometry(f'+{px}+{py}')
-        except Exception:
-            pass
-
-    def _drag_release(self, _e: tk.Event):
-        self._drag_start = None
-        if self._hwnd:
-            _set_click_through(self._hwnd, True)
-        if self.slot == 0:
-            self.persist.set('window_pos',
-                             [self.win.winfo_x(), self.win.winfo_y()])
+    def _draw_character(self):
+        now = time.time()
+        if self.show_reading:                       # 문서 더미 (맨 뒤, 왼쪽)
+            self._draw_doc_pile()
+        p = self._painter()
+        buni_items.draw_back(p, self._equip('back'))        # 뒤 레이어 — 망토·날개
+        self._draw_ears()                                    # 귀 (머리 뒤)
+        self._draw_body()
+        buni_items.draw_outfit(p, self._equip('outfit'))     # 옷 (몸통 위, 팔·노트북 아래)
+        self._draw_arms()
+        # 들어 올린 왼손의 소품 — 기본은 당근, 무기를 입었으면 그 무기가 대신 쥐어진다
+        if self.show_carrot and not self.shop.has_custom_weapon(self.character, self.try_on):
+            buni_items.draw_carrot(p, self.larm_dy)
+        if self.show_laptop:                                 # 작업 도구 — 기본은 노트북
+            if not buni_items.draw_work_tool(p, self._equip('tool'), now, self.larm_dy, self.rarm_dy):
+                self._draw_laptop()
+        self._draw_feet()
+        if self.show_reading and self.doc_visible:
+            self._draw_held_doc()
+        self._draw_head()
+        # 앞 레이어 — 얼굴·머리·무기
+        buni_items.draw_face(p, self._equip('face'))
+        buni_items.draw_head(p, self._equip('head'), now)
+        hold, weapon = self._hold(), self._equip('weapon')
+        if hold and weapon:
+            buni_items.draw_weapon(p, weapon, hold, now, self.weapon_swing, self.showing_weapon)
 
     # ── Drawing helpers ───────────────────────────────────────
 
     def _rect(self, ox: float, oy: float, w: float, h: float,
               color: str, tag: str = 'char') -> None:
         """Pixel block at character-center offset (body_dx/dy applied)."""
-        x = CHAR_CX + ox + self.body_dx
-        y = CHAR_CY + oy + self.body_dy
+        x = self.cx + ox + self.body_dx
+        y = self.cy + oy + self.body_dy
         self.cv.create_rectangle(x - w*P/2, y - h*P/2,
                                   x + w*P/2, y + h*P/2,
                                   fill=color, outline='', tags=tag)
@@ -1408,8 +1488,8 @@ class SessionWindow:
     def _oval(self, ox: float, oy: float, w: float, h: float,
               color: str, tag: str = 'char') -> None:
         """Ellipse at character-center offset (body_dx/dy applied)."""
-        x = CHAR_CX + ox + self.body_dx
-        y = CHAR_CY + oy + self.body_dy
+        x = self.cx + ox + self.body_dx
+        y = self.cy + oy + self.body_dy
         self.cv.create_oval(x - w*P/2, y - h*P/2,
                              x + w*P/2, y + h*P/2,
                              fill=color, outline='', tags=tag)
@@ -1420,36 +1500,6 @@ class SessionWindow:
                x0,  y1,   x0,  y1-r, x0,  y0+r, x0,  y0]
         self.cv.create_polygon(pts, smooth=True,
                                 fill=fill, outline=outline, width=1, tags=tag)
-
-    # ── Full redraw (draw order matches macOS z-order) ────────
-
-    def _draw(self):
-        if self._destroyed:
-            return
-        self.cv.delete('all')
-        # 1. Speech bubble (behind everything)
-        self._draw_bubble()
-        # 2. Paper pile (far left, background)
-        if self.show_reading:
-            self._draw_doc_pile()
-        # 3. Ears (behind head)
-        self._draw_ears()
-        # 4. Body + arms
-        self._draw_body_arms()
-        # 5. Laptop (on top of arms, below head)
-        if self.show_laptop:
-            self._draw_laptop()
-        # 6. Feet
-        self._draw_feet()
-        # 7. Held document (in front of body, behind head)
-        if self.show_reading and self.doc_visible:
-            self._draw_held_doc()
-        # 8. Head (topmost character layer)
-        self._draw_head()
-        # 9. Usage bar
-        self._draw_bar()
-        # 10. Memo tag (above ears)
-        self._draw_memo()
 
     # ── Character parts ───────────────────────────────────────
 
@@ -1467,12 +1517,14 @@ class SessionWindow:
             ow, oh, iw, ih, xo, yo = 1.8,  3.2, 1.0,  2.5, P*1.5,  P*3.3
         else:  # rabbit, brownRabbit
             ow, oh, iw, ih, xo, yo = 1.6,  3.4, 0.8,  2.7, P*1.6,  P*3.5
-        self._rect(-xo, -yo,        ow, oh, body)
-        self._rect(-xo, -yo-P*0.1,  iw, ih, ear)
-        self._rect( xo, -yo,        ow, oh, body)
-        self._rect( xo, -yo-P*0.1,  iw, ih, ear)
+        # 귀 접기(쓰다듬기 반응) — 귀 아래쪽을 고정하고 위가 줄어든다
+        s  = self.ear_scale
+        yb = -yo + oh * P / 2                       # 바깥 귀의 아래 끝 (고정점)
+        for sx in (-xo, xo):
+            self._rect(sx, yb + (-yo - yb) * s,           ow, oh * s, body)
+            self._rect(sx, yb + (-yo - P*0.1 - yb) * s,   iw, ih * s, ear)
 
-    def _draw_body_arms(self):
+    def _draw_body(self):
         body, ear, nose, extras = CHARACTERS[self.character]
         ch = self.character
         # Body size per character
@@ -1482,6 +1534,10 @@ class SessionWindow:
             self._rect(0, P*1.5, 4.6, 2.5, body)
         else:
             self._rect(0, P*1.5, 4.5, 2.5, body)
+
+    def _draw_arms(self):
+        body = CHARACTERS[self.character][0]
+        ch = self.character
         # Arms (with dark outline when holding laptop/doc)
         arm_x = P*2.70 if ch == 'orangeRabbit' else P*2.68 if ch == 'greenRabbit' else P*2.65
         lx = -arm_x + self.larm_dx;  ly = P*1.1 + self.larm_dy
@@ -1591,8 +1647,8 @@ class SessionWindow:
 
     def _draw_laptop(self):
         """MacBook on character's lap — positions from LaptopView.swift."""
-        cx = CHAR_CX + self.body_dx
-        cy = CHAR_CY + self.body_dy
+        cx = self.cx + self.body_dx
+        cy = self.cy + self.body_dy
 
         def r(oy, w, h, color):
             y = cy + P * oy
@@ -1633,8 +1689,8 @@ class SessionWindow:
 
     def _draw_doc_pile(self):
         """Paper pile on the left — static, behind character."""
-        pile_cx = CHAR_CX + self.body_dx - P*5.4
-        pile_cy = CHAR_CY + self.body_dy + P*2.55
+        pile_cx = self.cx + self.body_dx - P*5.4
+        pile_cy = self.cy + self.body_dy + P*2.55
 
         def r(ox, oy, w, h, color):
             x = pile_cx + ox*P;  y = pile_cy + oy*P
@@ -1656,8 +1712,8 @@ class SessionWindow:
 
     def _draw_held_doc(self):
         """Document the character is holding — affected by throw offset."""
-        doc_cx = CHAR_CX + self.body_dx + self.throw_dx
-        doc_cy = CHAR_CY + self.body_dy + self.throw_dy
+        doc_cx = self.cx + self.body_dx + self.throw_dx
+        doc_cy = self.cy + self.body_dy + self.throw_dy
 
         def r(oy, w, h, color):
             y = doc_cy + P * oy
@@ -1682,6 +1738,365 @@ class SessionWindow:
         self.cv.create_rectangle(corner_x - P*0.21, corner_y - P*0.21,
                                   corner_x + P*0.21, corner_y + P*0.21,
                                   fill=DOC_DARK, outline='', tags='char')
+
+
+# ══════════════════════════════════════════════════════════════
+class SessionWindow(CharacterDrawMixin):
+    """One Toplevel window per active Claude session."""
+
+    def __init__(self, manager: 'BuniManager', session_id: str, slot: int,
+                 event_file: Path, persist: PersistenceManager):
+        self.manager    = manager
+        self.session_id = session_id
+        self.slot       = slot
+        self.event_file = event_file
+        self.persist    = persist
+
+        # ── Toplevel
+        self.win = tk.Toplevel(manager.root)
+        self._setup_window()
+        self.cv = tk.Canvas(self.win, width=WIN_W, height=WIN_H,
+                            bg=TRANSP, highlightthickness=0)
+        self.cv.pack()
+
+        # ── 그림 기준점·상점 (CharacterDrawMixin이 쓴다)
+        self.cx, self.cy = CHAR_CX, CHAR_CY
+        self.shop    = manager.shop
+        self.try_on  = None            # 실제 부니는 입어보기 없음 (상점 미리보기만 쓴다)
+        self.show_carrot    = False    # 권한 요청·완료 때 들어 올린 손의 소품
+        self.ear_scale      = 1.0      # 귀 접기 (쓰다듬기 반응)
+        self.showing_weapon = False    # 대기 중 무기 꺼내 보여주는 중
+        self.weapon_swing   = 0.0
+        self._swing_target  = 0.0
+        self._show_token    = 0
+        self._weapon_job    = None
+        self._anim_job      = None
+        self._dragged       = False
+        self._press_xy      = (0, 0)
+
+        # ── Character & memo
+        self.character: str = self._load_character()
+        self.memo, self.memo_is_auto = self._load_memo()
+
+        # ── Body/arm animation floats
+        self.body_dy  = 0.0;  self.body_dx  = 0.0
+        self.larm_dx  = 0.0;  self.larm_dy  = 0.0
+        self.rarm_dx  = 0.0;  self.rarm_dy  = 0.0
+
+        # ── Laptop typing state
+        self.show_laptop  = False
+        self.laptop_phase = False
+
+        # ── Document reading state
+        self.show_reading = False
+        self._reading_step = 0
+        self.throw_dx  = 0.0;  self.throw_dy = 0.0
+        self.doc_visible  = True
+
+        # ── Eyes
+        self.blinking   = False
+        self.wide_eyes  = False
+
+        # ── App state
+        self.state          = 'idle'
+        # 사용자가 직접 숨긴 부니인지 — 숨긴 뒤에는 "이 세션이 새로 시작될 때"
+        # (= 비진행 → 진행 전환)만 다시 나타난다. 진행 중에 숨겼다면 그 작업
+        # 안에는 시작 경계가 없으므로, 작업이 끝나고 다음 작업이 시작될 때다.
+        self._manually_hidden = False
+        self._was_running     = False
+        self.msg: str | None = None
+        self.perm_id: str | None   = None
+        self.perm_cmd: str | None  = None
+        self.ask_msg: str          = ''   # AskUserQuestion 질문 내용
+        self.always_approve = self._load_always_approve()
+        # 한도 도달 안내를 사용자가 직접 숨긴 상태 — 다음 한도 창이 시작되면 해제
+        self._limit_notice_dismissed = False
+        self._limit_win: tk.Toplevel | None = None
+        self._limit_job = None
+        # 진행 중인(끝나지 않은) 도구 실행 수 — tool_use +1 / tool_done -1.
+        # 0보다 크면 오래 걸리는 도구가 실행 중이라 이벤트가 없어도 정상이다.
+        self._pending_tools = 0
+        # "확인 대기" 추정용 — 마지막으로 시작된 도구 이름과, 이미 안내했는지
+        self._pending_tool_name: str | None = None
+        self._wait_hint_shown = False
+        self._ask_is_hint     = False   # 현재 ask_user 버블이 추정 안내(훅 없는 확인 창)인지
+        # 뒤늦게 도착하는 지연 전환이 최신 이벤트를 덮어쓰지 않도록 순번을 올린다
+        self._event_seq = 0
+
+        # ── Usage
+        self._usage                = 0.0
+        self._session_start: datetime.datetime | None = None
+        self._monthly_tokens: int  = 0
+        self._server_utilization: float | None        = None
+        self._server_resets_at: datetime.datetime | None = None
+
+        # ── After handles
+        self._laptop_job   = None
+        self._reading_job  = None
+        self._blink_job    = None
+        self._idle_job     = None
+        self._title_job    = None
+        # done(Stop 훅)은 클로드가 한 번 응답을 마칠 때마다 매번 와서, 그대로 바로
+        # "완료했어요!"를 띄우면 세션이 아직 안 끝났는데(곧바로 다음 턴이 이어지는
+        # 경우) 중간에 완료 문구가 떴다 사라지는 것처럼 보인다. 잠깐 기다렸다가
+        # 그 사이 새 작업이 시작되면 취소한다.
+        self._completion_job = None
+        self._completion_debounce_ms = 3000
+        # "백그라운드 작업 중" 표시가 이만큼(초) 갱신되지 않으면 대기로 되돌린다.
+        # idle 폴백(300초)보다 짧게 잡아, 실제로는 끝났는데 문구만 남는 것을 방지.
+        self._background_stale_seconds = 90
+        self._perm_win:        tk.Toplevel | None = None
+        self._completion_win: tk.Toplevel | None = None
+        self._ask_user_win:   tk.Toplevel | None = None
+        self._destroyed    = False
+
+        # ── File monitoring
+        self._file_offset = 0
+        self._is_replaying = True   # 첫 poll에서 기존 이벤트 재생 중 — done/thinking 건너뜀
+        self._last_event_time = time.time()
+        self._init_file_offset()
+
+        # ── HWND (after window is mapped)
+        self._hwnd: int | None = None
+        self.win.after(300, self._init_hwnd)
+
+        # ── Position & initial draw
+        self._position_window()
+        self._draw()
+
+        # ── Bindings
+        self._build_menu()
+        self.cv.bind('<Button-3>',        self._show_menu)
+        self.cv.bind('<Double-Button-1>', lambda _: self._open_claude())
+        self.cv.bind('<ButtonPress-1>',   self._drag_press)
+        self.cv.bind('<B1-Motion>',       self._drag_motion)
+        self.cv.bind('<ButtonRelease-1>', self._drag_release)
+        self._drag_start: tuple | None = None
+
+        # ── Start
+        self._apply_state('ready')
+        self._schedule_blink()
+        self._schedule_idle_hop()
+        self._tick_bar_refresh()
+        self._schedule_title_sync()
+        self._tick_anim()
+        self._schedule_weapon_show()
+
+    # ── Persistence ───────────────────────────────────────────
+
+    def _load_character(self) -> str:
+        char = (self.persist.get(f'character.session.{self.session_id}') or
+                self.persist.get(f'character.slot.{self.slot}') or 'rabbit')
+        return char if char in CHARACTERS else 'rabbit'
+
+    def _load_memo(self) -> tuple[str, bool]:
+        """(메모, 자동연동여부) 반환.
+        이 세션에 사용자가 직접 지정한 메모가 있으면 그대로 쓰고 자동 연동을
+        끈다. 없거나 비어 있으면(= 메모를 지운 상태, 예전 버전이 남긴 빈
+        문자열 포함) 슬롯 메모를 임시로 보여주되 자동 상태로 두어, 곧 세션
+        이름을 읽어오면 대체되게 한다."""
+        ks = f'memo.session.{self.session_id}'
+        saved = self.persist.get(ks)
+        if saved:
+            return (saved, False)
+        return (self.persist.get(f'memo.slot.{self.slot}') or '', True)
+
+    def _load_always_approve(self) -> bool:
+        ks = f'alwaysApprove.session.{self.session_id}'
+        if self.persist.get(ks) is not None:
+            return bool(self.persist.get(ks))
+        return bool(self.persist.get(f'alwaysApprove.slot.{self.slot}', False))
+
+    def _save_always_approve(self):
+        self.persist.set(f'alwaysApprove.session.{self.session_id}', self.always_approve)
+        self.persist.set(f'alwaysApprove.slot.{self.slot}', self.always_approve)
+
+    def _save_character(self):
+        self.persist.set(f'character.session.{self.session_id}', self.character)
+        self.persist.set(f'character.slot.{self.slot}', self.character)
+
+    def _save_memo(self):
+        ks = f'memo.session.{self.session_id}'
+        kl = f'memo.slot.{self.slot}'
+        if self.memo:
+            self.persist.set(ks, self.memo)
+            self.persist.set(kl, self.memo)
+        else:
+            # 메모를 비우면 기본값(세션 이름)으로 되돌아가므로 저장값을 남기지 않는다
+            self.persist.remove(ks)
+            self.persist.remove(kl)
+
+    # ── 세션 이름 → 메모 자동 연동 ──────────────────────────────
+
+    def _schedule_title_sync(self):
+        if self.session_id in ('legacy', 'windows-default'):
+            return
+        self._sync_session_title()
+
+    def _sync_session_title(self):
+        if self._destroyed:
+            return
+        title = _read_session_title(self.session_id)
+        if title and self.memo_is_auto and self.memo != title:
+            self.memo = title
+            self._draw()
+        self._title_job = self.win.after(15_000, self._sync_session_title)
+
+    # ── Window setup ──────────────────────────────────────────
+
+    def _setup_window(self):
+        w = self.win
+        w.overrideredirect(True)
+        w.wm_attributes('-topmost', True)
+        w.wm_attributes('-transparentcolor', TRANSP)
+        w.config(bg=TRANSP)
+        w.resizable(False, False)
+        w.title(f'Buni-{self.slot}')
+
+    def _position_window(self):
+        sw = self.win.winfo_screenwidth()
+        sh = self.win.winfo_screenheight()
+        if self.slot == 0:
+            saved = self.persist.get('window_pos')
+            if saved and isinstance(saved, (list, tuple)) and len(saved) == 2:
+                try:
+                    x, y = int(saved[0]), int(saved[1])
+                    # 모니터 구성이 바뀌어(외장 모니터 분리 등) 저장된 위치가
+                    # 현재 화면 밖으로 완전히 벗어났으면 버리고 기본 위치를 쓴다
+                    on_screen = (x + WIN_W > 0 and x < sw and
+                                 y + WIN_H > 0 and y < sh)
+                    if on_screen:
+                        self.win.geometry(f'{WIN_W}x{WIN_H}+{x}+{y}')
+                        return
+                    self.persist.remove('window_pos')
+                except Exception:
+                    pass
+        # Top-right corner, slots stack downward
+        x = sw - WIN_W - 10
+        y = 50 + self.slot * SLOT_STEP
+        self.win.geometry(f'{WIN_W}x{WIN_H}+{x}+{y}')
+
+    def _init_hwnd(self):
+        try:
+            self._hwnd = _get_hwnd(self.win)
+            _set_click_through(self._hwnd, True)
+        except Exception:
+            pass
+        # <Enter>/<Leave>는 WS_EX_TRANSPARENT 상태에서 OS 이벤트가 도달하지 않아
+        # 절대 발생하지 않음 → 30ms 폴링으로 마우스 위치를 직접 확인
+        self._poll_click_through()
+
+    def _poll_click_through(self):
+        """30ms마다 마우스가 창 위에 있는지 확인해 클릭 투과를 토글."""
+        if self._destroyed or not self._hwnd:
+            return
+        try:
+            mx = self.win.winfo_pointerx()
+            my = self.win.winfo_pointery()
+            wx = self.win.winfo_rootx()
+            wy = self.win.winfo_rooty()
+            over = wx <= mx < wx + WIN_W and wy <= my < wy + WIN_H
+            _set_click_through(self._hwnd, not over)
+        except Exception:
+            pass
+        self.win.after(30, self._poll_click_through)
+
+    # ── Drag ─────────────────────────────────────────────────
+
+    def _drag_press(self, e: tk.Event):
+        self._drag_start = (e.x_root, e.y_root,
+                            self.win.winfo_x(), self.win.winfo_y())
+        self._dragged  = False
+        self._press_xy = (e.x, e.y)
+        if self._hwnd:
+            _set_click_through(self._hwnd, False)
+
+    def _drag_motion(self, e: tk.Event):
+        if not self._drag_start:
+            return
+        sx, sy, wx, wy = self._drag_start
+        if abs(e.x_root - sx) > 4 or abs(e.y_root - sy) > 4:
+            self._dragged = True
+        new_x = wx + e.x_root - sx
+        new_y = wy + e.y_root - sy
+        self.win.geometry(f'+{new_x}+{new_y}')
+        # 권한 팝업도 같이 이동
+        if self._perm_win and self._perm_win.winfo_exists():
+            self._reposition_perm_popup(new_x, new_y)
+
+    def _reposition_perm_popup(self, win_x: int, win_y: int):
+        """캐릭터 창 좌표(win_x, win_y) 기준으로 권한 팝업 재배치."""
+        if not (self._perm_win and self._perm_win.winfo_exists()):
+            return
+        try:
+            BW, TAIL_W = 230, 15
+            ph = self._perm_win.winfo_height()
+            if ph < 10:
+                ph = 156  # 초기 렌더 전 폴백 높이
+            tail_tip_x = int(CHAR_CX - P * 5) + 9 - 30
+            px = win_x + tail_tip_x - (BW + TAIL_W)
+            py = win_y + int(CHAR_CY - P * 3.5) - ph // 2
+            self._perm_win.geometry(f'+{px}+{py}')
+        except Exception:
+            pass
+
+    def _touch_region(self, x: int, y: int):
+        """누른 자리로 부위를 가린다 — 머리 위(귀)와 몸. 그 밖(게이지 바 등)은 반응 없음."""
+        dx, dy = x - self.cx, y - self.cy
+        if abs(dx) > P * 4 or dy < -P * 5.5 or dy > P * 3.6:
+            return None
+        return 'ear' if dy < -P * 2.1 else 'body'
+
+    def _touch(self, region: str):
+        """쓰다듬기 반응 — 귀는 쫑긋, 몸은 간지러워 몸을 비튼다."""
+        if region == 'ear':
+            # 귀가 확 접혔다가 통통 튀며 펴진다
+            steps = [(0, 0.45), (120, 1.14), (200, 0.94), (270, 1.03), (340, 1.0)]
+            for delay, scale in steps:
+                self.win.after(delay, lambda sc=scale: self._set_ear_scale(sc))
+        elif region == 'body':
+            # 간지러움 — 눈을 질끈 감고 몸을 좌우로 떤다
+            self.blinking = True
+            wiggle = [-3, 3, -2.2, 2.2, -1.2, 0]
+            for i, dx in enumerate(wiggle):
+                self.win.after(80 * i, lambda d=dx: self._set_body_dx(d))
+            self.win.after(80 * len(wiggle) + 120, self._end_tickle)
+
+    def _set_ear_scale(self, sc: float):
+        if not self._destroyed:
+            self.ear_scale = sc; self._draw()
+
+    def _set_body_dx(self, dx: float):
+        if not self._destroyed:
+            self.body_dx = dx; self._draw()
+
+    def _end_tickle(self):
+        if not self._destroyed:
+            self.blinking = False; self._draw()
+
+    def _drag_release(self, _e: tk.Event):
+        # 끌지 않고 눌렀다 뗀 것 = 쓰다듬기
+        if self._drag_start and not self._dragged:
+            region = self._touch_region(*self._press_xy)
+            if region:
+                self._touch(region)
+        self._drag_start = None
+        if self._hwnd:
+            _set_click_through(self._hwnd, True)
+        if self.slot == 0:
+            self.persist.set('window_pos',
+                             [self.win.winfo_x(), self.win.winfo_y()])
+
+    # ── Full redraw (draw order matches macOS z-order) ────────
+
+    def _draw(self):
+        if self._destroyed:
+            return
+        self.cv.delete('all')
+        self._draw_bubble()        # 1. Speech bubble (behind everything)
+        self._draw_character()     # 2~8. 캐릭터 본체 + 꾸미기 아이템
+        self._draw_bar()           # 9. Usage bar
+        self._draw_memo()          # 10. Memo tag (above ears)
 
     # ── Speech bubble ─────────────────────────────────────────
 
@@ -1765,7 +2180,7 @@ class SessionWindow:
 
         # 레벨 텍스트
         _txt(bx, lv_y,
-             text=f'Lv.{self._monthly_tokens // 500_000 + 1}',
+             text=f'Lv.{self.shop.level}',
              anchor='w', font=('Consolas', 6, 'bold'), color='#F2CC25')
 
         # 트랙 (어두운 pill)
@@ -1789,7 +2204,7 @@ class SessionWindow:
         # 라벨: % (왼쪽), ↺ (오른쪽)
         _lf = ('Consolas', 6, 'bold')
         label_pct = (f'{round(display_pct)}%'
-                     if self._server_utilization is not None else '동기화중')
+                     if self._server_utilization is not None else t('동기화중', 'syncing'))
         _txt(bx, label_y, text=label_pct,
              anchor='w', font=_lf, color='#AAAAAA')
         rst = self._reset_time_str()
@@ -2002,17 +2417,48 @@ class SessionWindow:
             self.win.after(0, lambda: self._do_apply(
                 new_state, tool, notif, perm_cmd, perm_id))
 
+    # 세션이 실제로 "돌고 있는" 상태 — 비진행 → 진행으로 바뀌는 순간이 곧
+    # "세션 시작"이고, 사용자가 숨긴 부니는 그 시점에만 다시 나타난다.
+    RUNNING_STATES = ('thinking', 'toolUse', 'toolRead', 'permission',
+                      'backgroundWork', 'ask_user')
+
     def _do_apply(self, new_state, tool, notif, perm_cmd, perm_id):
         if self._destroyed:
             return
         self.state = new_state
         self.wide_eyes = False
 
+        # ── 숨김 해제 판정 — 새 작업이 시작될 때만 다시 나타난다
+        running   = new_state in self.RUNNING_STATES
+        run_start = running and not self._was_running
+        self._was_running = running
+        if run_start:
+            # 실제로 새 작업이 시작됐다 — 전역 숨김도 여기서 함께 풀린다.
+            # thinking/toolUse 상태는 아래에서 _auto_show()를 부르지 않으므로
+            # (ready·permission에서만 호출) 여기서 직접 다시 띄운다.
+            self.manager._is_manually_hidden = False
+            self._manually_hidden = False
+            self._auto_show()
+
         # Stop animations that are no longer relevant
         if new_state not in ('thinking', 'toolUse', 'backgroundWork'):
             self._stop_laptop()
         if new_state != 'toolRead':
             self._stop_reading()
+
+        # 권한 요청·완료·확인 요청 — 왼팔을 들어 올리고 당근(입은 무기가 있으면 그 무기)을 쥔다
+        if new_state in ('permission', 'completed', 'ask_user'):
+            self.larm_dy = -P * 2.8
+            self.show_carrot = True
+        elif self.show_carrot:
+            self.show_carrot = False
+            if not (self.show_laptop or self.show_reading):
+                self.larm_dy = 0.0
+        # 대기를 벗어나면 무기 보여주기는 바로 접는다
+        if new_state != 'ready' and self.showing_weapon:
+            self._end_weapon_show()
+        if new_state != 'ask_user':
+            self._ask_is_hint = False
 
         # 관련 없는 상태로 넘어가면 떠 있던 팝업을 정리한다 — Windows는 각 상태가
         # 독립된 Toplevel 팝업이라, 정리하지 않으면 화면에 붕 뜬 채로 남는다.
@@ -2029,17 +2475,17 @@ class SessionWindow:
             # 자동 숨기기 제거 — 사용자가 직접 숨기기 전까지 표시 유지
 
         elif new_state == 'thinking':
-            self.msg = '코딩중'
+            self.msg = t('코딩중', 'Coding')
             self._start_laptop()
             self._draw()
 
         elif new_state == 'toolUse':
-            self.msg = tool or '작업 중...'
+            self.msg = tool or t('작업 중...', 'Working...')
             self._start_laptop()
             self._draw()
 
         elif new_state == 'toolRead':
-            self.msg = tool or '읽는 중...'
+            self.msg = tool or t('읽는 중...', 'Reading...')
             self._start_reading()
             self._draw()
 
@@ -2061,7 +2507,7 @@ class SessionWindow:
             self.perm_id  = perm_id
             self._auto_show()
             self._draw()
-            if not self.manager._is_manually_hidden:
+            if not self.hidden_by_user:
                 self._show_perm_popup()
 
         elif new_state == 'completed':
@@ -2069,14 +2515,15 @@ class SessionWindow:
             self.wide_eyes = True
             self._bounce(high=True)
             self._draw()
-            if not self.manager._is_manually_hidden:
+            if not self.hidden_by_user:
                 self._show_completion_popup()
 
         elif new_state == 'ask_user':
             self.wide_eyes = True
             self.msg = None
+            self.ask_msg = notif or ''
             self._draw()
-            if not self.manager._is_manually_hidden:
+            if not self.hidden_by_user:
                 self._show_ask_user_popup()
 
         elif new_state == 'ready':
@@ -2089,10 +2536,21 @@ class SessionWindow:
         if new_state not in ('permission', 'completed', 'ask_user'):
             self._maybe_show_limit_popup()
 
+    @property
+    def hidden_by_user(self) -> bool:
+        """사용자가 숨긴 상태인지 — 이 세션 개별 숨김이거나 전체 숨김."""
+        return self._manually_hidden or self.manager._is_manually_hidden
+
+    def hide_until_next_start(self):
+        """패널을 숨기고, 이 세션이 새로 시작될 때까지 숨김 상태를 유지한다."""
+        self._manually_hidden = True
+        self.hide()
+
     def _auto_show(self):
-        """숨긴 상태가 아닐 때만 표시 — "부니 불러오기"를 누르기 전까지는
-        어떤 상태 변화(권한 요청 포함)로도 자동으로 다시 나타나지 않게 한다."""
-        if not self.manager._is_manually_hidden:
+        """숨긴 상태가 아닐 때만 표시 — 사용자가 숨긴 뒤에는 이 세션이 새로
+        시작되거나(위 _do_apply) "부니 불러오기"를 누르기 전까지는 어떤 상태
+        변화(권한 요청 포함)로도 자동으로 다시 나타나지 않게 한다."""
+        if not self.hidden_by_user:
             self.show()
 
     def _clear_msg_if(self, old_msg):
@@ -2169,7 +2627,7 @@ class SessionWindow:
         _bubble(cv, 2, 3, WIN_H_, SHADOW)
         _bubble(cv, 0, 0, WIN_H_, WHITE)
 
-        cv.create_text(PAD + 4, PAD + 2, text='✅ 완료했어요!',
+        cv.create_text(PAD + 4, PAD + 2, text=t('✅ 완료했어요!', '✅ All done!'),
                        anchor='nw', font=('Consolas', 10, 'bold'),
                        fill='#000000', tags='bubble')
 
@@ -2181,7 +2639,7 @@ class SessionWindow:
 
         btn_y = PAD + TITLE_H + GAP
         bg    = '#2DB357'
-        label = '확인'
+        label = t('확인', 'OK')
         bw    = len(label) * 9 + 20
         bx    = PAD
         br    = 7
@@ -2217,7 +2675,12 @@ class SessionWindow:
         TITLE_H  = 20
         BTN_H    = 28
         GAP      = 6
-        WIN_H_   = PAD + TITLE_H + GAP + BTN_H + PAD
+        QLINE_H  = 15
+        # 훅이 실어 보낸 AskUserQuestion 질문을 제목 아래에 최대 2줄까지 보여준다
+        q_font   = tkfont.Font(family='Malgun Gothic', size=8)
+        q_lines  = (_wrap_memo_lines(self.ask_msg, q_font, BW - PAD * 2 - 8, max_lines=2)
+                    if self.ask_msg else [])
+        WIN_H_   = PAD + TITLE_H + len(q_lines) * QLINE_H + GAP + BTN_H + PAD
 
         def _get_geometry(h):
             self.win.update_idletasks()
@@ -2266,13 +2729,17 @@ class SessionWindow:
         _bubble(cv, 2, 3, WIN_H_, SHADOW)
         _bubble(cv, 0, 0, WIN_H_, WHITE)
 
-        cv.create_text(PAD + 4, PAD + 2, text='✅ 확인이 필요해요!',
+        cv.create_text(PAD + 4, PAD + 2, text=t('✅ 확인이 필요해요!', '✅ Needs your input!'),
                        anchor='nw', font=('Consolas', 10, 'bold'),
                        fill='#000000', tags='bubble')
 
-        btn_y = PAD + TITLE_H + GAP
+        for i, line in enumerate(q_lines):
+            cv.create_text(PAD + 4, PAD + TITLE_H + i * QLINE_H, text=line,
+                           anchor='nw', font=q_font, fill='#404040', tags='bubble')
+
+        btn_y = PAD + TITLE_H + len(q_lines) * QLINE_H + GAP
         bg    = '#3377E0'
-        label = '클로드 열기'
+        label = t('클로드 열기', 'Open Claude')
         bw    = len(label) * 9 + 20
         bx    = PAD
         br    = 7
@@ -2304,7 +2771,7 @@ class SessionWindow:
             return
         if self.state in ('permission', 'completed', 'ask_user'):
             return
-        if self.manager._is_manually_hidden:
+        if self.hidden_by_user:
             return
         if self._limit_win and self._limit_win.winfo_exists():
             self._tick_limit_popup()
@@ -2322,11 +2789,11 @@ class SessionWindow:
 
     def _limit_countdown_str(self) -> str:
         if self._server_resets_at is None:
-            return '재설정 시각 확인 중'
+            return t('재설정 시각 확인 중', 'Checking reset time')
         now  = datetime.datetime.now(datetime.timezone.utc)
         diff = int((self._server_resets_at - now).total_seconds())
         if diff <= 0:
-            return '곧 재설정돼요'
+            return t('곧 재설정돼요', 'Resetting soon')
         h = diff // 3600; m = (diff % 3600) // 60; s = diff % 60
         return (f'{h}:{m:02d}:{s:02d} 후 재설정' if h > 0
                 else f'{m}:{s:02d} 후 재설정')
@@ -2395,7 +2862,7 @@ class SessionWindow:
         _bubble(cv, 2, 3, WIN_H_, SHADOW)
         _bubble(cv, 0, 0, WIN_H_, WHITE)
 
-        cv.create_text(PAD + 4, PAD + 2, text='⏳ 한도에 도달했어요',
+        cv.create_text(PAD + 4, PAD + 2, text=t('⏳ 한도에 도달했어요', '⏳ Usage limit reached'),
                        anchor='nw', font=('Consolas', 10, 'bold'),
                        fill='#000000', tags='bubble')
 
@@ -2406,7 +2873,7 @@ class SessionWindow:
 
         btn_y = txt_y + TXT_H + GAP
         bg    = '#73737F'
-        label = '숨기기'
+        label = t('숨기기', 'Hide')
         bw    = len(label) * 9 + 20
         bx    = PAD
         br    = 7
@@ -2520,7 +2987,7 @@ class SessionWindow:
         _bubble(cv, 0, 0, WIN_H, WHITE)
 
         # 제목
-        cv.create_text(PAD + 4, PAD + 2, text='🔐 실행 허용?',
+        cv.create_text(PAD + 4, PAD + 2, text=t('🔐 실행 허용?', '🔐 Run this?'),
                        anchor='nw', font=('Consolas', 10, 'bold'),
                        fill='#000000', tags='bubble')
 
@@ -2554,9 +3021,9 @@ class SessionWindow:
 
         # 버튼
         btn_y = cmd_y + CMD_H + GAP
-        btns  = [('거부', '#DA3733', 'deny'),
-                 ('허용', '#2DB357', 'approve'),
-                 ('전체 허용', '#3377E0', 'approve_all')]
+        btns  = [(t('거부', 'Deny'), '#DA3733', 'deny'),
+                 (t('허용', 'Allow'), '#2DB357', 'approve'),
+                 (t('전체 허용', 'Allow all'), '#3377E0', 'approve_all')]
         bx = PAD
         for label, bg, action in btns:
             bw = len(label) * 9 + 16
@@ -2605,29 +3072,32 @@ class SessionWindow:
         # 트레이의 "부니 숨기기"와 동일한 전체 숨김으로 위임 — 이 창만 hide()하면
         # manager._is_manually_hidden이 안 켜져서, 다른 상태 변화나 새 Claude
         # 세션으로 언제든 되살아나 버린다.
-        self._menu.add_command(label='숨기기',  command=self.manager.hide_all)
-        self._menu.add_command(label='Claude 열기', command=self._open_claude)
+        self._menu.add_command(label=t('숨기기', 'Hide'),  command=self.manager.hide_all)
+        self._menu.add_command(label=t('Claude 열기', 'Open Claude'), command=self._open_claude)
         self._menu.add_separator()
 
         char_menu = tk.Menu(self._menu, tearoff=0)
-        for cid, name in CHAR_DISPLAY_NAMES.items():
+        for cid in CHAR_DISPLAY_NAMES:
+            name = char_display_name(cid)
             char_menu.add_command(label=name,
                                    command=lambda c=cid: self._set_character(c))
-        self._menu.add_cascade(label='캐릭터 변경', menu=char_menu)
+        self._menu.add_cascade(label=t('캐릭터 변경', 'Change character'), menu=char_menu)
 
         self._menu.add_separator()
-        label = '메모 추가...' if not self.memo else '메모 편집...'
+        label = t('메모 추가...', 'Add note...') if not self.memo else t('메모 편집...', 'Edit note...')
         self._menu.add_command(label=label, command=self._edit_memo)
         if self.memo:
-            self._menu.add_command(label='메모 지우기', command=self._clear_memo)
+            self._menu.add_command(label=t('메모 지우기', 'Clear note'), command=self._clear_memo)
 
         self._menu.add_separator()
-        self._menu.add_command(label='위치 초기화',  command=self._reset_position)
-        self._menu.add_command(label='단축키 설정...', command=self.manager._open_shortcut_settings)
+        self._menu.add_command(label=t(f'🛍 부니 상점  (🪙 {self.shop.coins})', f'🛍 Buni Shop  (🪙 {self.shop.coins})'),
+                               command=lambda: self.manager.open_shop(self.character))
+        self._menu.add_command(label=t('위치 초기화', 'Reset position'),  command=self._reset_position)
+        self._menu.add_command(label=t('설정...', 'Settings...'), command=self.manager._open_shortcut_settings)
         self._menu.add_separator()
-        self._menu.add_command(label='세션 끊기',    command=self._disconnect)
+        self._menu.add_command(label=t('세션 끊기', 'Disconnect session'),    command=self._disconnect)
         self._menu.add_separator()
-        self._menu.add_command(label='종료', command=self.manager.quit)
+        self._menu.add_command(label=t('종료', 'Quit'), command=self.manager.quit)
 
     def _show_menu(self, e: tk.Event):
         self._build_menu()
@@ -2649,21 +3119,35 @@ class SessionWindow:
 
     def _edit_memo(self):
         result = simpledialog.askstring(
-            '메모 설정',
-            '이 캐릭터의 메모를 입력하세요:\n(빈칸으로 두면 메모가 삭제됩니다)',
+            t('메모 설정', 'Set note'),
+            t('이 캐릭터의 메모를 입력하세요:\n(빈칸으로 두면 세션 이름으로 되돌아갑니다)',
+              'Enter a note for this character:\n(Leave empty to go back to the session name)'),
             initialvalue=self.memo, parent=self.win)
-        if result is not None:
-            # 직접 입력(빈칸으로 지우는 것 포함)한 순간부터 세션 이름 자동 연동을 끈다
-            self.memo_is_auto = False
-            self.memo = result.strip()
-            self._save_memo()
-            self._draw()
+        if result is None:
+            return
+        trimmed = result.strip()
+        if not trimmed:
+            # 비우면 "메모 없음"이 아니라 기본값(세션 이름)으로 되돌린다
+            self._clear_memo()
+            return
+        # 직접 입력한 순간부터 세션 이름 자동 연동을 끈다
+        self.memo_is_auto = False
+        self.memo = trimmed
+        self._save_memo()
+        self._draw()
 
     def _clear_memo(self):
-        self.memo_is_auto = False
+        """메모를 비웠을 때 — 저장된 메모를 지우고 기본값인
+        "세션 이름 자동 연동"으로 되돌린다."""
+        self.memo_is_auto = True
         self.memo = ''
         self._save_memo()
         self._draw()
+        # 15초 주기 폴링을 기다리지 않고 지금 바로 세션 이름을 채운다
+        title = _read_session_title(self.session_id)
+        if title:
+            self.memo = title
+            self._draw()
 
     def _reset_position(self):
         if self.slot == 0:
@@ -2742,6 +3226,27 @@ class SessionWindow:
         # 세션 등에 대한 안전망). 오래 걸리는 도구가 실행 중
         # (tool_use 후 tool_done 미도착)이면 이벤트가 없는 게 정상이므로 건드리지 않는다.
         quiet_for = time.time() - self._last_event_time
+
+        # 도구가 시작됐는데 한참 아무 소식이 없다 = 클로드가 확인 창을 띄우고 기다리는 중일
+        # 가능성이 높다. 훅이 오지 않는 확인 창(브라우저 사이트 권한 등)을 알리는 유일한
+        # 방법이라 여기서 추정한다. Bash처럼 원래 오래 도는 도구까지 잡으면 오탐이 잦아,
+        # 보통 몇 초 안에 끝나는 MCP 도구에만 적용한다.
+        if (self._pending_tools > 0 and not self._wait_hint_shown and quiet_for > 20
+                and self._pending_tool_name and self._pending_tool_name.startswith('mcp__')
+                and self.state in ('thinking', 'toolUse', 'toolRead')):
+            self._wait_hint_shown = True
+            self._ask_is_hint = True
+            hint = (self._fmt_tool(self._pending_tool_name.lower())
+                    + t(' — 클로드 창에서 확인을 기다리는 중일 수 있어요',
+                        ' — Claude may be waiting for your confirmation'))
+            self._apply_state('ask_user', notif=hint)
+
+        # 승인 버튼 없는 확인 버블(ask_user·확인 대기 추정)은 터미널에서 답해도 후속
+        # 이벤트가 안 올 수 있어, 한동안 조용하면 스스로 정리한다.
+        if self.state == 'ask_user' and quiet_for > 120:
+            self._pending_tools = 0
+            self._apply_state('ready')
+
         if self._pending_tools == 0:
             if (self.state not in ('idle', 'completed', 'permission', 'ask_user', 'backgroundWork')
                     and quiet_for > 300):
@@ -2759,17 +3264,18 @@ class SessionWindow:
             ev = json.loads(raw)
         except json.JSONDecodeError:
             return
-        t = ev.get('type', '')
+        et = ev.get('type', '')
 
         # 뒤늦게 도착하는 지연 전환이 최신 이벤트를 덮어쓰지 않도록 순번을 올린다
         self._event_seq += 1
 
-        if t == 'tool_use':
+        if et == 'tool_use':
             # 과거 이벤트 재생으로 이미 끝난 도구 실행이 되살아나는 것 방지
             if self._is_replaying:
                 return
             # 권한/확인 요청 중에는 도구 이벤트 무시 — 말풍선 겹침 방지
-            if self.state in ('permission', 'ask_user'):
+            # (훅 없는 확인 창을 추정해 띄운 안내는 예외 — 도구가 진행되면 걷는다)
+            if self.state == 'permission' or (self.state == 'ask_user' and not self._ask_is_hint):
                 return
             # 새 작업이 시작됐으니 대기 중이던 "완료" 표시는 취소
             if self._completion_job:
@@ -2777,6 +3283,8 @@ class SessionWindow:
                 self._completion_job = None
             self._pending_tools += 1
             tool_raw   = ev.get('tool', 'tool')
+            self._pending_tool_name = tool_raw
+            self._wait_hint_shown   = False
             label      = self._fmt_tool(tool_raw)
             next_state = 'toolRead' if tool_raw.lower() in READ_TOOLS else 'toolUse'
             # macOS처럼 ready 상태에서는 thinking 0.6초 후 도구 상태로 전환
@@ -2790,15 +3298,18 @@ class SessionWindow:
             else:
                 self._apply_state(next_state, tool=label)
 
-        elif t == 'tool_done':
+        elif et == 'tool_done':
             if self._is_replaying:
                 return
-            if self.state in ('permission', 'ask_user'):
+            if self.state == 'permission' or (self.state == 'ask_user' and not self._ask_is_hint):
                 return
             self._pending_tools = max(0, self._pending_tools - 1)
+            if self._pending_tools == 0:
+                self._pending_tool_name = None
+            self._wait_hint_shown = False
             self._apply_state('thinking')
 
-        elif t == 'thinking':
+        elif et == 'thinking':
             is_stale = (time.time() - ev.get('ts', 0) > 30) if 'ts' in ev else True
             if self._is_replaying and is_stale:
                 return
@@ -2806,20 +3317,24 @@ class SessionWindow:
                 self.win.after_cancel(self._completion_job)
                 self._completion_job = None
             self._pending_tools = 0   # 새 턴 시작 — 이전 턴에서 남은 카운트 정리
+            self._pending_tool_name = None
+            self._wait_hint_shown = False
             if self.state in ('ready', 'completed'):
                 self._apply_state('thinking')
 
-        elif t == 'done':
+        elif et == 'done':
             if self._is_replaying:
                 return   # 과거 done 재생 시 세션 조기 제거 방지
             self._pending_tools = 0
+            self._pending_tool_name = None
+            self._wait_hint_shown = False
             if self._completion_job:
                 self.win.after_cancel(self._completion_job)
             self._completion_job = self.win.after(
                 self._completion_debounce_ms, self._show_completion_if_pending)
             # 자동 파일 삭제·세션 제거 없음 — 사용자가 숨기기 전까지 유지
 
-        elif t == 'background':
+        elif et == 'background':
             # Stop 훅은 왔지만 run_in_background로 띄운 작업이 아직 돌고 있는 경우 —
             # 완료가 아니라 "백그라운드 작업 중"으로 표시. 대기 중이던 완료 표시도 취소.
             if self._is_replaying:
@@ -2829,33 +3344,33 @@ class SessionWindow:
                 self.win.after_cancel(self._completion_job)
                 self._completion_job = None
             count = ev.get('count', 1)
-            base  = ev.get('message') or '백그라운드 작업'
+            base  = ev.get('message') or t('백그라운드 작업', 'Background task')
             label = f'{base} 외 {count - 1}건' if count > 1 else base
             self._apply_state('backgroundWork', notif=f'⏳ {label}')
 
-    def _show_completion_if_pending(self):
-        self._completion_job = None
-        if not self._destroyed:
-            self._apply_state('completed')
-
-        elif t == 'ask_user':
-            if self._is_replaying:
+        elif et == 'ask_user':
+            # 이미 답한 질문이 재시작 때 되살아나는 건 막되, 방금 온 질문은
+            # 재생 중이라도 띄운다 — 완료 뒤 세션이 다시 감지될 때 첫 폴링이
+            # 재생 모드라, 예전에는 그 질문이 통째로 무시됐다.
+            is_stale = (time.time() - ev.get('ts', 0) > 30) if 'ts' in ev else True
+            if self._is_replaying and is_stale:
                 return
-            self._apply_state('ask_user')
+            self._ask_is_hint = False
+            self._apply_state('ask_user', notif=(ev.get('message') or '').strip())
 
-        elif t == 'notification':
+        elif et == 'notification':
             is_stale = (time.time() - ev.get('ts', 0) > 30) if 'ts' in ev else True
             if self._is_replaying and is_stale:
                 return
             if self.state == 'ask_user':
                 return   # 확인 요청 버블이 알림에 덮이지 않도록
-            self._apply_state('notification', notif=ev.get('message', '알림'))
+            self._apply_state('notification', notif=ev.get('message', t('알림', 'Notification')))
 
-        elif t == 'permission_request':
+        elif et == 'permission_request':
             is_stale = (time.time() - ev.get('ts', 0) > 30) if 'ts' in ev else True
             if self._is_replaying and is_stale:
                 return
-            pid = ev.get('id');  cmd = ev.get('message', '명령')
+            pid = ev.get('id');  cmd = ev.get('message', t('명령', 'command'))
             if pid and self.always_approve:
                 try:
                     (_TEMP / f'claude-companion-decision-{pid}').write_text('approve')
@@ -2864,10 +3379,18 @@ class SessionWindow:
             elif pid:
                 self._apply_state('permission', perm_cmd=cmd, perm_id=pid)
 
-        elif t == 'usage':
+        elif et == 'usage':
             pct = ev.get('percent', 0)
             sts = ev.get('sessionStartTs', None)
             self.win.after(0, lambda p=pct, s=sts: self.set_usage(p, s))
+
+    def _show_completion_if_pending(self):
+        self._completion_job = None
+        if not self._destroyed:
+            # 같은 완료가 두 번 들어와도 코인은 한 번만
+            if self.state != 'completed':
+                self.shop.reward_completion()
+            self._apply_state('completed')
 
     def _cleanup_event_file(self):
         """세션 이벤트 파일 삭제 → poll_events가 False를 반환해 세션 자동 제거."""
@@ -2886,18 +3409,18 @@ class SessionWindow:
             tool  = ' '.join(parts[2:]) if len(parts) > 2 else raw
             return f"{tool.replace('_', ' ')} 실행 중"
         return {
-            'bash':      '터미널 명령 실행 중',
-            'read':      '파일 읽는 중',
-            'write':     '파일 쓰는 중',
-            'edit':      '파일 수정 중',
-            'multiedit': '파일 수정 중',
-            'glob':      '파일 검색 중',
-            'grep':      '코드 검색 중',
-            'ls':        '폴더 탐색 중',
-            'websearch': '웹 검색 중',
-            'webfetch':  '페이지 읽는 중',
-            'todowrite': '할 일 정리 중',
-            'todoread':  '할 일 확인 중',
+            'bash':      t('터미널 명령 실행 중', 'Running command'),
+            'read':      t('파일 읽는 중', 'Reading file'),
+            'write':     t('파일 쓰는 중', 'Writing file'),
+            'edit':      t('파일 수정 중', 'Editing file'),
+            'multiedit': t('파일 수정 중', 'Editing file'),
+            'glob':      t('파일 검색 중', 'Finding files'),
+            'grep':      t('코드 검색 중', 'Searching code'),
+            'ls':        t('폴더 탐색 중', 'Browsing folder'),
+            'websearch': t('웹 검색 중', 'Searching the web'),
+            'webfetch':  t('페이지 읽는 중', 'Reading page'),
+            'todowrite': t('할 일 정리 중', 'Updating to-dos'),
+            'todoread':  t('할 일 확인 중', 'Checking to-dos'),
         }.get(raw.lower(), f'{raw} 실행 중')
 
     # ── Visibility ────────────────────────────────────────────
@@ -2928,6 +3451,65 @@ class SessionWindow:
         except Exception:
             return False
 
+    # ── 무기 보여주기 (대기 중) ───────────────────────────────
+
+    def _schedule_weapon_show(self):
+        if self._destroyed:
+            return
+        # 몇 초마다 꺼낼지 고민한다 — 확률로 걸러서 평균 12초 안팎에 한 번 나온다
+        self._weapon_job = self.win.after(4000, self._maybe_show_weapon)
+
+    def _maybe_show_weapon(self):
+        if self._destroyed:
+            return
+        self._schedule_weapon_show()
+        weapon = self._equip('weapon')
+        if (self.state != 'ready' or self.showing_weapon or not weapon or weapon == 'carrot'
+                or not self.is_visible or random.randrange(3) != 0):
+            return
+        self._start_weapon_show()
+
+    def _start_weapon_show(self):
+        """① 오른팔을 들어 올리며 무기를 꺼낸다 → ② 천천히 좌우로 기울여 보여준다 →
+        ③ 팔을 내리며 집어넣는다."""
+        self._show_token += 1
+        tok = self._show_token
+        self.showing_weapon = True
+        self.rarm_dy = -P * 1.6
+        self._swing_target = 0.0
+        self._draw()
+        for i, angle in enumerate([-8, 14, -6, 12, -4, 0]):
+            self.win.after(700 + 340 * i, lambda a=angle, k=tok: self._set_swing(a, k))
+        self.win.after(3200, lambda k=tok: self._end_weapon_show(k))
+
+    def _set_swing(self, angle: float, token: int):
+        if token == self._show_token and self.showing_weapon:
+            self._swing_target = angle
+
+    def _end_weapon_show(self, token=None):
+        if self._destroyed or (token is not None and token != self._show_token):
+            return
+        if not self.showing_weapon:
+            return
+        self.showing_weapon = False
+        self.weapon_swing = self._swing_target = 0.0
+        if not self.show_laptop and not self.show_reading:
+            self.rarm_dy = 0.0
+        self._draw()
+
+    def _tick_anim(self):
+        """시간에 따라 계속 바뀌는 아이템(무기 흔들림·뜨개질·후광)이 있을 때만 다시 그린다."""
+        if self._destroyed:
+            return
+        try:
+            if self._needs_anim() and self.is_visible:
+                # 기울임은 목표 각도로 부드럽게 따라간다
+                self.weapon_swing += (self._swing_target - self.weapon_swing) * 0.5
+                self._draw()
+        except Exception:
+            pass
+        self._anim_job = self.win.after(90, self._tick_anim)
+
     # ── Disconnect ────────────────────────────────────────────
 
     def _disconnect(self):
@@ -2937,10 +3519,13 @@ class SessionWindow:
         Claude를 새로 시작하면 새 session_id로 새 부니가 생성됩니다."""
         import tkinter.messagebox as mb
         if not mb.askyesno(
-                '세션 끊기',
-                '이 세션을 끊으시겠습니까?\n\n'
-                '창이 닫히며, 이 세션에 대한 알림은 더 이상 표시되지 않습니다.\n'
-                'Claude를 새로 시작하면 새 부니가 생성됩니다.',
+                t('세션 끊기', 'Disconnect session'),
+                t('이 세션을 끊으시겠습니까?\n\n'
+                  '창이 닫히며, 이 세션에 대한 알림은 더 이상 표시되지 않습니다.\n'
+                  'Claude를 새로 시작하면 새 부니가 생성됩니다.',
+                  'Disconnect this session?\n\n'
+                  'The window closes and this session stops notifying you.\n'
+                  'Starting Claude again creates a new Buni.'),
                 parent=self.win):
             return
         self.manager.disconnect_session(self.session_id, self.event_file)
@@ -2974,6 +3559,418 @@ class SessionWindow:
 
 
 # ══════════════════════════════════════════════════════════════
+# 부니 상점 — 위에서 입혀보고, 아래에서 사고 입는다
+# ══════════════════════════════════════════════════════════════
+
+class ShopPreview(CharacterDrawMixin):
+    """상점 미리보기 캐릭터 — 실제 세션과 무관하게 입어보는 모습을 그대로 보여준다."""
+
+    SCALE = 1.9
+
+    def __init__(self, cv: tk.Canvas, shop: 'buni_shop.ShopStore', cx: int, cy: int):
+        self.cv, self.shop = cv, shop
+        self.cx, self.cy = cx, cy
+        self.character = 'rabbit'
+        self.try_on: dict = {}
+        self.state = 'ready'
+        self.mode  = 'idle'
+        self.body_dx = self.body_dy = 0.0
+        self.larm_dx = self.larm_dy = self.rarm_dx = self.rarm_dy = 0.0
+        self.show_laptop = self.show_reading = self.show_carrot = False
+        self.doc_visible = True
+        self.throw_dx = self.throw_dy = 0.0
+        self.blinking = self.wide_eyes = False
+        self.ear_scale = 1.0
+        self.showing_weapon = False
+        self.weapon_swing = 0.0
+
+    def set_mode(self, mode: str):
+        """idle(대기) / working(작업 중) / done(완료) — 무기·작업 도구가 보이는 모습을 고른다."""
+        self.mode = mode
+        self.show_laptop = self.show_carrot = False
+        self.wide_eyes = False
+        self.larm_dx = self.rarm_dx = 0.0
+        self.larm_dy = self.rarm_dy = 0.0
+        if mode == 'working':
+            self.state = 'thinking'
+            self.show_laptop = True
+            self.larm_dx, self.rarm_dx = P * 1.55, -P * 1.55
+            self.larm_dy = self.rarm_dy = P
+        elif mode == 'done':
+            self.state = 'completed'
+            self.show_carrot = True
+            self.wide_eyes = True
+            self.larm_dy = -P * 2.8
+        else:
+            self.state = 'ready'
+
+    def redraw(self):
+        if self.mode == 'working':               # 팔이 번갈아 위아래 — 뜨개질 바늘이 손을 따라 움직인다
+            swing = P * 0.6 if int(time.time() / 0.36) % 2 else -P * 0.6
+            self.larm_dy, self.rarm_dy = P - swing, P + swing
+        self.cv.delete('all')
+        self._draw_character()
+        self.cv.scale('all', self.cx, self.cy, self.SCALE, self.SCALE)
+
+
+class ShopWindow:
+    """부니 상점 창."""
+
+    WEAR  = '#4DC780'     # 착용 중 — 초록
+    TRY   = '#599EFA'     # 입어보는 중 — 파랑 (착용 중과 구분)
+    BG    = '#1E1E24'
+    CARD  = '#2A2A33'
+    DIM   = '#7A7A88'
+    GOLD  = '#F2CC25'
+    COIN  = '#FAD238'
+    ACCENT = '#3377E0'
+    BUY   = '#F29926'
+    OFF   = '#DB4D4D'
+
+    MODE_FOR_SLOT = {'weapon': 'done', 'tool': 'working'}
+
+    def __init__(self, manager: 'BuniManager', character: str):
+        self.manager = manager
+        self.shop    = manager.shop
+        self.target  = character if character in CHARACTERS else 'rabbit'
+        self.slot    = 'head'
+        self.try_on: dict = {}
+        self._job    = None
+
+        win = self.win = tk.Toplevel(manager.root)
+        win.title(t('부니 상점', 'Buni Shop'))
+        win.configure(bg=self.BG)
+        win.geometry('480x740')
+        win.minsize(440, 620)
+        win.attributes('-topmost', True)
+        win.protocol('WM_DELETE_WINDOW', self.close)
+        win.bind('<Escape>', lambda _: self.close())
+
+        self._font   = ('Malgun Gothic', 10)
+        self._fontb  = ('Malgun Gothic', 10, 'bold')
+
+        # ── 머리말: 제목 · 클라우드 · 코인 · 레벨
+        head = tk.Frame(win, bg=self.BG)
+        head.pack(fill='x', padx=18, pady=(14, 6))
+        tk.Label(head, text=t('부니 상점', 'Buni Shop'), bg=self.BG, fg='white',
+                 font=('Malgun Gothic', 14, 'bold')).pack(side='left')
+        self._lv = tk.Label(head, bg=self.BG, fg=self.GOLD, font=('Consolas', 11, 'bold'))
+        self._lv.pack(side='right')
+        self._coins = tk.Label(head, bg=self.BG, fg='#FAE080', font=('Consolas', 12, 'bold'))
+        self._coins.pack(side='right', padx=(0, 12))
+        self._cloud_box = tk.Frame(head, bg=self.BG)
+        self._cloud_box.pack(side='right', padx=(0, 12))
+
+        # ── 캐릭터 선택
+        self._char_btns = {}
+        picker = tk.Frame(win, bg=self.BG)
+        picker.pack(fill='x', padx=18, pady=(0, 8))
+        for i, cid in enumerate(CHARACTERS):
+            b = tk.Button(picker, text=self._short_name(cid), relief='flat', cursor='hand2',
+                          font=('Malgun Gothic', 9, 'bold'), bd=0, pady=5,
+                          command=lambda c=cid: self._set_target(c))
+            b.grid(row=0, column=i, sticky='ew', padx=(0 if i == 0 else 4, 0))
+            picker.grid_columnconfigure(i, weight=1, uniform='ch')
+            self._char_btns[cid] = b
+
+        # ── 미리보기
+        pv = tk.Frame(win, bg=self.CARD)
+        pv.pack(fill='x', padx=18, pady=(0, 8))
+        self._cv = tk.Canvas(pv, width=444, height=180, bg=self.CARD, highlightthickness=0)
+        self._cv.pack()
+        self.preview = ShopPreview(self._cv, self.shop, 222, 96)
+        self._mode_btns = {}
+        modes = tk.Frame(pv, bg=self.CARD)
+        modes.place(relx=1.0, rely=1.0, x=-8, y=-8, anchor='se')
+        for i, (m, ko, en) in enumerate((('idle', '대기', 'Idle'), ('working', '작업 중', 'Working'),
+                                         ('done', '완료', 'Done'))):
+            b = tk.Button(modes, text=t(ko, en), relief='flat', cursor='hand2', bd=0,
+                          font=('Malgun Gothic', 8), padx=7, pady=2,
+                          command=lambda mm=m: self._set_mode(mm))
+            b.grid(row=0, column=i, padx=(0 if i == 0 else 2, 0))
+            self._mode_btns[m] = b
+
+        # ── 지금 입은 것
+        self._summary = tk.Frame(win, bg=self.BG)
+        self._summary.pack(fill='x', padx=20, pady=(0, 6))
+        self._sum_tag = tk.Label(self._summary, bg=self.BG, font=('Malgun Gothic', 9, 'bold'))
+        self._sum_tag.pack(side='left')
+        self._sum_txt = tk.Label(self._summary, bg=self.BG, font=('Malgun Gothic', 9),
+                                 justify='left', anchor='w', wraplength=300)
+        self._sum_txt.pack(side='left', padx=(6, 0))
+        self._sum_reset = tk.Button(self._summary, text=t('원래대로', 'Reset'), relief='flat', bd=0,
+                                    bg='#555566', fg='white', cursor='hand2',
+                                    font=('Malgun Gothic', 8), padx=8, pady=1,
+                                    command=self._reset_try)
+
+        tk.Frame(win, bg='#3A3A44', height=1).pack(fill='x', padx=16)
+
+        # ── 자리 선택
+        self._slot_btns = {}
+        tabs = tk.Frame(win, bg=self.BG)
+        tabs.pack(fill='x', padx=18, pady=(10, 8))
+        for i, sl in enumerate(buni_shop.SLOTS):
+            b = tk.Button(tabs, text=t(*buni_shop.SLOT_TITLES[sl]), relief='flat', cursor='hand2',
+                          font=('Malgun Gothic', 9, 'bold'), bd=0, pady=5,
+                          command=lambda s=sl: self._set_slot(s))
+            b.grid(row=0, column=i, sticky='ew', padx=(0 if i == 0 else 3, 0))
+            tabs.grid_columnconfigure(i, weight=1, uniform='sl')
+            self._slot_btns[sl] = b
+
+        # ── 목록 (스크롤)
+        holder = tk.Frame(win, bg=self.BG)
+        holder.pack(fill='both', expand=True, padx=(18, 4), pady=(0, 14))
+        self._list_cv = tk.Canvas(holder, bg=self.BG, highlightthickness=0)
+        sb = tk.Scrollbar(holder, orient='vertical', command=self._list_cv.yview)
+        self._list_cv.configure(yscrollcommand=sb.set)
+        sb.pack(side='right', fill='y')
+        self._list_cv.pack(side='left', fill='both', expand=True)
+        self._list = tk.Frame(self._list_cv, bg=self.BG)
+        self._list_id = self._list_cv.create_window((0, 0), window=self._list, anchor='nw')
+        self._list.bind('<Configure>', lambda e: self._list_cv.configure(
+            scrollregion=self._list_cv.bbox('all')))
+        self._list_cv.bind('<Configure>', lambda e: self._list_cv.itemconfigure(self._list_id, width=e.width))
+        win.bind('<MouseWheel>', lambda e: self._list_cv.yview_scroll(-int(e.delta / 120), 'units'))
+
+        win.update_idletasks()
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        win.geometry(f'+{(sw - 480) // 2}+{max(20, (sh - 740) // 2 - 20)}')
+
+        self._apply_target()
+        self.preview.set_mode(self.MODE_FOR_SLOT.get(self.slot, 'idle'))
+        self.refresh()
+        self._tick()
+
+    # ── 창 ───────────────────────────────────────────────────
+
+    def is_open(self) -> bool:
+        try:
+            return bool(self.win.winfo_exists())
+        except Exception:
+            return False
+
+    def show(self, character=None):
+        if character and character in CHARACTERS and character != self.target:
+            self._set_target(character)
+        self.win.deiconify(); self.win.lift(); self.win.focus_force()
+
+    def close(self):
+        if self._job:
+            try: self.win.after_cancel(self._job)
+            except Exception: pass
+        try: self.win.destroy()
+        except Exception: pass
+
+    def _tick(self):
+        if not self.is_open():
+            return
+        self.preview.try_on = self._displayed()
+        self.preview.redraw()
+        self._job = self.win.after(100, self._tick)
+
+    # ── 상태 ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _short_name(cid: str) -> str:
+        return char_display_name(cid).split(' ')[0]
+
+    def _displayed(self) -> dict:
+        """미리보기에 실제로 보여줄 아이템 — 입어보는 것이 실제 착용보다 우선한다."""
+        shown = {}
+        for sl in buni_shop.SLOTS:
+            iid = self.try_on.get(sl) or self.shop.equipped_id(sl, self.target)
+            if iid:
+                shown[sl] = iid
+        return shown
+
+    def _apply_target(self):
+        self.preview.character = self.target
+
+    def _set_target(self, cid: str):
+        self.target = cid
+        self.try_on = {}          # 입어보던 것은 그 캐릭터의 미리보기였다
+        self._apply_target()
+        self.refresh()
+
+    def _set_mode(self, mode: str):
+        self.preview.set_mode(mode)
+        self._refresh_modes()
+
+    def _set_slot(self, slot: str):
+        self.slot = slot
+        # 탭을 넘기면 그 자리에 어울리는 모션으로 — 무기는 완료, 작업 도구는 작업 중
+        self.preview.set_mode(self.MODE_FOR_SLOT.get(slot, 'idle'))
+        self.refresh()
+
+    def _try_on_item(self, it):
+        if self.try_on.get(it.slot) == it.id:
+            self.try_on.pop(it.slot, None)
+        else:
+            self.try_on[it.slot] = it.id
+        self.preview.set_mode(self.MODE_FOR_SLOT.get(it.slot, 'idle'))
+        self.refresh()
+
+    def _settle(self, it):
+        """착용·해제·구매로 실제 상태가 바뀌었을 때 — 입어보기를 거두고 그 모습을 바로 보여준다."""
+        self.try_on.pop(it.slot, None)
+        self.preview.set_mode(self.MODE_FOR_SLOT.get(it.slot, 'idle'))
+        self.refresh()
+
+    def _reset_try(self):
+        self.try_on = {}
+        self.refresh()
+
+    # ── 그리기 ───────────────────────────────────────────────
+
+    def refresh(self):
+        """상태가 바뀔 때마다(코인·레벨·구매·착용·로그인) 화면 전체를 맞춘다."""
+        if not self.is_open():
+            return
+        self._coins.config(text=f'🪙 {self.shop.coins}')
+        self._lv.config(text=f'★ Lv.{self.shop.level}')
+        self._refresh_cloud()
+        for cid, b in self._char_btns.items():
+            on = cid == self.target
+            b.config(bg=self.ACCENT if on else '#2F2F3A', fg='white' if on else '#AAAAB4',
+                     activebackground=self.ACCENT if on else '#3A3A48', activeforeground='white')
+        for sl, b in self._slot_btns.items():
+            on = sl == self.slot
+            b.config(bg=self.ACCENT if on else '#2F2F3A', fg='white' if on else '#AAAAB4',
+                     activebackground=self.ACCENT if on else '#3A3A48', activeforeground='white')
+        self._refresh_modes()
+        self._refresh_summary()
+        self._refresh_list()
+
+    def _refresh_modes(self):
+        for m, b in self._mode_btns.items():
+            on = m == self.preview.mode
+            b.config(bg=self.ACCENT if on else '#3A3A48', fg='white' if on else '#BBBBC4',
+                     activebackground=self.ACCENT, activeforeground='white')
+
+    def _refresh_cloud(self):
+        for w in self._cloud_box.winfo_children():
+            w.destroy()
+        cloud = self.manager.cloud
+        if not cloud.is_configured:
+            return
+        if cloud.is_signed_in:
+            tk.Label(self._cloud_box, text=t('☁ 연동됨', '☁ Synced'), bg=self.BG, fg=self.WEAR,
+                     font=('Malgun Gothic', 9, 'bold')).pack()
+        else:
+            tk.Button(self._cloud_box, text=t('☁ 다른 PC와 연동', '☁ Sync'), relief='flat', bd=0,
+                      bg='#555566', fg='white', cursor='hand2', font=('Malgun Gothic', 8),
+                      padx=8, pady=2, command=self.manager.cloud_sign_in_ui).pack()
+
+    def _refresh_summary(self):
+        shown = self._displayed()
+        parts = []
+        for sl in buni_shop.SLOTS:
+            iid = shown.get(sl)
+            it = buni_shop.item(iid) if iid else None
+            if not it or (self.shop.is_default(it) and sl not in self.try_on):
+                continue
+            name = t(it.name_ko, it.name_en)
+            parts.append(name + t(' (미리보기)', ' (preview)') if self.try_on.get(sl) == iid else name)
+        trying = bool(self.try_on)
+        self._sum_tag.config(text=t('미리보기', 'Preview') if trying else t('착용 중', 'Wearing'),
+                             fg=self.TRY if trying else self.WEAR)
+        self._sum_txt.config(text='  ·  '.join(parts) if parts else t('없음 — 기본 모습', 'Nothing — default look'),
+                             fg='#DDDDE4' if parts else '#666672')
+        if trying:
+            self._sum_reset.pack(side='right')
+        else:
+            self._sum_reset.pack_forget()
+
+    def _refresh_list(self):
+        for w in self._list.winfo_children():
+            w.destroy()
+        for it in buni_shop.items_in(self.slot):
+            self._row(it)
+        note = {'tool': t('작업 도구는 생각하거나 도구를 쓰는 동안 노트북 대신 사용합니다. 팔 동작은 그대로예요.',
+                          'Work tools replace the laptop while Claude is working.'),
+                'weapon': t('무기는 생각하거나 도구를 쓰는 작업 중에만 손에 듭니다.',
+                            'Weapons are only drawn while Claude is working.')}.get(self.slot)
+        if note:
+            tk.Label(self._list, text=note, bg=self.BG, fg='#5C5C6A', font=('Malgun Gothic', 8),
+                     wraplength=380, justify='left').pack(anchor='w', pady=(4, 8))
+
+    def _row(self, it):
+        shop = self.shop
+        owned, equipped = shop.is_owned(it), shop.is_equipped(it, self.target)
+        unlocked = shop.is_unlocked(it)
+        trying = self.try_on.get(it.slot) == it.id
+
+        edge = self.WEAR if equipped else (self.TRY if trying else self.CARD)
+        card = tk.Frame(self._list, bg=self.CARD, highlightthickness=2, highlightbackground=edge,
+                        highlightcolor=edge, cursor='hand2')
+        card.pack(fill='x', pady=4, padx=(0, 10))
+        if equipped:                                         # 왼쪽 굵은 띠 — 입은 항목이 바로 보이게
+            tk.Frame(card, bg=self.WEAR, width=5).pack(side='left', fill='y')
+        if equipped:
+            card.config(bg='#23382E')
+        body = tk.Frame(card, bg=card['bg'])
+        body.pack(side='left', fill='x', expand=True, padx=12, pady=10)
+
+        top = tk.Frame(body, bg=card['bg'])
+        top.pack(anchor='w')
+        tk.Label(top, text=t(it.name_ko, it.name_en), bg=card['bg'],
+                 fg='white' if unlocked else '#6A6A76', font=self._fontb).pack(side='left')
+        if trying:
+            tk.Label(top, text=t('👀 미리보기 중', '👀 Previewing'), bg=self.TRY, fg='white',
+                     font=('Malgun Gothic', 8, 'bold'), padx=6).pack(side='left', padx=(8, 0))
+        if equipped:
+            tk.Label(top, text=(t('✓ 사용 중', '✓ In use') if shop.is_default(it) else t('✓ 착용 중', '✓ Equipped')),
+                     bg=self.WEAR, fg='#10261A', font=('Malgun Gothic', 8, 'bold'),
+                     padx=6).pack(side='left', padx=(8, 0))
+        info = tk.Frame(body, bg=card['bg'])
+        info.pack(anchor='w', pady=(3, 0))
+        tk.Label(info, text=f'Lv.{it.level}', bg=card['bg'],
+                 fg=self.GOLD if unlocked else '#E6665A', font=('Consolas', 9)).pack(side='left')
+        if not owned:
+            tk.Label(info, text=f'🪙 {it.price}', bg=card['bg'], fg=self.COIN,
+                     font=('Consolas', 9, 'bold')).pack(side='left', padx=(10, 0))
+
+        # 오른쪽: 동작 버튼
+        acts = tk.Frame(card, bg=card['bg'])
+        acts.pack(side='right', padx=10)
+
+        def pill(parent, text, color, cmd):
+            return tk.Button(parent, text=text, bg=color, fg='white', relief='flat', bd=0, cursor='hand2',
+                             font=('Malgun Gothic', 9, 'bold'), padx=10, pady=3,
+                             activebackground=color, activeforeground='white', command=cmd)
+
+        if shop.is_default(it) and equipped:
+            pass                                             # 기본 아이템을 쓰는 중 — 배지가 대신 알려준다
+        elif owned:
+            label = (t('해제', 'Take off') if equipped
+                     else (t('사용', 'Use') if shop.is_default(it) else t('착용', 'Equip')))
+            # 해제는 빨강, 착용은 파랑 — 색만 봐도 누르면 어떻게 되는지 구분된다
+            pill(acts, label, self.OFF if equipped else self.ACCENT,
+                 lambda i=it: (shop.toggle_equip(i, self.target), self._settle(i))).pack()
+        else:
+            if not unlocked:
+                tk.Label(acts, text=t(f'Lv.{it.level} 필요', f'Needs Lv.{it.level}'), bg=card['bg'],
+                         fg='#6A6A76', font=('Malgun Gothic', 8)).pack(side='left', padx=(0, 6))
+            elif shop.coins < it.price:
+                tk.Label(acts, text=t('코인 부족', 'Not enough'), bg=card['bg'],
+                         fg='#6A6A76', font=('Malgun Gothic', 8)).pack(side='left', padx=(0, 6))
+            # 아직 내 것이 아닌 아이템 — 레벨·코인이 모자라도 입어볼 수는 있다
+            pill(acts, t('취소', 'Cancel') if trying else t('입어보기', 'Try on'), self.TRY,
+                 lambda i=it: self._try_on_item(i)).pack(side='left')
+            if unlocked and shop.coins >= it.price:
+                pill(acts, t('구매', 'Buy'), self.BUY,
+                     lambda i=it: (shop.buy(i, self.target), self._settle(i))).pack(side='left', padx=(6, 0))
+
+        # 행을 누르면 사기 전에 미리 입어본다
+        def bind_all(w):
+            if not isinstance(w, tk.Button):
+                w.bind('<Button-1>', lambda e, i=it: self._try_on_item(i))
+            for c in w.winfo_children():
+                bind_all(c)
+        bind_all(card)
+
+
+# ══════════════════════════════════════════════════════════════
 class BuniManager:
     """Root application — manages multiple SessionWindows."""
 
@@ -2991,6 +3988,17 @@ class BuniManager:
         threading.Thread(target=_tcp_event_server, args=(self,), daemon=True).start()
 
         self.persist  = PersistenceManager()
+        # ── 상점·계정 연동·덮개 닫아도 실행 (cloud/awake는 앱으로 실행할 때만 불러온다 —
+        #    훅(--hook)은 도구를 부를 때마다 이 파일을 실행하므로 가볍게 둔다)
+        import buni_cloud, buni_awake
+        self.shop     = buni_shop.ShopStore()
+        self.cloud    = buni_cloud.CloudSession(self.shop, t)
+        self.awake    = buni_awake.AwakeManager(self.persist, self.root, t)
+        self._shop_window: 'ShopWindow | None' = None
+        self.shop.add_listener(lambda: self._ui(self._on_shop_changed))
+        self.cloud.add_listener(lambda: self._ui(self._on_cloud_changed))
+        self.awake.add_listener(lambda: self._ui(self._on_awake_changed))
+        self.cloud.start()
         self.sessions: dict[str, SessionWindow] = {}
         self._slot_map: dict[int, str] = {}
         self._disconnected: set[str] = set()   # 수동으로 끊긴 세션 ID 차단 목록
@@ -3071,8 +4079,10 @@ class BuniManager:
         win.set_server_usage(self._server_utilization, self._server_resets_at)
         self.sessions[session_id] = win
 
+        # 사용자가 숨긴 직후라면 새 부니도 조용히 대기 —
+        # 이 세션이 실제로 작업을 시작할 때 비로소 나타난다.
         if self._is_manually_hidden:
-            win.hide()
+            win.hide_until_next_start()
 
     def remove_session(self, session_id: str):
         win = self.sessions.pop(session_id, None)
@@ -3109,16 +4119,24 @@ class BuniManager:
         self.remove_session(session_id)
 
     def hide_all(self):
+        """전체 숨김 — 각 부니는 "그 세션이 새로 시작될 때"까지 숨어 있고
+        (진행 중에 숨겼다면 그 작업이 끝나고 다음 작업이 시작될 때),
+        그 사이에 새로 만들어지는 부니도 나타나지 않는다."""
         self._is_manually_hidden = True
         for win in self.sessions.values():
-            win.hide()
+            win.hide_until_next_start()
 
     def show_all(self):
         self._is_manually_hidden = False
         for win in self.sessions.values():
+            win._manually_hidden = False
             win.show()
 
     def quit(self):
+        try:
+            self.awake.restore_on_quit()     # 켜둔 채 꺼지면 덮개를 닫아도 계속 안 자게 된다
+        except Exception:
+            pass
         try:
             PID_FILE.unlink(missing_ok=True)
         except Exception:
@@ -3245,8 +4263,78 @@ class BuniManager:
             time.sleep(300)
 
     def _broadcast_tokens(self):
+        self.shop.update_level(self._monthly_tokens)
         for win in self.sessions.values():
             win.set_monthly_tokens(self._monthly_tokens)
+
+    # ── 상점 · 계정 · 절전 방지 ───────────────────────────────
+
+    def _ui(self, fn):
+        """어느 스레드에서 불려도 Tk 메인 스레드에서 실행되게 넘긴다."""
+        try:
+            self.root.after(0, fn)
+        except Exception:
+            pass
+
+    def _on_shop_changed(self):
+        for win in list(self.sessions.values()):
+            win._draw()
+        if self._shop_window and self._shop_window.is_open():
+            self._shop_window.refresh()
+        self._refresh_settings()
+
+    def _on_cloud_changed(self):
+        if self._shop_window and self._shop_window.is_open():
+            self._shop_window.refresh()
+        self._refresh_settings()
+        self._refresh_tray_menu()
+
+    def _on_awake_changed(self):
+        self._refresh_settings()
+        self._refresh_tray_menu()
+
+    def _refresh_settings(self):
+        ss = self._shortcut_settings
+        if ss and ss.is_open():
+            ss.refresh_dynamic()
+
+    def open_shop(self, character: str | None = None):
+        if self._shop_window and self._shop_window.is_open():
+            self._shop_window.show(character)
+            return
+        char = character
+        if not char:
+            sw = next(iter(self.sessions.values()), None)
+            char = sw.character if sw else 'rabbit'
+        self._shop_window = ShopWindow(self, char)
+
+    def cloud_sign_in_ui(self):
+        """"다른 PC와 연동" — 어떤 정보가 서버에 저장되는지 먼저 알리고 동의를 받는다."""
+        from tkinter import messagebox
+        cloud = self.cloud
+        if cloud.busy:
+            return
+        if not cloud.consent_given:
+            ok = messagebox.askokcancel(
+                t('다른 PC와 연동할까요?', 'Sync with your other PCs?'),
+                t('Google로 로그인하면 아래 정보가 서버에 저장되어 다른 PC에서도 이어집니다.\n\n'
+                  '• 코인, 산 아이템, 캐릭터별 착용 상태\n'
+                  '• 기기별 이번 달 토큰 사용량(레벨 계산용 숫자)\n'
+                  '• 로그인 계정의 고유 ID와 표시 이름\n\n'
+                  '대화 내용이나 코드는 저장하지 않으며, 이메일 주소도 저장하지 않아요. '
+                  '로그인은 선택이라 안 해도 모든 기능을 그대로 쓸 수 있고, 설정에서 언제든 '
+                  '로그아웃하거나 서버 데이터를 지울 수 있어요.',
+                  'Signing in with Google stores the following on a server so it carries over to your other PCs:\n\n'
+                  '• Coins, owned items and per-character outfits\n'
+                  '• Per-device token usage for this month (a number used for your level)\n'
+                  "• Your account's unique ID and display name\n\n"
+                  'Conversations and code are never stored, and neither is your email address. '
+                  'Signing in is optional, and you can sign out or delete your server data any time in Settings.'),
+                icon='question', parent=self.root)
+            if not ok:
+                return
+            cloud.give_consent()
+        threading.Thread(target=cloud.sign_in, daemon=True).start()
 
     # ── Server plan usage (5분마다 fetch) ─────────────────────
 
@@ -3414,18 +4502,71 @@ class BuniManager:
         else:
             self.show_all()
 
+    def _refresh_tray_menu(self):
+        """언어 변경 후 트레이 메뉴 라벨을 다시 평가시킨다."""
+        icon = getattr(self, '_tray_icon', None)
+        if not icon:
+            return
+        try:
+            icon.update_menu()
+        except Exception:
+            pass
+
     def _open_shortcut_settings(self):
         if self._shortcut_settings and self._shortcut_settings.is_open():
             self._shortcut_settings.show()
             return
         self._shortcut_settings = ShortcutSettingsWindow(
-            self.root, self.persist, self._hotkey_mgr)
+            self.root, self.persist, self._hotkey_mgr, manager=self)
+        # 언어를 바꾸면 트레이 메뉴도 새 언어로 다시 그린다
+        self._shortcut_settings.on_language_changed = self._refresh_tray_menu
 
     def _open_claude(self):
         try:
             os.startfile('claude')
         except Exception:
             pass
+
+    # ── 덮개 닫아도 계속 실행 (트레이 하위 메뉴) ──────────────
+
+    def _awake_menu_title(self, item=None) -> str:
+        a = self.awake
+        if a.is_active:
+            return t(f'🔋 덮개 닫아도 계속 실행 — 실행 중 ({a.status_text()})',
+                     f'🔋 Keep running with lid closed — ON ({a.status_text()})')
+        return t('🔋 덮개 닫아도 계속 실행', '🔋 Keep running with lid closed')
+
+    def _awake_menu_items(self, pystray):
+        import buni_awake
+
+        def start(minutes):
+            def _cb(icon, item):
+                self.root.after(0, lambda: self.awake.enable(minutes))
+            return _cb
+
+        def off(icon, item):
+            self.root.after(0, self.awake.disable)
+
+        def toggle_schedule(icon, item):
+            self.root.after(0, lambda: self.awake.set_schedule(enabled=not self.awake.schedule_enabled))
+
+        items = [pystray.MenuItem(
+                    (lambda ko, en: (lambda i: t(ko, en)))(ko, en), start(minutes))
+                 for minutes, ko, en in buni_awake.DURATIONS]
+        items += [
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(lambda i: t('지금 끄기', 'Turn off now'), off,
+                             visible=lambda i: self.awake.is_active),
+            pystray.MenuItem(
+                lambda i: t(f'시간대 예약 {buni_awake.hhmm(self.awake.schedule_start)}'
+                            f'–{buni_awake.hhmm(self.awake.schedule_end)}',
+                            f'Schedule {buni_awake.hhmm(self.awake.schedule_start)}'
+                            f'–{buni_awake.hhmm(self.awake.schedule_end)}'),
+                toggle_schedule, checked=lambda i: self.awake.schedule_enabled),
+            pystray.MenuItem(lambda i: '⚠️ ' + self.awake.last_error, None,
+                             visible=lambda i: bool(self.awake.last_error), enabled=False),
+        ]
+        return items
 
     # ── System tray ───────────────────────────────────────────
 
@@ -3478,6 +4619,9 @@ class BuniManager:
         def on_settings(icon, item):
             self.root.after(0, self._open_shortcut_settings)
 
+        def on_shop(icon, item):
+            self.root.after(0, self.open_shop)
+
         def on_reset(icon, item):
             self.root.after(0, lambda: [
                 w._reset_position() for w in self.sessions.values()])
@@ -3497,16 +4641,22 @@ class BuniManager:
                         w._save_always_approve()
             self.root.after(0, _do)
 
+        # 라벨을 호출형으로 둬야 언어를 바꿨을 때 update_menu()로 다시 평가된다
         icon = pystray.Icon('Buni', make_icon(), 'Buni', pystray.Menu(
-            pystray.MenuItem('⚡ 전체 허용 모드 켜짐 — 클릭하여 끄기',
+            pystray.MenuItem(lambda i: t('⚡ 전체 허용 모드 켜짐 — 클릭하여 끄기',
+                                         '⚡ Approve-all is ON — click to turn off'),
                               on_disable_always_approve, visible=_any_always_approve),
-            pystray.MenuItem('부니 숨기기',   on_hide, default=True),
-            pystray.MenuItem('부니 불러오기', on_show),
-            pystray.MenuItem('Claude 열기',   on_claude),
-            pystray.MenuItem('단축키 설정...', on_settings),
-            pystray.MenuItem('위치 초기화',    on_reset),
+            pystray.MenuItem(lambda i: t('부니 숨기기', 'Hide Buni'),   on_hide, default=True),
+            pystray.MenuItem(lambda i: t('부니 불러오기', 'Show Buni'), on_show),
+            pystray.MenuItem(lambda i: t('Claude 열기', 'Open Claude'), on_claude),
+            pystray.MenuItem(lambda i: t('설정...', 'Settings...'),     on_settings),
+            pystray.MenuItem(lambda i: t(f'🛍 부니 상점  (🪙 {self.shop.coins})',
+                                         f'🛍 Buni Shop  (🪙 {self.shop.coins})'), on_shop),
+            pystray.MenuItem(self._awake_menu_title, pystray.Menu(*self._awake_menu_items(pystray)),
+                             visible=lambda i: self.awake.supported),
+            pystray.MenuItem(lambda i: t('위치 초기화', 'Reset position'), on_reset),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem('종료',           on_quit),
+            pystray.MenuItem(lambda i: t('종료', 'Quit'),               on_quit),
         ))
         self._tray_icon = icon
         threading.Thread(target=icon.run, daemon=True).start()

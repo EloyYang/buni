@@ -29,6 +29,19 @@ jobs:
         shell: bash
         run: echo "VERSION=$(cat VERSION)" >> $GITHUB_OUTPUT
 
+      - name: Write cloud-config.json (optional account sync)
+        id: cloudcfg
+        shell: bash
+        env:
+          BUNI_CLOUD_CONFIG: ${{ secrets.BUNI_CLOUD_CONFIG }}
+        run: |
+          if [ -n "$BUNI_CLOUD_CONFIG" ]; then
+            printf '%s' "$BUNI_CLOUD_CONFIG" > cloud-config.json
+            echo "DATA=--add-data cloud-config.json;." >> $GITHUB_OUTPUT
+          else
+            echo "DATA=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build Buni-Windows.exe
         run: |
           pyinstaller `
@@ -40,6 +53,7 @@ jobs:
             --hidden-import PIL `
             --hidden-import PIL.Image `
             --hidden-import PIL.ImageDraw `
+            ${{ steps.cloudcfg.outputs.DATA }} `
             windows/buni.py
 
       - name: Build installer with Inno Setup
