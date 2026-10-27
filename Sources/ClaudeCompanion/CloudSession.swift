@@ -207,7 +207,46 @@ final class CloudSession: ObservableObject {
         SecItemAdd(query as CFDictionary, nil)
     }
 
+    /// 이번 실행에서 키체인 안내를 이미 보여 줬는지
+    private static var keychainExplained = false
+
+    /// macOS가 허용 창을 띄우게 될 상황인지 — 창 없이 조용히 읽어 보고, 물어봐야 한다면 true
+    private static func keychainWouldPrompt() -> Bool {
+        var query = baseQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail      // 허용 창을 띄우지 말고 실패로 알려 달라
+        var out: CFTypeRef?
+        return SecItemCopyMatching(query as CFDictionary, &out) == errSecInteractionNotAllowed
+    }
+
+    /// 허용 창이 뜨기 직전에, 그 창이 왜 뜨는지 먼저 알려 준다 (앱이 새로 설치·업데이트되면 macOS가 다시 묻는다)
+    private static func explainKeychainPromptIfNeeded() {
+        guard !keychainExplained, keychainWouldPrompt() else { return }
+        keychainExplained = true
+        let show = {
+            NSApp.activate(ignoringOtherApps: true)
+            let a = NSAlert()
+            a.messageText = L.t("Google 로그인을 이어가려고 키체인을 확인해요", "Buni needs to check your Keychain")
+            a.informativeText = L.t(
+                "곧 macOS가 “Buni가 키체인에서 com.buni.companion.cloud에 저장된 비밀 정보를 사용하려고 합니다”라는 창을 띄워요.\n\n"
+                + "• 이 항목은 Buni가 Google 로그인 상태를 유지하려고 보관해 둔 로그인 토큰이에요. 비밀번호는 저장하지 않아요.\n"
+                + "• Buni를 새로 설치하거나 업데이트하면 macOS가 한 번 다시 물어봐요.\n"
+                + "• Mac 로그인 암호를 입력하고 ‘항상 허용’을 누르면 다음부터 묻지 않아요.\n"
+                + "• 거절해도 Buni의 다른 기능은 그대로 쓸 수 있고, 채팅·계정 연동만 로그아웃 상태가 돼요.",
+                "macOS is about to ask whether Buni may use “com.buni.companion.cloud” in your Keychain.\n\n"
+                + "• That item is the sign-in token Buni stores to keep you signed in with Google. No password is stored.\n"
+                + "• macOS asks again once after Buni is installed or updated.\n"
+                + "• Enter your Mac password and choose “Always Allow” so it won't ask again.\n"
+                + "• If you decline, everything else keeps working — only chat and account sync stay signed out.")
+            a.addButton(withTitle: L.t("확인", "OK"))
+            a.runModal()
+        }
+        if Thread.isMainThread { show() } else { DispatchQueue.main.sync(execute: show) }
+    }
+
     private static func keychainRead() -> String? {
+        explainKeychainPromptIfNeeded()
         var query = baseQuery()
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne

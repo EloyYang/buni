@@ -14,6 +14,7 @@ from pathlib import Path
 
 import buni_shop
 import buni_items
+import buni_update
 
 # ── Pixel unit (matches macOS p = 6.5)
 P = 6.5
@@ -4530,6 +4531,8 @@ class BuniManager:
         self._server_utilization: float | None = None
         self._server_resets_at:   datetime.datetime | None = None
         self._tray_icon = None   # _start_tray()에서 채움 — 트레이 툴팁에 한도 표시용
+        self._update_info = None          # 새 버전이 나왔으면 buni_update.fetch_latest() 결과
+        self._update_busy = False
 
         # ── 단축키 ─────────────────────────────────────────
         self._hotkey_mgr = GlobalHotkeyManager()
@@ -4540,6 +4543,7 @@ class BuniManager:
         threading.Thread(target=self._monitor_loop,      daemon=True).start()
         threading.Thread(target=self._token_loop,        daemon=True).start()
         threading.Thread(target=self._server_usage_loop, daemon=True).start()
+        threading.Thread(target=self._update_loop,       daemon=True).start()
 
         # Poll sessions on main thread
         self._poll_sessions()
@@ -4653,6 +4657,95 @@ class BuniManager:
         for win in self.sessions.values():
             win._manually_hidden = False
             win.show()
+
+    # ── 앱 안 업데이트 ───────────────────────────────────────
+
+    def _update_loop(self):
+        """시작 5초 뒤, 그리고 6시간마다 새 버전을 확인한다."""
+        time.sleep(5)
+        while True:
+            try:
+                info = buni_update.fetch_latest()
+                if info and (not self._update_info or self._update_info['version'] != info['version']):
+                    self._update_info = info
+                    if self._tray_icon is not None:
+                        self._tray_icon.update_menu()
+                        try:
+                            self._tray_icon.notify(
+                                t(f'새 버전 v{info["version"]}이 나왔어요. 트레이 메뉴에서 업데이트할 수 있어요.',
+                                  f'Buni v{info["version"]} is available. Update from the tray menu.'),
+                                'Buni')
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            time.sleep(buni_update.CHECK_INTERVAL)
+
+    def start_update(self):
+        """트레이의 업데이트 항목 — 확인 → 내려받기(진행 창) → 설치 → 종료 후 자동 재시작."""
+        info = self._update_info
+        if not info or self._update_busy:
+            return
+        from tkinter import messagebox, ttk
+        ver = info['version']
+        if buni_update.install_kind() == 'source':
+            import webbrowser
+            webbrowser.open(info['page'])
+            return
+        if not messagebox.askyesno(
+                'Buni', t(f'Buni v{ver}로 업데이트할까요?\n\n새 버전을 내려받아 설치하고 Buni를 다시 시작해요.',
+                          f'Update to Buni v{ver}?\n\nIt will download and install the new version, then restart.'),
+                parent=self.root):
+            return
+        self._update_busy = True
+        win = tk.Toplevel(self.root)
+        win.title('Buni')
+        win.attributes('-topmost', True)
+        win.resizable(False, False)
+        win.protocol('WM_DELETE_WINDOW', lambda: None)
+        lab = tk.Label(win, text=t('⬇ 업데이트 내려받는 중…', '⬇ Downloading update…'), padx=24, pady=14)
+        lab.pack()
+        bar = ttk.Progressbar(win, length=260, mode='determinate', maximum=100)
+        bar.pack(padx=24, pady=(0, 16))
+        win.update_idletasks()
+        win.geometry(f'+{(win.winfo_screenwidth() - win.winfo_reqwidth()) // 2}+{(win.winfo_screenheight() - win.winfo_reqheight()) // 3}')
+        q = queue.Queue()
+
+        def work():
+            try:
+                def prog(got, total):
+                    q.put(('p', got * 100 / total if total else 0))
+                kind = buni_update.run_update(info, prog)
+                q.put(('ok', kind))
+            except Exception as e:
+                q.put(('err', str(e)))
+        threading.Thread(target=work, daemon=True).start()
+
+        def pump():
+            try:
+                while True:
+                    kind, val = q.get_nowait()
+                    if kind == 'p':
+                        bar['value'] = val
+                    elif kind == 'ok':
+                        lab.config(text=t('⚙ 설치하고 다시 시작하는 중…', '⚙ Installing and restarting…'))
+                        bar.config(mode='indeterminate'); bar.start(12)
+                        win.after(600, lambda: (self._tray_icon.stop() if self._tray_icon else None, self.quit()))
+                        return
+                    elif kind == 'err':
+                        self._update_busy = False
+                        win.destroy()
+                        if messagebox.askyesno(
+                                'Buni', t('업데이트하지 못했어요 (' + val + ').\n지금 쓰던 앱은 그대로예요.\n\n릴리스 페이지를 열까요?',
+                                          'Update failed (' + val + ').\nYour current app is unchanged.\n\nOpen the release page?'),
+                                parent=self.root):
+                            import webbrowser
+                            webbrowser.open(info['page'])
+                        return
+            except queue.Empty:
+                pass
+            win.after(100, pump)
+        pump()
 
     def quit(self):
         try:
@@ -5205,7 +5298,13 @@ class BuniManager:
             self.root.after(0, _do)
 
         # 라벨을 호출형으로 둬야 언어를 바꿨을 때 update_menu()로 다시 평가된다
+        def on_update(icon, item):
+            self.root.after(0, self.start_update)
+
         icon = pystray.Icon('Buni', make_icon(), 'Buni', pystray.Menu(
+            pystray.MenuItem(lambda i: t(f'🆕 v{self._update_info["version"]}로 업데이트…',
+                                         f'🆕 Update to v{self._update_info["version"]}…') if self._update_info else '',
+                             on_update, visible=lambda i: bool(self._update_info) and not self._update_busy),
             pystray.MenuItem(lambda i: t('⚡ 전체 허용 모드 켜짐 — 클릭하여 끄기',
                                          '⚡ Approve-all is ON — click to turn off'),
                               on_disable_always_approve, visible=_any_always_approve),
@@ -5229,6 +5328,7 @@ class BuniManager:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(lambda i: t('설정...', 'Settings...'),     on_settings),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem(f'Buni v{buni_update.current_version()}', None, enabled=False),
             pystray.MenuItem(lambda i: t('종료', 'Quit'),               on_quit),
         ))
         self._tray_icon = icon

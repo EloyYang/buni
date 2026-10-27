@@ -28,6 +28,7 @@ pyinstaller ^
     --hidden-import PIL ^
     --hidden-import PIL.Image ^
     --hidden-import PIL.ImageDraw ^
+    --add-data "%~dp0..\VERSION;." ^
     %CLOUDDATA% ^
     "%~dp0buni.py"
 

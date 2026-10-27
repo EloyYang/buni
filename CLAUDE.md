@@ -15,6 +15,7 @@ Buni/
 │   ├── *CharacterView.swift    # 캐릭터별 픽셀아트 그림
 │   ├── Chat{Client,Store,Views}.swift  # 채팅방 (Realtime Database, 방 코드·최대 5명)
 │   ├── ChatBubbleView.swift    # 상태 말풍선
+│   ├── UpdateChecker.swift · SelfUpdater.swift  # 새 버전 확인 · 앱 안에서 내려받아 설치·재시작
 │   └── ...
 ├── windows/
 │   ├── buni.py                # Windows Tkinter 앱 (세션 창·트레이·상점 창)
@@ -22,7 +23,8 @@ Buni/
 │   ├── buni_items.py          # 아이템·무기·작업 도구 그리기 (Painter)
 │   ├── buni_cloud.py          # Google 로그인 + Firestore 동기화 (선택 기능)
 │   ├── buni_awake.py          # 덮개 닫아도 계속 실행 (powercfg)
-│   └── buni_chat.py           # 채팅방 (Realtime Database, 방 코드·최대 5명)
+│   ├── buni_chat.py           # 채팅방 (Realtime Database, 방 코드·최대 5명)
+│   └── buni_update.py         # 새 버전 확인 · 앱 안에서 내려받아 설치·재시작 (설치형/포터블)
 ├── build_app.sh               # macOS 빌드 스크립트
 ├── release.sh                 # GitHub 릴리스 스크립트 (./release.sh <버전>)
 ├── install.sh                 # Claude Code 훅 설치
@@ -61,4 +63,4 @@ macOS 설치만 할 때: `./build_app.sh --install`
 
 ## 현재 버전
 
-1.7.0
+1.8.0

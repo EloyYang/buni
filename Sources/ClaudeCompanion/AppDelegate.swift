@@ -11,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var shopWindow: NSWindow?
     private var cancellables = Set<AnyCancellable>()
     private var availableUpdate: String? = nil
+    private var updateStatus: String? = nil          // 업데이트 내려받는 동안 메뉴에 보일 진행 문구
 
     // ── 다중 세션 관리
     private var sessions:          [String: SessionWindow] = [:]
@@ -492,9 +493,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
 
         if let ver = availableUpdate {
-            let item = NSMenuItem(title: L.t("🆕 업데이트 v\(ver) — 다운로드", "🆕 Update v\(ver) — download"),
-                                  action: #selector(downloadUpdate), keyEquivalent: "")
-            item.target = self; menu.addItem(item); menu.addItem(.separator())
+            if let status = updateStatus {
+                let item = NSMenuItem(title: status, action: nil, keyEquivalent: "")
+                item.isEnabled = false; menu.addItem(item)
+            } else {
+                let item = NSMenuItem(title: L.t("🆕 v\(ver)로 업데이트…", "🆕 Update to v\(ver)…"),
+                                      action: #selector(downloadUpdate), keyEquivalent: "")
+                item.target = self; menu.addItem(item)
+            }
+            menu.addItem(.separator())
         }
 
         // 전체 허용 모드 상태 표시
@@ -698,7 +705,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func downloadUpdate() { UpdateChecker.openReleasePage() }
+    /// 새 버전을 앱 안에서 내려받아 설치하고 다시 시작한다. 실패하면 이유를 알리고 릴리스 페이지를 열 수 있다.
+    @objc private func downloadUpdate() {
+        guard let ver = availableUpdate, updateStatus == nil else { return }
+        let ask = NSAlert()
+        ask.messageText = L.t("Buni v\(ver)로 업데이트할까요?", "Update to Buni v\(ver)?")
+        ask.informativeText = L.t("새 버전을 내려받아 설치하고 Buni를 다시 시작해요. 채팅 방에 있다면 잠시 나갔다 다시 들어와야 해요. "
+                                  + "다시 시작한 뒤 키체인 허용 창이 뜨면 '항상 허용'을 눌러 주세요.",
+                                  "Buni will download the new version, install it and restart. If you're in a chat room you'll need to rejoin. "
+                                  + "If a Keychain prompt appears after restarting, choose “Always Allow”.")
+        ask.addButton(withTitle: L.t("업데이트", "Update"))
+        ask.addButton(withTitle: L.t("나중에", "Later"))
+        ask.addButton(withTitle: L.t("릴리스 페이지 열기", "Open release page"))
+        NSApp.activate(ignoringOtherApps: true)
+        switch ask.runModal() {
+        case .alertFirstButtonReturn:
+            updateStatus = L.t("⬇ 업데이트 준비 중…", "⬇ Preparing update…")
+            rebuildMenu()
+            SelfUpdater.shared.start(expectedVersion: ver, progress: { [weak self] text in
+                self?.updateStatus = text; self?.rebuildMenu()
+            }, completion: { [weak self] failure in
+                guard let self, let failure else { return }
+                self.updateStatus = nil; self.rebuildMenu()
+                let err = NSAlert()
+                err.messageText = L.t("업데이트하지 못했어요", "Update failed")
+                err.informativeText = failure.localizedDescription + "\n\n"
+                    + L.t("지금 쓰던 앱은 그대로예요. 릴리스 페이지에서 직접 받을 수 있어요.", "Your current app is unchanged. You can download it from the release page.")
+                err.addButton(withTitle: L.t("릴리스 페이지 열기", "Open release page"))
+                err.addButton(withTitle: L.t("닫기", "Close"))
+                if err.runModal() == .alertFirstButtonReturn { UpdateChecker.openReleasePage() }
+            })
+        case .alertThirdButtonReturn:
+            UpdateChecker.openReleasePage()
+        default: break
+        }
+    }
 
     @objc private func hideStatusBar() {
         NSStatusBar.system.removeStatusItem(statusItem!)

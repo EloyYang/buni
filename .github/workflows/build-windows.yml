@@ -55,6 +55,7 @@ jobs:
             --hidden-import PIL `
             --hidden-import PIL.Image `
             --hidden-import PIL.ImageDraw `
+            --add-data "VERSION;." `
             ${{ steps.cloudcfg.outputs.DATA }} `
             windows/buni.py
 
