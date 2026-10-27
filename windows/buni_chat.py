@@ -1,5 +1,5 @@
 """
-부니 채팅 — 방 코드로 모여서(최대 5명) 대화하는 기능 (macOS ChatStore.swift 포팅).
+부니 채팅 — 방 코드로 모여서(최대 10명) 대화하는 기능 (macOS ChatStore.swift 포팅).
 
 서버는 Firebase Realtime Database(cloud/database.rules.json). 로그인한 사용자만 쓸 수 있고,
 방은 6자리 코드로 들어간다. 상대에게 보이는 것은 닉네임·캐릭터·옷차림·모션(대기/작업 중/완료)과
@@ -18,7 +18,7 @@ import urllib.request
 
 import buni_cloud
 
-MAX_MEMBERS = 5
+MAX_MEMBERS = 10
 MAX_NICKNAME = 20
 CHARACTER_NAMES = {                 # 닉네임을 비워 두면 대화에 쓰는 이름 (한국어, English)
     'rabbit': ('부니', 'Buni'), 'brownRabbit': ('두니', 'Duni'), 'pinkRabbit': ('푸니', 'Puni'),
@@ -382,7 +382,7 @@ class ChatStore:
                 self.persist.remove('chat.lastRoom')
                 raise ChatError(t('그런 방이 없어요. 코드를 다시 확인해 주세요', 'No such room. Check the code'))
 
-            # 내 자리를 먼저 쓰고(들어온 시각 joined 포함), 그 뒤에 5명을 넘지 않는지 확인한다
+            # 내 자리를 먼저 쓰고(들어온 시각 joined 포함), 그 뒤에 10명을 넘지 않는지 확인한다
             member_url = rtdb.url(f'rooms/{code}/members/{uid}', token)
             entry = self._profile()
             entry['joined'] = SERVER_TIME
@@ -392,7 +392,7 @@ class ChatStore:
                 if s2 == 200 and not has_seat(json.loads(body2) or {}, uid):
                     rtdb.send('DELETE', member_url)                      # 자리가 없다 — 내 자리를 거둔다
                     self._prune_stale(rtdb, code, token, uid)
-                    raise ChatError(t('방이 가득 찼어요 (최대 5명)', 'The room is full (max 5)'))
+                    raise ChatError(t('방이 가득 찼어요 (최대 10명)', 'The room is full (max 10)'))
             if status != 200:
                 raise ChatError(t(f'서버 오류 ({status})', f'Server error ({status})'))
         except ChatError as e:

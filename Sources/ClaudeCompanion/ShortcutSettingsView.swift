@@ -239,8 +239,10 @@ struct ShortcutSettingsView: View {
                         .buttonStyle(PillButtonStyle(color: Color(red: 0.86, green: 0.30, blue: 0.30)))
                 }
             } else {
-                Text(L.t("로그인은 선택이에요. 안 해도 모든 기능을 그대로 쓸 수 있고, 다른 PC에서도 같은 설정·레벨을 쓰고 싶을 때만 로그인하세요.",
-                         "Signing in is optional. Everything works without it — sign in only if you want the same settings and level on your other PCs."))
+                Text(L.t("로그인은 선택이에요. 안 해도 모든 기능을 그대로 쓸 수 있고, 다른 PC에서도 같은 설정·레벨을 쓰고 싶을 때만 로그인하세요.\n"
+                         + "저장되는 것: 코인·아이템·착용 상태, 레벨 계산용 토큰 수, 계정 ID·표시 이름 (대화·코드·이메일은 저장하지 않아요)",
+                         "Signing in is optional. Everything works without it — sign in only if you want the same settings and level on your other PCs.\n"
+                         + "Stored: coins, items, outfits, a token count for your level, account ID and display name (conversations, code and email are never stored)"))
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게

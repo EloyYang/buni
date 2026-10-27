@@ -4,7 +4,7 @@ import Combine
 /// 채팅방 상태 — 방에 들어가고 나가기, 대화, 접속자(와 그들의 부니 모션)를 관리한다.
 ///
 /// 서버는 Firebase Realtime Database(cloud/database.rules.json). 로그인한 사용자만 쓸 수 있고,
-/// 방은 6자리 코드로 들어가며 최대 5명이다. 상대에게 보이는 것은 닉네임·캐릭터·옷차림·
+/// 방은 6자리 코드로 들어가며 최대 10명이다. 상대에게 보이는 것은 닉네임·캐릭터·옷차림·
 /// 모션(대기/작업 중/완료)과 대화뿐이고, 어떤 세션에서 무슨 작업을 하는지는 전해지지 않는다.
 @MainActor
 final class ChatStore: ObservableObject {
@@ -44,7 +44,7 @@ final class ChatStore: ObservableObject {
         static let lastRoom = "chat.lastRoom"
     }
 
-    static let maxMembers = 5
+    static let maxMembers = 10
     private static let heartbeat: TimeInterval = 20
     private static let staleAfter: TimeInterval = 75
     private static let tokenRefresh: TimeInterval = 50 * 60
@@ -155,7 +155,7 @@ final class ChatStore: ObservableObject {
             guard s == 200 else { throw ChatError.http(s) }
             if String(data: data, encoding: .utf8) == "null" { throw ChatError.roomNotFound }
 
-            // 내 자리를 먼저 쓰고(들어온 시각 joined 포함), 그 뒤에 5명을 넘지 않는지 확인한다
+            // 내 자리를 먼저 쓰고(들어온 시각 joined 포함), 그 뒤에 10명을 넘지 않는지 확인한다
             var entry = profilePayload()
             entry["joined"] = RTDB.serverTime
             let memberURL = rtdb.url("rooms/\(code)/members/\(uid)", token: token)

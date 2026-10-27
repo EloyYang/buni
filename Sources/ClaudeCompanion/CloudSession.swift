@@ -99,30 +99,10 @@ final class CloudSession: ObservableObject {
         }
     }
 
-    // MARK: - 처음 로그인할 때 한 번만 알려주기
+    // MARK: - 로그인 안내
 
-    /// 어떤 정보가 서버에 저장되는지 먼저 알리고 동의를 받는다 (한 번 동의하면 다시 묻지 않는다)
+    /// 로그인 전에 확인 창을 띄우지 않는다 — 서버에 저장되는 정보는 설정 창의 계정 영역에 글로 안내한다.
     private func confirmConsent() -> Bool {
-        if UserDefaults.standard.bool(forKey: Keys.consent) { return true }
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = L.t("다른 PC와 연동할까요?", "Sync with your other PCs?")
-        alert.informativeText = L.t(
-            "Google로 로그인하면 아래 정보가 서버에 저장되어 다른 PC에서도 이어집니다.\n\n"
-            + "• 코인, 산 아이템, 캐릭터별 착용 상태\n"
-            + "• 기기별 이번 달 토큰 사용량(레벨 계산용 숫자)\n"
-            + "• 로그인 계정의 고유 ID와 표시 이름\n\n"
-            + "대화 내용이나 코드는 저장하지 않으며, 이메일 주소도 저장하지 않아요. "
-            + "로그인은 선택이라 안 해도 모든 기능을 그대로 쓸 수 있고, 설정에서 언제든 로그아웃하거나 서버 데이터를 지울 수 있어요.",
-            "Signing in with Google stores the following on a server so it carries over to your other PCs:\n\n"
-            + "• Coins, owned items and per-character outfits\n"
-            + "• Per-device token usage for this month (a number used for your level)\n"
-            + "• Your account's unique ID and display name\n\n"
-            + "Conversations and code are never stored, and neither is your email address. "
-            + "Signing in is optional, and you can sign out or delete your server data any time in Settings.")
-        alert.addButton(withTitle: L.t("동의하고 로그인", "Agree & sign in"))
-        alert.addButton(withTitle: L.t("취소", "Cancel"))
-        guard alert.runModal() == .alertFirstButtonReturn else { return false }
         UserDefaults.standard.set(true, forKey: Keys.consent)
         return true
     }

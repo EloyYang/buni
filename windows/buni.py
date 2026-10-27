@@ -1169,9 +1169,13 @@ class ShortcutSettingsWindow:
         else:
             tk.Label(self._acct, bg=BG, fg=DIM, font=('Malgun Gothic', 8), justify='left', anchor='w',
                      text=t('다른 PC에서도 같은 캐릭터·레벨을 이어가려면 로그인하세요.\n'
-                            '안 해도 모든 기능을 그대로 쓸 수 있어요.',
+                            '안 해도 모든 기능을 그대로 쓸 수 있어요.\n'
+                            '저장되는 것: 코인·아이템·착용 상태, 레벨 계산용 토큰 수, 계정 ID·표시 이름\n'
+                            '(대화·코드·이메일은 저장하지 않아요)',
                             'Sign in to carry your characters and level to other PCs.\n'
-                            'Everything works without it.')).pack(anchor='w')
+                            'Everything works without it.\n'
+                            'Stored: coins, items, outfits, a token count for your level, account ID and display name\n'
+                            '(conversations, code and email are never stored)')).pack(anchor='w')
             b = tk.Button(self._acct, text=t('Google로 로그인', 'Sign in with Google'),
                           bg='#3377E0', fg='white', relief='flat', bd=0, font=('Malgun Gothic', 9),
                           padx=12, pady=4, cursor='hand2', activebackground='#2255BB',
@@ -4014,9 +4018,11 @@ class ChatWindow:
     """방 안에서 화면 아래쪽에 뜨는 채팅 패널 — 사람마다 부니 한 마리, 머리 위에 말풍선."""
 
     COL      = 108          # 사람 한 명이 차지하는 가로 폭
+    PER_ROW  = 5            # 한 줄에 5명까지 — 더 많으면 아래로 줄이 늘어난다
     BUBBLE_H = 100          # 말풍선 영역 높이
-    AV_CY    = 142          # 캐릭터 중심 y
-    H        = 236
+    AV_CY    = 142          # 캐릭터 중심 y (첫 줄 기준)
+    ROW_H    = 222          # 한 줄의 높이
+    H        = 236          # 창 높이 — 줄 수에 따라 _place()에서 바뀐다
     BUBBLE_SECONDS = 9
     INPUT_IDLE_SECONDS = 6
     NAME_DY  = 38           # 캐릭터 중심에서 이름표까지
@@ -4054,25 +4060,42 @@ class ChatWindow:
     # ── 위치 · 크기 ──────────────────────────────────────────
 
     def _size(self) -> int:
-        return max(300, max(1, len(self.chat.members)) * self.COL + 20)
+        return max(300, min(max(1, len(self.chat.members)), self.PER_ROW) * self.COL + 20)
+
+    def _rows(self) -> int:
+        return max(1, -(-len(self.chat.members) // self.PER_ROW))
+
+    def _height(self) -> int:
+        return self._rows() * self.ROW_H + 14
+
+    def _slot(self, i: int):
+        """i번째 사람의 (캐릭터 중심 x, 줄의 위쪽 y 오프셋) — 한 줄에 5명, 마지막 줄은 가운데로 모은다."""
+        n = len(self.chat.members)
+        r, c = divmod(i, self.PER_ROW)
+        in_row = min(self.PER_ROW, n - r * self.PER_ROW)
+        left = 10 + (self._width - 20 - in_row * self.COL) // 2
+        return left + self.COL * c + self.COL // 2, r * self.ROW_H
 
     def _place(self, first=False):
-        w = self._size()
-        if w != self._width or first:
+        w, h = self._size(), self._height()
+        if w != self._width or h != self.H or first:
             old_w = self._width or w
+            old_h = self.H
             self.win.update_idletasks()
             x, y = self.win.winfo_x(), self.win.winfo_y()
             self._width = w
-            self.cv.config(width=w)
+            self.H = h
+            self.cv.config(width=w, height=h)
             if first:
                 saved = self.manager.persist.get('chat.window_pos')
                 sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-                x, y = (saved if saved else [(sw - w) // 2, sh - self.H - 56])
+                x, y = (saved if saved else [(sw - w) // 2, sh - h - 56])
             else:
                 x += (old_w - w) // 2          # 가운데를 기준으로 좌우로 늘고 줄게
+                y += old_h - h                 # 아래쪽을 기준으로 위로 늘고 줄게
             sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-            x = max(0, min(x, sw - w)); y = max(0, min(y, sh - self.H))
-            self.win.geometry(f'{w}x{self.H}+{x}+{y}')
+            x = max(0, min(x, sw - w)); y = max(0, min(y, sh - h))
+            self.win.geometry(f'{w}x{h}+{x}+{y}')
 
     def close(self):
         if self._job:
@@ -4114,27 +4137,28 @@ class ChatWindow:
         for i, m in enumerate(members):
             if m['uid'] == chat.my_uid:
                 m = chat._local_member(m)              # 내 칸은 바로바로 반영
-            cx = 10 + self.COL * i + self.COL // 2
+            cx, oy = self._slot(i)
+            cy = oy + self.AV_CY
             av = self.avatars.get(m['uid'])
             if av is None:
-                av = self.avatars[m['uid']] = ChatAvatar(cv, self.shop, cx, self.AV_CY)
-            av.cx, av.cy = cx, self.AV_CY
+                av = self.avatars[m['uid']] = ChatAvatar(cv, self.shop, cx, cy)
+            av.cx, av.cy = cx, cy
             av.apply(m)
             av.tick_blink()
             av.paint()
             me = m['uid'] == chat.my_uid
             if not (me and self._input and self._input.winfo_exists()):    # 입력창이 열려 있으면 그 자리가 입력창
-                self._name_tag(cx, m['name'], me=me, level=m.get('level', 1))
+                self._name_tag(cx, cy, m['name'], me=me, level=m.get('level', 1))
             # 새 메시지가 있으면 머리 위에 말풍선
             last = next((x for x in reversed(chat.messages) if x['uid'] == m['uid']), None)
             if last and now - chat.received_at.get(last['id'], 0.0) < self.BUBBLE_SECONDS:
-                self._bubble(cx, last['text'])
+                self._bubble(cx, oy, last['text'])
         for uid in [u for u in self.avatars if u not in {m['uid'] for m in members}]:
             del self.avatars[uid]
         self._controls()
 
-    def _name_tag(self, cx, name, me, level=1):
-        y = self.AV_CY + self.NAME_DY
+    def _name_tag(self, cx, cy, name, me, level=1):
+        y = cy + self.NAME_DY
         lv = self.cv.create_text(0, y, text=f'Lv.{level}', font=('Malgun Gothic', 7, 'bold'), fill='#FFD966', anchor='w')
         tid = self.cv.create_text(0, y, text=name, font=('Malgun Gothic', 8, 'bold'), fill='white', anchor='w')
         lw = self.cv.bbox(lv)[2] - self.cv.bbox(lv)[0]
@@ -4146,15 +4170,15 @@ class ChatWindow:
         pill = self.cv.create_polygon(
             [x0-6, y0, x1+6, y0, x1+8, y0+2, x1+8, y1-2, x1+6, y1, x0-6, y1, x0-8, y1-2, x0-8, y0+2],
             smooth=True, fill='#3377E0' if me else '#2E2E36', outline='')
-        self.cv.tag_lower(pill, tid)
+        self.cv.tag_lower(pill, lv)           # 배경은 레벨·닉네임 글자 둘 다의 아래로 (lv가 tid보다 아래라 lv 기준)
 
-    def _bubble(self, cx, text):
+    def _bubble(self, cx, oy, text):
         # 글자 수만큼만 감싼다 — 줄임표 없이 전부 보이고, 짧으면 말풍선도 짧아진다
         tid = self.cv.create_text(cx, 0, text=text, width=90, justify='center',
                                   font=('Malgun Gothic', 8), fill='#222222', anchor='s')
         x0, y0, x1, y1 = self.cv.bbox(tid)
         # 말풍선은 캐릭터 귀 위쪽(영역 아래 끝)에 붙인다
-        bottom = self.BUBBLE_H - 6
+        bottom = oy + self.BUBBLE_H - 6
         self.cv.move(tid, 0, bottom - 6 - y1 + 0)
         x0, y0, x1, y1 = self.cv.bbox(tid)
         pad = 6
@@ -4226,11 +4250,22 @@ class ChatWindow:
             threading.Thread(target=self.chat.leave, daemon=True).start()
         else:
             # 캐릭터를 눌렀다 — 내 부니면 말하기, 남의 부니는 간지럽히기
-            idx = (e.x - 10) // self.COL
-            if 0 <= idx < len(self.chat.members) and self.AV_CY + 28 <= e.y <= self.AV_CY + 50:
+            idx, zone = None, None
+            for i in range(len(self.chat.members)):
+                cx, oy = self._slot(i)
+                if abs(e.x - cx) > self.COL // 2:
+                    continue
+                dy = e.y - (oy + self.AV_CY)
+                if 28 <= dy <= 50:
+                    idx, zone = i, 'name'
+                elif -42 <= dy <= 28:
+                    idx, zone = i, 'body'
+                if idx is not None:
+                    break
+            if zone == 'name':
                 if self.chat.members[idx]['uid'] == self.chat.my_uid:
                     self.edit_nickname()               # 내 이름표를 누르면 닉네임 바꾸기
-            elif 0 <= idx < len(self.chat.members) and 100 <= e.y <= 170:
+            elif zone == 'body':
                 m = self.chat.members[idx]
                 if m['uid'] == self.chat.my_uid:
                     self.toggle_input()
@@ -4292,9 +4327,9 @@ class ChatWindow:
         if me is None:
             return
         w.update_idletasks()
-        cx = 10 + self.COL * me + self.COL // 2
+        cx, oy = self._slot(me)
         x = self.win.winfo_x() + cx - w.winfo_reqwidth() // 2
-        y = self.win.winfo_y() + self.AV_CY + self.NAME_DY - w.winfo_reqheight() // 2
+        y = self.win.winfo_y() + oy + self.AV_CY + self.NAME_DY - w.winfo_reqheight() // 2
         w.geometry(f'+{max(0, x)}+{max(0, y)}')
 
     def _on_text(self, *_):
@@ -4408,9 +4443,9 @@ class ChatLobbyWindow:
                 self._lobby(button)
         if c.last_error:
             note(c.last_error, '#F28C70')
-        note(t('방에는 최대 5명까지 들어올 수 있어요. 다른 사람에게는 내 닉네임·캐릭터·옷차림·대화와 '
+        note(t('방에는 최대 10명까지 들어올 수 있어요. 다른 사람에게는 내 닉네임·캐릭터·옷차림·대화와 '
                '작업 모션(대기/작업 중/완료)만 보이고, 어떤 작업을 하는지는 전해지지 않아요.',
-               'Up to 5 people per room. Others only see your nickname, character, outfit, messages and a work '
+               'Up to 10 people per room. Others only see your nickname, character, outfit, messages and a work '
                'motion (idle / working / done) — never what you are working on.'), '#555566')
 
     def _profile(self, button):
@@ -4962,31 +4997,11 @@ class BuniManager:
         self.root.after(2000, self._chat_motion_tick)
 
     def cloud_sign_in_ui(self):
-        """"다른 PC와 연동" — 어떤 정보가 서버에 저장되는지 먼저 알리고 동의를 받는다."""
-        from tkinter import messagebox
+        """"다른 PC와 연동" — 바로 Google 로그인으로 넘어간다."""
         cloud = self.cloud
         if cloud.busy:
             return
-        if not cloud.consent_given:
-            ok = messagebox.askokcancel(
-                t('다른 PC와 연동할까요?', 'Sync with your other PCs?'),
-                t('Google로 로그인하면 아래 정보가 서버에 저장되어 다른 PC에서도 이어집니다.\n\n'
-                  '• 코인, 산 아이템, 캐릭터별 착용 상태\n'
-                  '• 기기별 이번 달 토큰 사용량(레벨 계산용 숫자)\n'
-                  '• 로그인 계정의 고유 ID와 표시 이름\n\n'
-                  '대화 내용이나 코드는 저장하지 않으며, 이메일 주소도 저장하지 않아요. '
-                  '로그인은 선택이라 안 해도 모든 기능을 그대로 쓸 수 있고, 설정에서 언제든 '
-                  '로그아웃하거나 서버 데이터를 지울 수 있어요.',
-                  'Signing in with Google stores the following on a server so it carries over to your other PCs:\n\n'
-                  '• Coins, owned items and per-character outfits\n'
-                  '• Per-device token usage for this month (a number used for your level)\n'
-                  "• Your account's unique ID and display name\n\n"
-                  'Conversations and code are never stored, and neither is your email address. '
-                  'Signing in is optional, and you can sign out or delete your server data any time in Settings.'),
-                icon='question', parent=self.root)
-            if not ok:
-                return
-            cloud.give_consent()
+        cloud.give_consent()          # 안내는 설정 창의 계정 영역에 글로 두고, 로그인 때는 경고 창을 띄우지 않는다
         threading.Thread(target=cloud.sign_in, daemon=True).start()
 
     # ── Server plan usage (5분마다 fetch) ─────────────────────

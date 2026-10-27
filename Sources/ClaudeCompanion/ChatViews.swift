@@ -211,9 +211,14 @@ struct ChatRoomView: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            HStack(alignment: .bottom, spacing: 4) {
-                ForEach(store.members) { m in
-                    ChatAvatarView(member: m, isMe: m.id == CloudSession.shared.user?.uid, now: now)
+            // 한 줄에 5명까지 — 그보다 많으면 아래로 줄을 늘려서 패널이 화면보다 넓어지지 않게 한다
+            VStack(spacing: 4) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    HStack(alignment: .bottom, spacing: 4) {
+                        ForEach(row) { m in
+                            ChatAvatarView(member: m, isMe: m.id == CloudSession.shared.user?.uid, now: now)
+                        }
+                    }
                 }
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.messages.count)
@@ -234,7 +239,14 @@ struct ChatRoomView: View {
     private static let inputIdleSeconds: TimeInterval = 6
 
     /// 패널 가로 폭 — 사람 수에만 따라 바뀐다
-    private var panelWidth: CGFloat { max(280, CGFloat(store.members.count) * 112 + 20) }
+    private var panelWidth: CGFloat { max(280, CGFloat(min(store.members.count, Self.perRow)) * 112 + 20) }
+
+    private static let perRow = 5
+    private var rows: [[ChatMember]] {
+        stride(from: 0, to: store.members.count, by: Self.perRow).map {
+            Array(store.members[$0..<min($0 + Self.perRow, store.members.count)])
+        }
+    }
 
     /// 방 코드·말하기·나가기 — 마우스를 올렸을 때만 또렷하게 보인다
     private var controls: some View {
@@ -289,9 +301,9 @@ struct ChatLobbyView: View {
                 Text(err).font(.system(size: 11)).foregroundColor(Color(red: 0.95, green: 0.55, blue: 0.45))
             }
             Spacer(minLength: 0)
-            note(L.t("방에는 최대 5명까지 들어올 수 있어요. 다른 사람에게는 내 닉네임·캐릭터·옷차림·대화와 "
+            note(L.t("방에는 최대 10명까지 들어올 수 있어요. 다른 사람에게는 내 닉네임·캐릭터·옷차림·대화와 "
                      + "작업 모션(대기/작업 중/완료)만 보이고, 어떤 작업을 하는지는 전해지지 않아요.",
-                     "Up to 5 people per room. Others only see your nickname, character, outfit, messages and a work "
+                     "Up to 10 people per room. Others only see your nickname, character, outfit, messages and a work "
                      + "motion (idle / working / done) — never what you're working on."))
         }
         .padding(20)

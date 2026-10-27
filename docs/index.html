@@ -721,7 +721,7 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     { title:'부니 상점', titleEn:'Buni Shop', desc:'작업이 끝날 때마다 코인이 쌓여요. 모자·옷·날개, 검과 지팡이까지 — 캐릭터마다 따로 꾸미고, 사기 전에 입어볼 수도 있어요.', descEn:'Every finished task earns coins. Hats, outfits, wings, swords and staffs — dress each rabbit separately, and try things on before you buy.', icon:'shop', demo:'shop', badge:true },
     { title:'덮개 닫아도 계속 실행', titleEn:'Keep running, lid closed', desc:'노트북 덮개를 닫아도 Claude가 계속 일해요. 시간을 정하거나 시간대를 예약하면 알아서 켜고 꺼져요.', descEn:'Close the lid and Claude keeps working. Pick a duration or schedule it — it switches itself on and off.', icon:'awake', demo:'awake', badge:true },
     { title:'다른 PC와 연동', titleEn:'Sync across PCs', desc:'선택 사항이에요. Google로 로그인하면 코인·아이템·레벨이 다른 PC에서도 그대로 이어져요. 안 해도 모든 기능을 쓸 수 있어요.', descEn:'Optional. Sign in with Google and your coins, items and level follow you to other PCs. Everything works without it.', icon:'sync', demo:'sync', badge:true },
-    { title:'함께 모여 채팅', titleEn:'Chat together', desc:'방 코드로 최대 5명이 모여 말풍선으로 대화해요. 채팅용 부니는 내 세션 상태에 맞춰 작업 중·완료 모션만 보여줘요.', descEn:'Up to 5 people join a room with a code and chat in speech bubbles. Your chat rabbit just mirrors whether your sessions are working or done — nothing more.', icon:'chat', demo:'chat', badge:true },
+    { title:'함께 모여 채팅', titleEn:'Chat together', desc:'방 코드로 최대 10명이 모여 말풍선으로 대화해요. 채팅용 부니는 내 세션 상태에 맞춰 작업 중·완료 모션만 보여줘요.', descEn:'Up to 10 people join a room with a code and chat in speech bubbles. Your chat rabbit just mirrors whether your sessions are working or done — nothing more.', icon:'chat', demo:'chat', badge:true },
     { title:'딴짓 방해모드', titleEn:'Nag mode', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', descEn:"If you're idle too long, Buni hops around your screen nagging you back to work.", icon:'wander', demo:'wander' },
     { title:'SSH Remote 지원', titleEn:'SSH remote support', desc:'VS Code(Cursor 포함)로 원격 서버에 붙어도 상태가 그대로 도착해요.', descEn:'Connect to a remote server via VS Code (or Cursor) — status still comes through.', icon:'ssh' },
   ];
@@ -845,7 +845,7 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
             (m[5] ? '<span class="inp"><span class="ic">💬</span><span class="tx" id="chatTx-'+fi+'"></span><span class="cr">↵</span></span>' : '') +
           '</div></div>';
       }).join('');
-      demoHtml = '<div class="feature-demo"><div class="chat-demo">'+colsHtml+'</div><div class="chat-room-cap" id="chatCap-'+fi+'">🏠 SM2GNY · 3/5</div></div>';
+      demoHtml = '<div class="feature-demo"><div class="chat-demo">'+colsHtml+'</div><div class="chat-room-cap" id="chatCap-'+fi+'">🏠 SM2GNY · 3/10</div></div>';
     } else if(f.demo === 'usage'){
       demoHtml =
         '<div class="feature-demo">' +

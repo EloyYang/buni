@@ -38,7 +38,7 @@ enum ChatError: LocalizedError {
         case .notConfigured: return L.t("서버 설정이 없어서 채팅을 쓸 수 없어요", "Chat isn't set up (cloud-config.json)")
         case .notSignedIn:   return L.t("채팅은 Google 로그인이 필요해요", "Chat needs a Google sign-in")
         case .roomNotFound:  return L.t("그런 방이 없어요. 코드를 다시 확인해 주세요", "No such room. Check the code")
-        case .roomFull:      return L.t("방이 가득 찼어요 (최대 5명)", "The room is full (max 5)")
+        case .roomFull:      return L.t("방이 가득 찼어요 (최대 10명)", "The room is full (max 10)")
         case .http(let c):   return L.t("서버 오류 (\(c))", "Server error (\(c))")
         case .invalidCode:   return L.t("방 코드는 영문·숫자 6자리예요", "Room codes are 6 letters/digits")
         }
@@ -65,7 +65,7 @@ enum RoomCode {
 
 // MARK: - 인원 제한
 
-/// 방은 최대 5명이다. 데이터베이스 규칙으로는 인원을 셀 수 없어서, 들어온 사람이 직접 확인한다:
+/// 방은 최대 10명이다. 데이터베이스 규칙으로는 인원을 셀 수 없어서, 들어온 사람이 직접 확인한다:
 /// 지금 활동 중인 사람들을 들어온 순서(서버 시각, 같으면 uid)로 세워 내가 5번째 안에 드는지 본다.
 /// 모두가 같은 기준으로 계산하므로 동시에 들어와도 가장 늦은 사람이 물러난다.
 enum RoomCapacity {
