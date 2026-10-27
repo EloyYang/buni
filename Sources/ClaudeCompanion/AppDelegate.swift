@@ -93,6 +93,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// 켜둔 채 종료되면 맥이 영영 안 자게 되므로 반드시 되돌린다
     func applicationWillTerminate(_ notification: Notification) {
         AwakeManager.shared.restoreOnQuit()
+        MainActor.assumeIsolated { ChatStore.shared.leaveBlocking() }     // 채팅방 자리를 비운다
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -112,6 +113,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         startSessionScanner()
         // 선택 기능 — 서버 설정이 있고 이전에 로그인해 둔 사람만 조용히 이어진다
         Task { @MainActor in CloudSync.shared.start() }
+        Task { @MainActor in
+            ChatStore.shared.start()
+            ChatWindowController.shared.start()
+        }
+        startChatMotionTimer()
     }
 
     private func setupSocketServer() {
@@ -500,33 +506,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self; menu.addItem(item); menu.addItem(.separator())
         }
 
+        /// 기능별 묶음 머리글 — 눌리지 않는 작은 제목
+        func header(_ ko: String, _ en: String) {
+            if #available(macOS 14.0, *) {
+                menu.addItem(NSMenuItem.sectionHeader(title: L.t(ko, en)))
+            } else {
+                let h = NSMenuItem(title: L.t(ko, en), action: nil, keyEquivalent: "")
+                h.isEnabled = false
+                menu.addItem(h)
+            }
+        }
+
+        // ── 부니 화면
         // 숨기기/불러오기를 하나로 토글하면, 세션 하나가 소리 없이(예: Claude
         // 종료 감지) 숨겨졌을 때 "불러오기" 항목 자체가 안 보여서 — 그걸
         // 보이게 하려고 전체를 숨겼다가 다시 불러와야 하는 번거로움이 생김.
         // 항상 둘 다 보여주고 각각 명시적으로 동작하게 한다.
+        header("부니 화면", "On screen")
         menu.addItem(NSMenuItem(title: L.t("전체 부니 숨기기", "Hide all Buni"),
                                 action: #selector(hideAllMenuAction), keyEquivalent: "h"))
         menu.addItem(NSMenuItem(title: L.t("전체 부니 불러오기", "Show all Buni"),
                                 action: #selector(showAllMenuAction), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: L.t("Claude 열기", "Open Claude"),
-                                action: #selector(openClaude), keyEquivalent: "o"))
         menu.addItem(NSMenuItem(title: L.t("위치 초기화", "Reset position"),
                                 action: #selector(resetPosition), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: L.t("설정...", "Settings..."),
-                                action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: L.t("Claude 열기", "Open Claude"),
+                                action: #selector(openClaude), keyEquivalent: "o"))
+        menu.addItem(.separator())
 
+        // ── 꾸미기 · 함께하기
+        header("꾸미기 · 함께하기", "Style & together")
         let shopItem = NSMenuItem(title: L.t("🛍 부니 상점  (🪙 \(ShopStore.shared.coins))",
                                              "🛍 Buni Shop  (🪙 \(ShopStore.shared.coins))"),
                                   action: #selector(openShop), keyEquivalent: "")
         shopItem.target = self
         menu.addItem(shopItem)
 
+        let chatRoom = MainActor.assumeIsolated { ChatStore.shared.roomCode }
+        let chatTitle = chatRoom.map { L.t("💬 부니 채팅  (방 \($0))", "💬 Buni Chat  (room \($0))") }
+                        ?? L.t("💬 부니 채팅…", "💬 Buni Chat…")
+        let chatItem = NSMenuItem(title: chatTitle, action: #selector(openChat), keyEquivalent: "")
+        chatItem.target = self
+        menu.addItem(chatItem)
+        menu.addItem(.separator())
+
+        // ── 작업 도구
+        header("작업 도구", "Work tools")
         menu.addItem(buildKeepAwakeMenuItem())
 
         let focusItem = NSMenuItem(title: L.t("딴짓 방해모드", "Distraction mode"),
                                    action: #selector(toggleFocusMode), keyEquivalent: "")
         focusItem.state = FocusModeStore.shared.enabled ? .on : .off
         menu.addItem(focusItem)
+        menu.addItem(.separator())
+
+        // ── 앱 설정
+        header("앱", "App")
+        menu.addItem(NSMenuItem(title: L.t("설정...", "Settings..."),
+                                action: #selector(openSettings), keyEquivalent: ","))
 
         let loginItem = NSMenuItem(title: L.t("부팅 시 자동 실행", "Launch at login"),
                                    action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
@@ -704,6 +740,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openClaude() {
         NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Claude.app"))
+    }
+
+    @objc func openChat() {
+        Task { @MainActor in ChatWindowController.shared.showLobby() }
+    }
+
+    // MARK: - 채팅 부니 모션
+
+    private var chatMotionTimer: Timer?
+
+    /// 내 세션들의 상태를 한 가지 모션으로 요약해 채팅방에 알린다.
+    /// 하나라도 작업 중이면 작업 중, 아니면 완료된 세션이 있으면 완료, 그 밖엔 대기.
+    /// (세션 이름·작업 내용은 보내지 않는다 — 모션만 간다)
+    private func startChatMotionTimer() {
+        chatMotionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let states = self.sessions.values.map { $0.controller.state }
+            let motion: ChatMotion
+            if states.contains(where: { $0.isRunning }) { motion = .working }
+            else if states.contains(where: { if case .completed = $0 { return true } else { return false } }) { motion = .done }
+            else { motion = .idle }
+            Task { @MainActor in
+                ChatStore.shared.setLocalMotion(motion)
+                self.rebuildMenuIfChatChanged()
+            }
+        }
+    }
+
+    private var lastChatMenuRoom: String?
+    @MainActor private func rebuildMenuIfChatChanged() {
+        let room = ChatStore.shared.roomCode
+        if room != lastChatMenuRoom { lastChatMenuRoom = room; rebuildMenu() }
     }
 
     @objc func openShop() {

@@ -18,8 +18,19 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "▶ Swift 빌드 중..."
 cd "$SCRIPT_DIR"
-swift build -c release
-BINARY="$SCRIPT_DIR/.build/release/ClaudeCompanion"
+# 클라우드 동기화 폴더(SynologyDrive 등) 안에서 빌드하면 수많은 중간 파일을 동기화하느라
+# 컴파일러가 파일을 읽다가 멈추는 일이 있다 — 그런 경로면 빌드 산출물을 폴더 밖에 둔다.
+BUILD_DIR="${BUNI_BUILD_DIR:-}"
+if [ -z "$BUILD_DIR" ] && [[ "$SCRIPT_DIR" == *"/CloudStorage/"* ]]; then
+    BUILD_DIR="$HOME/.cache/buni-build"
+fi
+if [ -n "$BUILD_DIR" ]; then
+    swift build -c release --scratch-path "$BUILD_DIR"
+    BINARY="$BUILD_DIR/release/ClaudeCompanion"
+else
+    swift build -c release
+    BINARY="$SCRIPT_DIR/.build/release/ClaudeCompanion"
+fi
 echo "✓ 빌드 완료"
 
 # ── 2. 앱 번들 구조 생성

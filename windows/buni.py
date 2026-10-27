@@ -3072,9 +3072,9 @@ class SessionWindow(CharacterDrawMixin):
         # 트레이의 "부니 숨기기"와 동일한 전체 숨김으로 위임 — 이 창만 hide()하면
         # manager._is_manually_hidden이 안 켜져서, 다른 상태 변화나 새 Claude
         # 세션으로 언제든 되살아나 버린다.
+        # ── 이 부니
         self._menu.add_command(label=t('숨기기', 'Hide'),  command=self.manager.hide_all)
-        self._menu.add_command(label=t('Claude 열기', 'Open Claude'), command=self._open_claude)
-        self._menu.add_separator()
+        self._menu.add_command(label=t('위치 초기화', 'Reset position'),  command=self._reset_position)
 
         char_menu = tk.Menu(self._menu, tearoff=0)
         for cid in CHAR_DISPLAY_NAMES:
@@ -3083,20 +3083,23 @@ class SessionWindow(CharacterDrawMixin):
                                    command=lambda c=cid: self._set_character(c))
         self._menu.add_cascade(label=t('캐릭터 변경', 'Change character'), menu=char_menu)
 
-        self._menu.add_separator()
         label = t('메모 추가...', 'Add note...') if not self.memo else t('메모 편집...', 'Edit note...')
         self._menu.add_command(label=label, command=self._edit_memo)
         if self.memo:
             self._menu.add_command(label=t('메모 지우기', 'Clear note'), command=self._clear_memo)
 
+        # ── 꾸미기 · 함께하기
         self._menu.add_separator()
         self._menu.add_command(label=t(f'🛍 부니 상점  (🪙 {self.shop.coins})', f'🛍 Buni Shop  (🪙 {self.shop.coins})'),
                                command=lambda: self.manager.open_shop(self.character))
-        self._menu.add_command(label=t('위치 초기화', 'Reset position'),  command=self._reset_position)
+        self._menu.add_command(label=t('💬 부니 채팅...', '💬 Buni Chat...'), command=self.manager.open_chat)
+
+        # ── 앱
+        self._menu.add_separator()
+        self._menu.add_command(label=t('Claude 열기', 'Open Claude'), command=self._open_claude)
         self._menu.add_command(label=t('설정...', 'Settings...'), command=self.manager._open_shortcut_settings)
         self._menu.add_separator()
         self._menu.add_command(label=t('세션 끊기', 'Disconnect session'),    command=self._disconnect)
-        self._menu.add_separator()
         self._menu.add_command(label=t('종료', 'Quit'), command=self.manager.quit)
 
     def _show_menu(self, e: tk.Event):
@@ -3604,12 +3607,16 @@ class ShopPreview(CharacterDrawMixin):
         else:
             self.state = 'ready'
 
-    def redraw(self):
+    def paint(self):
+        """캔버스를 지우지 않고 이 캐릭터만 그린다 (한 캔버스에 여럿을 그릴 때)."""
         if self.mode == 'working':               # 팔이 번갈아 위아래 — 뜨개질 바늘이 손을 따라 움직인다
             swing = P * 0.6 if int(time.time() / 0.36) % 2 else -P * 0.6
             self.larm_dy, self.rarm_dy = P - swing, P + swing
-        self.cv.delete('all')
         self._draw_character()
+
+    def redraw(self):
+        self.cv.delete('all')
+        self.paint()
         self.cv.scale('all', self.cx, self.cy, self.SCALE, self.SCALE)
 
 
@@ -3971,6 +3978,513 @@ class ShopWindow:
 
 
 # ══════════════════════════════════════════════════════════════
+# 부니 채팅 — 방 안의 채팅 부니들 + 로비 창
+# ══════════════════════════════════════════════════════════════
+
+class ChatAvatar(ShopPreview):
+    """채팅방에 있는 사람 한 명의 부니. 모션(대기/작업 중/완료)은 서버에서 받은 값으로,
+    옷차림은 받은 아이템 id로 그린다(상점 미리보기와 같은 방식)."""
+
+    SCALE = 1.0
+
+    def __init__(self, cv: tk.Canvas, shop, cx: int, cy: int):
+        super().__init__(cv, shop, cx, cy)
+        self.uid = ''
+        self._blink_left = 0
+
+    def apply(self, member: dict):
+        self.uid = member['uid']
+        self.character = member['char'] if member['char'] in CHARACTERS else 'rabbit'
+        self.try_on = dict(member['equip'])
+        mode = {'working': 'working', 'done': 'done'}.get(member['motion'], 'idle')
+        if mode != self.mode:
+            self.set_mode(mode)
+
+    def tick_blink(self):
+        if self._blink_left > 0:
+            self._blink_left -= 1
+            self.blinking = self._blink_left > 0
+        elif random.random() < 0.025:
+            self._blink_left = 2
+            self.blinking = True
+
+
+class ChatWindow:
+    """방 안에서 화면 아래쪽에 뜨는 채팅 패널 — 사람마다 부니 한 마리, 머리 위에 말풍선."""
+
+    COL      = 108          # 사람 한 명이 차지하는 가로 폭
+    BUBBLE_H = 100          # 말풍선 영역 높이
+    AV_CY    = 142          # 캐릭터 중심 y
+    H        = 236
+    BUBBLE_SECONDS = 9
+    INPUT_IDLE_SECONDS = 6
+    NAME_DY  = 38           # 캐릭터 중심에서 이름표까지
+
+    def __init__(self, manager: 'BuniManager'):
+        self.manager = manager
+        self.chat    = manager.chat
+        self.shop    = manager.shop
+        self.avatars: dict[str, ChatAvatar] = {}
+        self._input: tk.Toplevel | None = None
+        self._entry: tk.Entry | None = None
+        self._draft = ''                   # 쓰다 만 메시지 — 입력창이 닫혀도 남는다
+        self._input_touched = 0.0
+        self._job = None
+        self._width = 0
+        self._press = None
+        self._moved = False
+
+        win = self.win = tk.Toplevel(manager.root)
+        win.overrideredirect(True)
+        win.attributes('-topmost', True)
+        win.configure(bg=TRANSP)
+        try:
+            win.wm_attributes('-transparentcolor', TRANSP)
+        except tk.TclError:
+            pass
+        self.cv = tk.Canvas(win, width=300, height=self.H, bg=TRANSP, highlightthickness=0)
+        self.cv.pack()
+        self.cv.bind('<ButtonPress-1>',   self._press_cb)
+        self.cv.bind('<B1-Motion>',       self._motion_cb)
+        self.cv.bind('<ButtonRelease-1>', self._release_cb)
+        self._place(first=True)
+        self._tick()
+
+    # ── 위치 · 크기 ──────────────────────────────────────────
+
+    def _size(self) -> int:
+        return max(300, max(1, len(self.chat.members)) * self.COL + 20)
+
+    def _place(self, first=False):
+        w = self._size()
+        if w != self._width or first:
+            old_w = self._width or w
+            self.win.update_idletasks()
+            x, y = self.win.winfo_x(), self.win.winfo_y()
+            self._width = w
+            self.cv.config(width=w)
+            if first:
+                saved = self.manager.persist.get('chat.window_pos')
+                sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
+                x, y = (saved if saved else [(sw - w) // 2, sh - self.H - 56])
+            else:
+                x += (old_w - w) // 2          # 가운데를 기준으로 좌우로 늘고 줄게
+            sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
+            x = max(0, min(x, sw - w)); y = max(0, min(y, sh - self.H))
+            self.win.geometry(f'{w}x{self.H}+{x}+{y}')
+
+    def close(self):
+        if self._job:
+            try: self.win.after_cancel(self._job)
+            except Exception: pass
+        self.close_input()
+        try: self.win.destroy()
+        except Exception: pass
+
+    def is_open(self) -> bool:
+        try:
+            return bool(self.win.winfo_exists())
+        except Exception:
+            return False
+
+    # ── 그리기 ───────────────────────────────────────────────
+
+    def _tick(self):
+        if not self.is_open():
+            return
+        try:
+            self._place()
+            self.chat.sync_profile()
+            self.redraw()
+            if self._input and self._input.winfo_exists():
+                if time.time() - self._input_touched > self.INPUT_IDLE_SECONDS:
+                    self.close_input()                   # 한동안 입력이 없으면 다시 닉네임을 보인다
+                else:
+                    self._place_input()
+        except Exception:
+            pass
+        self._job = self.win.after(100, self._tick)
+
+    def redraw(self):
+        chat, cv = self.chat, self.cv
+        cv.delete('all')
+        members = chat.members
+        now = time.time()
+        for i, m in enumerate(members):
+            if m['uid'] == chat.my_uid:
+                m = chat._local_member(m)              # 내 칸은 바로바로 반영
+            cx = 10 + self.COL * i + self.COL // 2
+            av = self.avatars.get(m['uid'])
+            if av is None:
+                av = self.avatars[m['uid']] = ChatAvatar(cv, self.shop, cx, self.AV_CY)
+            av.cx, av.cy = cx, self.AV_CY
+            av.apply(m)
+            av.tick_blink()
+            av.paint()
+            me = m['uid'] == chat.my_uid
+            if not (me and self._input and self._input.winfo_exists()):    # 입력창이 열려 있으면 그 자리가 입력창
+                self._name_tag(cx, m['name'], me=me, level=m.get('level', 1))
+            # 새 메시지가 있으면 머리 위에 말풍선
+            last = next((x for x in reversed(chat.messages) if x['uid'] == m['uid']), None)
+            if last and now - chat.received_at.get(last['id'], 0.0) < self.BUBBLE_SECONDS:
+                self._bubble(cx, last['text'])
+        for uid in [u for u in self.avatars if u not in {m['uid'] for m in members}]:
+            del self.avatars[uid]
+        self._controls()
+
+    def _name_tag(self, cx, name, me, level=1):
+        y = self.AV_CY + self.NAME_DY
+        lv = self.cv.create_text(0, y, text=f'Lv.{level}', font=('Malgun Gothic', 7, 'bold'), fill='#FFD966', anchor='w')
+        tid = self.cv.create_text(0, y, text=name, font=('Malgun Gothic', 8, 'bold'), fill='white', anchor='w')
+        lw = self.cv.bbox(lv)[2] - self.cv.bbox(lv)[0]
+        nw = self.cv.bbox(tid)[2] - self.cv.bbox(tid)[0]
+        left = cx - (lw + 4 + nw) / 2
+        self.cv.coords(lv, left, y)
+        self.cv.coords(tid, left + lw + 4, y)
+        x0, y0, x1, y1 = self.cv.bbox(lv, tid)
+        pill = self.cv.create_polygon(
+            [x0-6, y0, x1+6, y0, x1+8, y0+2, x1+8, y1-2, x1+6, y1, x0-6, y1, x0-8, y1-2, x0-8, y0+2],
+            smooth=True, fill='#3377E0' if me else '#2E2E36', outline='')
+        self.cv.tag_lower(pill, tid)
+
+    def _bubble(self, cx, text):
+        # 글자 수만큼만 감싼다 — 줄임표 없이 전부 보이고, 짧으면 말풍선도 짧아진다
+        tid = self.cv.create_text(cx, 0, text=text, width=90, justify='center',
+                                  font=('Malgun Gothic', 8), fill='#222222', anchor='s')
+        x0, y0, x1, y1 = self.cv.bbox(tid)
+        # 말풍선은 캐릭터 귀 위쪽(영역 아래 끝)에 붙인다
+        bottom = self.BUBBLE_H - 6
+        self.cv.move(tid, 0, bottom - 6 - y1 + 0)
+        x0, y0, x1, y1 = self.cv.bbox(tid)
+        pad = 6
+        L, T, R, B = x0 - pad, y0 - pad, x1 + pad, y1 + pad
+        r = 8
+        pts = [L+r, T, R-r, T, R, T, R, T+r, R, B-r, R, B, R-r, B, L+r, B, L, B, L, B-r, L, T+r, L, T]
+        poly = self.cv.create_polygon(pts, smooth=True, fill='#FFFFFF', outline='#CCCCCC')
+        tail = self.cv.create_polygon(cx-5, B-1, cx+5, B-1, cx, B+6, fill='#FFFFFF', outline='')
+        self.cv.tag_lower(tail, tid); self.cv.tag_lower(poly, tid)
+
+    def _controls(self):
+        chat = self.chat
+        y = self.H - 14
+        labels = [('talk', '💬 ' + t('말하기', 'Chat')),
+                  ('code', f'🏠 {chat.room_code} · {len(chat.members)}/{buni_chat.MAX_MEMBERS}'),
+                  ('leave', t('나가기', 'Leave'))]
+        if chat.status == 'reconnecting':
+            labels.insert(2, ('retry', t('다시 연결 중…', 'Reconnecting…')))
+        items = []
+        total = 0
+        for tag, text in labels:
+            tid = self.cv.create_text(0, y, text=text, font=('Malgun Gothic', 8, 'bold'), fill='white', tags=('ctl', tag))
+            bb = self.cv.bbox(tid)
+            items.append((tag, tid, bb[2] - bb[0]))
+            total += bb[2] - bb[0] + 14
+        x = (self._width - total) // 2 + 7
+        pill_l = x - 8
+        for tag, tid, w in items:
+            self.cv.coords(tid, x + w / 2, y)
+            self.cv.tag_bind(tid, '<Enter>', lambda e, i=tid: self.cv.itemconfig(i, fill='#FFDD66'))
+            self.cv.tag_bind(tid, '<Leave>', lambda e, i=tid: self.cv.itemconfig(i, fill='white'))
+            x += w + 14
+        pill = self.cv.create_polygon(
+            [pill_l+8, y-9, x-6, y-9, x+2, y-9, x+2, y+9, x-6, y+9, pill_l+8, y+9, pill_l, y+9, pill_l, y-9],
+            smooth=True, fill='#26262E', outline='')
+        self.cv.tag_lower(pill)
+        self._ctl = {tag: tid for tag, tid, _ in items}
+
+    # ── 마우스: 끌어서 옮기기 · 누르기 ───────────────────────
+
+    def _press_cb(self, e):
+        self._press = (e.x_root, e.y_root, self.win.winfo_x(), self.win.winfo_y(), e.x, e.y)
+        self._moved = False
+
+    def _motion_cb(self, e):
+        if not self._press:
+            return
+        sx, sy, wx, wy, *_ = self._press
+        if abs(e.x_root - sx) > 4 or abs(e.y_root - sy) > 4:
+            self._moved = True
+        if self._moved:
+            self.win.geometry(f'+{wx + e.x_root - sx}+{wy + e.y_root - sy}')
+
+    def _release_cb(self, e):
+        press, self._press = self._press, None
+        if not press:
+            return
+        if self._moved:
+            self.manager.persist.set('chat.window_pos', [self.win.winfo_x(), self.win.winfo_y()])
+            return
+        item = self.cv.find_closest(e.x, e.y)
+        tags = self.cv.gettags(item) if item else ()
+        if 'talk' in tags:
+            self.toggle_input()
+        elif 'code' in tags:
+            self.manager.root.clipboard_clear()
+            self.manager.root.clipboard_append(self.chat.room_code or '')
+        elif 'leave' in tags:
+            threading.Thread(target=self.chat.leave, daemon=True).start()
+        else:
+            # 캐릭터를 눌렀다 — 내 부니면 말하기, 남의 부니는 간지럽히기
+            idx = (e.x - 10) // self.COL
+            if 0 <= idx < len(self.chat.members) and self.AV_CY + 28 <= e.y <= self.AV_CY + 50:
+                if self.chat.members[idx]['uid'] == self.chat.my_uid:
+                    self.edit_nickname()               # 내 이름표를 누르면 닉네임 바꾸기
+            elif 0 <= idx < len(self.chat.members) and 100 <= e.y <= 170:
+                m = self.chat.members[idx]
+                if m['uid'] == self.chat.my_uid:
+                    self.toggle_input()
+                else:
+                    av = self.avatars.get(m['uid'])
+                    if av:
+                        av._blink_left = 6; av.blinking = True
+
+    def edit_nickname(self):
+        result = simpledialog.askstring(
+            t('닉네임', 'Nickname'),
+            t(f'채팅에 쓸 이름 ({buni_chat.MAX_NICKNAME}자까지)', f'Name shown in chat (up to {buni_chat.MAX_NICKNAME} characters)'),
+            initialvalue=self.chat.display_name, parent=self.win)
+        if result is None:                                   # 취소
+            return
+        name = result.strip()[:buni_chat.MAX_NICKNAME]       # 비우면 캐릭터 이름으로 돌아간다
+        if name != self.chat.display_name:
+            self.chat.nickname = name
+            self.chat.push_profile()
+
+    # ── 입력창 ───────────────────────────────────────────────
+
+    def toggle_input(self):
+        if self._input and self._input.winfo_exists():
+            self.close_input()
+        else:
+            self.open_input()
+
+    def open_input(self):
+        """내 닉네임 자리에 작은 입력칸이 겹쳐 뜬다 — 캐릭터는 그대로, 입력이 없으면 닉네임으로 돌아온다."""
+        if self._input and self._input.winfo_exists():
+            self._input.lift(); self._entry.focus_force(); return
+        w = self._input = tk.Toplevel(self.manager.root)
+        w.overrideredirect(True)
+        w.attributes('-topmost', True)
+        w.configure(bg='#3377E0')                          # 파란 테두리 — 입력칸이라는 걸 알아보게
+        inner = tk.Frame(w, bg='#17171C')
+        inner.pack(padx=2, pady=2)
+        tk.Label(inner, text='💬', bg='#17171C', fg='#6FA3FF', font=('Segoe UI Emoji', 8)).pack(side='left', padx=(5, 0))
+        self._text_var = tk.StringVar(value=self._draft)
+        self._entry = tk.Entry(inner, textvariable=self._text_var, width=12, font=('Malgun Gothic', 9),
+                               relief='flat', bd=0, bg='#17171C', fg='white', insertbackground='#6FA3FF')
+        self._entry.pack(side='left', padx=(3, 0), ipady=3)
+        self._hint = tk.Label(inner, text='↵', bg='#17171C', fg='#6A6A78', font=('Consolas', 9, 'bold'), width=2)
+        self._hint.pack(side='left', padx=(0, 3))
+        self._text_var.trace_add('write', self._on_text)
+        self._entry.bind('<Return>', lambda e: self._send())
+        self._entry.bind('<Escape>', lambda e: self.close_input())
+        self._input_touched = time.time()
+        self._place_input()
+        self._entry.focus_force()
+        self._entry.icursor('end')
+
+    def _place_input(self):
+        w = self._input
+        if not w:
+            return
+        me = next((i for i, m in enumerate(self.chat.members) if m['uid'] == self.chat.my_uid), None)
+        if me is None:
+            return
+        w.update_idletasks()
+        cx = 10 + self.COL * me + self.COL // 2
+        x = self.win.winfo_x() + cx - w.winfo_reqwidth() // 2
+        y = self.win.winfo_y() + self.AV_CY + self.NAME_DY - w.winfo_reqheight() // 2
+        w.geometry(f'+{max(0, x)}+{max(0, y)}')
+
+    def _on_text(self, *_):
+        """글자 수 제한 — 넘치는 만큼은 입력되지 않는다."""
+        self._input_touched = time.time()
+        v = self._text_var.get()
+        if len(v) > buni_chat.MAX_TEXT:
+            self._text_var.set(v[:buni_chat.MAX_TEXT])
+            return
+        n = len(v)                                    # 비었으면 ↵ 안내, 40자부터는 글자 수
+        self._hint.config(text=f'{n}/{buni_chat.MAX_TEXT}' if n >= 40 else ('↵' if n == 0 else ''),
+                          width=6 if n >= 40 else 2)
+
+    def close_input(self):
+        if self._input:
+            try: self._draft = self._text_var.get()
+            except Exception: pass
+            try: self._input.destroy()
+            except Exception: pass
+        self._input = self._entry = None
+
+    def _send(self):
+        if not self._entry:
+            return
+        text = self._entry.get()
+        self._entry.delete(0, 'end')
+        self._draft = ''
+        self._input_touched = time.time()
+        self.chat.send(text)
+
+
+class ChatLobbyWindow:
+    """방 만들기 · 코드로 입장 · 내 채팅 프로필."""
+
+    BG = '#1E1E24'
+
+    def __init__(self, manager: 'BuniManager'):
+        self.manager = manager
+        self.chat    = manager.chat
+        self._sig    = None
+        win = self.win = tk.Toplevel(manager.root)
+        win.title(t('부니 채팅', 'Buni Chat'))
+        win.configure(bg=self.BG)
+        win.resizable(False, False)
+        win.attributes('-topmost', True)
+        win.protocol('WM_DELETE_WINDOW', self.close)
+        win.bind('<Escape>', lambda _: self.close())
+        self.body = tk.Frame(win, bg=self.BG, padx=20, pady=16)
+        self.body.pack(fill='both', expand=True)
+        self.refresh(force=True)
+        win.update_idletasks()
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        win.geometry(f'+{(sw - win.winfo_reqwidth()) // 2}+{(sh - win.winfo_reqheight()) // 3}')
+
+    def is_open(self) -> bool:
+        try:
+            return bool(self.win.winfo_exists())
+        except Exception:
+            return False
+
+    def show(self):
+        self.win.deiconify(); self.win.lift(); self.win.focus_force()
+
+    def close(self):
+        try: self.win.destroy()
+        except Exception: pass
+
+    def _signature(self):
+        c = self.chat
+        return (c.is_available, c.cloud.is_signed_in, c.room_code, c.last_error, c.status,
+                tuple((m['uid'], m['name'], m['motion']) for m in c.members), c.cloud.busy)
+
+    def refresh(self, force=False):
+        """방·접속자·로그인 상태가 바뀔 때만 다시 그린다 (메시지가 올 때마다 그리면 입력 중인 칸이 풀린다)."""
+        if not self.is_open():
+            return
+        sig = self._signature()
+        if sig == self._sig and not force:
+            return
+        self._sig = sig
+        for w in self.body.winfo_children():
+            w.destroy()
+        c, B = self.chat, self.BG
+        tk.Label(self.body, text=t('부니 채팅', 'Buni Chat'), bg=B, fg='white',
+                 font=('Malgun Gothic', 13, 'bold')).pack(anchor='w')
+
+        def note(text, fg='#8A8A98'):
+            tk.Label(self.body, text=text, bg=B, fg=fg, font=('Malgun Gothic', 8), justify='left',
+                     wraplength=360, anchor='w').pack(anchor='w', pady=(6, 0))
+
+        def button(parent, text, color, cmd, **kw):
+            return tk.Button(parent, text=text, bg=color, fg='white', relief='flat', bd=0, cursor='hand2',
+                             font=('Malgun Gothic', 9, 'bold'), padx=12, pady=4,
+                             activebackground=color, activeforeground='white', command=cmd, **kw)
+
+        if not c.is_available:
+            note(t('서버 설정(cloud-config.json)이 없어서 채팅을 쓸 수 없어요.',
+                   'Chat needs the server config (cloud-config.json).'), '#D9B25A')
+        elif not c.cloud.is_signed_in:
+            note(t('채팅은 Google 로그인이 필요해요. 로그인하면 같은 방 사람들과 이름이 보여요.',
+                   'Chat needs a Google sign-in so people in the room can tell you apart.'))
+            button(self.body, t('Google로 로그인', 'Sign in with Google'), '#3377E0',
+                   self.manager.cloud_sign_in_ui,
+                   state='disabled' if c.cloud.busy else 'normal').pack(anchor='w', pady=(10, 0))
+        else:
+            self._profile(button)
+            tk.Frame(self.body, bg='#3A3A44', height=1).pack(fill='x', pady=12)
+            if c.room_code:
+                self._in_room(button)
+            else:
+                self._lobby(button)
+        if c.last_error:
+            note(c.last_error, '#F28C70')
+        note(t('방에는 최대 5명까지 들어올 수 있어요. 다른 사람에게는 내 닉네임·캐릭터·옷차림·대화와 '
+               '작업 모션(대기/작업 중/완료)만 보이고, 어떤 작업을 하는지는 전해지지 않아요.',
+               'Up to 5 people per room. Others only see your nickname, character, outfit, messages and a work '
+               'motion (idle / working / done) — never what you are working on.'), '#555566')
+
+    def _profile(self, button):
+        c, B = self.chat, self.BG
+        row = tk.Frame(self.body, bg=B); row.pack(fill='x', pady=(10, 0))
+        tk.Label(row, text=t('닉네임', 'Nickname'), bg=B, fg='#CCCCCC', width=8, anchor='w',
+                 font=('Malgun Gothic', 9)).pack(side='left')
+        var = tk.StringVar(value=c.nickname)
+        ent = tk.Entry(row, textvariable=var, width=24, font=('Malgun Gothic', 10), relief='flat',
+                       bg='#2A2A34', fg='white', insertbackground='white')
+        ent.pack(side='left', ipady=3)
+        ent.insert(0, '') if c.nickname else None
+
+        def save(_e=None):
+            c.nickname = var.get()
+            c.push_profile()
+        ent.bind('<Return>', save); ent.bind('<FocusOut>', save)
+        tk.Label(row, text=t(f'(비우면 {c.character_name(c.character)})', f'(empty = {c.character_name(c.character)})'),
+                 bg=B, fg='#8A8A98', font=('Malgun Gothic', 8)).pack(side='left', padx=6)
+
+        row2 = tk.Frame(self.body, bg=B); row2.pack(fill='x', pady=(8, 0))
+        tk.Label(row2, text=t('캐릭터', 'Character'), bg=B, fg='#CCCCCC', width=8, anchor='w',
+                 font=('Malgun Gothic', 9)).pack(side='left')
+        for cid in CHARACTERS:
+            on = cid == c.character
+            def pick(cid=cid):
+                c.character = cid
+                c.push_profile()
+                self.refresh(force=True)
+            tk.Button(row2, text=char_display_name(cid).split(' ')[0], relief='flat', bd=0, cursor='hand2',
+                      bg='#3377E0' if on else '#2F2F3A', fg='white' if on else '#AAAAB4',
+                      font=('Malgun Gothic', 8, 'bold'), padx=6, pady=3,
+                      activebackground='#3377E0', activeforeground='white', command=pick).pack(side='left', padx=(0, 3))
+
+    def _lobby(self, button):
+        c, B = self.chat, self.BG
+        button(self.body, t('새 방 만들기', 'Create a room'), '#3377E0',
+               lambda: threading.Thread(target=c.create_room, daemon=True).start()).pack(anchor='w')
+        row = tk.Frame(self.body, bg=B); row.pack(fill='x', pady=(12, 0))
+        var = tk.StringVar()
+        ent = tk.Entry(row, textvariable=var, width=14, font=('Consolas', 13), relief='flat',
+                       bg='#2A2A34', fg='white', insertbackground='white')
+        ent.pack(side='left', ipady=4)
+
+        def enter(_e=None):
+            code = var.get()
+            threading.Thread(target=lambda: c.join(code), daemon=True).start()
+        ent.bind('<Return>', enter)
+        button(row, t('입장', 'Join'), '#F29926', enter).pack(side='left', padx=(8, 0))
+        tk.Label(self.body, text=t('방 코드 6자리', '6-character room code'), bg=B, fg='#666672',
+                 font=('Malgun Gothic', 8)).pack(anchor='w', pady=(2, 0))
+
+    def _in_room(self, button):
+        c, B = self.chat, self.BG
+        row = tk.Frame(self.body, bg=B); row.pack(fill='x')
+        tk.Label(row, text=t('방 코드', 'Room code'), bg=B, fg='#CCCCCC', font=('Malgun Gothic', 9)).pack(side='left')
+        tk.Label(row, text=c.room_code, bg=B, fg='white', font=('Consolas', 20, 'bold')).pack(side='left', padx=10)
+
+        def copy():
+            self.manager.root.clipboard_clear(); self.manager.root.clipboard_append(c.room_code)
+        button(row, t('복사', 'Copy'), '#555566', copy).pack(side='left')
+        tk.Label(row, text=f'{len(c.members)}/{buni_chat.MAX_MEMBERS}', bg=B, fg='#CCCCCC',
+                 font=('Consolas', 10)).pack(side='right')
+        colors = {'idle': '#8A8A98', 'working': '#F2BF33', 'done': '#4DC780'}
+        labels = {'idle': t('대기', 'Idle'), 'working': t('작업 중', 'Working'), 'done': t('완료', 'Done')}
+        for m in c.members:
+            r = tk.Frame(self.body, bg=B); r.pack(fill='x', pady=(6, 0))
+            tk.Label(r, text='●', bg=B, fg=colors[m['motion']], font=('Malgun Gothic', 8)).pack(side='left')
+            tk.Label(r, text=m['name'], bg=B, fg='white', font=('Malgun Gothic', 10, 'bold')).pack(side='left', padx=6)
+            tk.Label(r, text=labels[m['motion']], bg=B, fg='#8A8A98', font=('Malgun Gothic', 9)).pack(side='left')
+        button(self.body, t('방 나가기', 'Leave room'), '#DB4D4D',
+               lambda: threading.Thread(target=c.leave, daemon=True).start()).pack(anchor='w', pady=(14, 0))
+
+
+# ══════════════════════════════════════════════════════════════
 class BuniManager:
     """Root application — manages multiple SessionWindows."""
 
@@ -3991,14 +4505,21 @@ class BuniManager:
         # ── 상점·계정 연동·덮개 닫아도 실행 (cloud/awake는 앱으로 실행할 때만 불러온다 —
         #    훅(--hook)은 도구를 부를 때마다 이 파일을 실행하므로 가볍게 둔다)
         import buni_cloud, buni_awake
+        global buni_chat
+        import buni_chat
         self.shop     = buni_shop.ShopStore()
         self.cloud    = buni_cloud.CloudSession(self.shop, t)
+        self.chat     = buni_chat.ChatStore(self.cloud, self.shop, self.persist, t)
+        self._chat_window:  'ChatWindow | None' = None
+        self._chat_lobby:   'ChatLobbyWindow | None' = None
+        self.chat.add_listener(lambda: self._ui(self._on_chat_changed))
         self.awake    = buni_awake.AwakeManager(self.persist, self.root, t)
         self._shop_window: 'ShopWindow | None' = None
         self.shop.add_listener(lambda: self._ui(self._on_shop_changed))
         self.cloud.add_listener(lambda: self._ui(self._on_cloud_changed))
         self.awake.add_listener(lambda: self._ui(self._on_awake_changed))
         self.cloud.start()
+        self.chat.start()
         self.sessions: dict[str, SessionWindow] = {}
         self._slot_map: dict[int, str] = {}
         self._disconnected: set[str] = set()   # 수동으로 끊긴 세션 ID 차단 목록
@@ -4022,6 +4543,7 @@ class BuniManager:
 
         # Poll sessions on main thread
         self._poll_sessions()
+        self.root.after(2000, self._chat_motion_tick)
 
         # System tray
         self._start_tray()
@@ -4135,6 +4657,10 @@ class BuniManager:
     def quit(self):
         try:
             self.awake.restore_on_quit()     # 켜둔 채 꺼지면 덮개를 닫아도 계속 안 자게 된다
+        except Exception:
+            pass
+        try:
+            self.chat.leave_blocking()       # 채팅방 자리를 비운다
         except Exception:
             pass
         try:
@@ -4307,6 +4833,40 @@ class BuniManager:
             sw = next(iter(self.sessions.values()), None)
             char = sw.character if sw else 'rabbit'
         self._shop_window = ShopWindow(self, char)
+
+    # ── 채팅 ──────────────────────────────────────────────────
+
+    def _on_chat_changed(self):
+        """방에 들어가면 채팅 패널을 띄우고, 나오면 내린다."""
+        if self.chat.is_in_room:
+            if not (self._chat_window and self._chat_window.is_open()):
+                self._chat_window = ChatWindow(self)
+        elif self._chat_window:
+            self._chat_window.close()
+            self._chat_window = None
+        if self._chat_lobby and self._chat_lobby.is_open():
+            self._chat_lobby.refresh()
+        self._refresh_tray_menu()
+
+    def open_chat(self):
+        if self._chat_lobby and self._chat_lobby.is_open():
+            self._chat_lobby.show()
+            return
+        self._chat_lobby = ChatLobbyWindow(self)
+
+    def _chat_motion_tick(self):
+        """내 세션들의 상태를 한 가지 모션으로 요약해 채팅방에 알린다.
+        하나라도 작업 중이면 작업 중, 아니면 완료된 세션이 있으면 완료, 그 밖엔 대기.
+        (세션 이름·작업 내용은 보내지 않는다 — 모션만 간다)"""
+        states = [w.state for w in self.sessions.values()]
+        if any(s in SessionWindow.RUNNING_STATES for s in states):
+            motion = 'working'
+        elif any(s == 'completed' for s in states):
+            motion = 'done'
+        else:
+            motion = 'idle'
+        self.chat.set_motion(motion)
+        self.root.after(2000, self._chat_motion_tick)
 
     def cloud_sign_in_ui(self):
         """"다른 PC와 연동" — 어떤 정보가 서버에 저장되는지 먼저 알리고 동의를 받는다."""
@@ -4622,6 +5182,9 @@ class BuniManager:
         def on_shop(icon, item):
             self.root.after(0, self.open_shop)
 
+        def on_chat(icon, item):
+            self.root.after(0, self.open_chat)
+
         def on_reset(icon, item):
             self.root.after(0, lambda: [
                 w._reset_position() for w in self.sessions.values()])
@@ -4646,15 +5209,25 @@ class BuniManager:
             pystray.MenuItem(lambda i: t('⚡ 전체 허용 모드 켜짐 — 클릭하여 끄기',
                                          '⚡ Approve-all is ON — click to turn off'),
                               on_disable_always_approve, visible=_any_always_approve),
+            # 기능별로 묶고, 묶음마다 눌리지 않는 작은 제목을 단다
+            pystray.MenuItem(lambda i: t('부니 화면', 'On screen'), None, enabled=False),
             pystray.MenuItem(lambda i: t('부니 숨기기', 'Hide Buni'),   on_hide, default=True),
             pystray.MenuItem(lambda i: t('부니 불러오기', 'Show Buni'), on_show),
+            pystray.MenuItem(lambda i: t('위치 초기화', 'Reset position'), on_reset),
             pystray.MenuItem(lambda i: t('Claude 열기', 'Open Claude'), on_claude),
-            pystray.MenuItem(lambda i: t('설정...', 'Settings...'),     on_settings),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(lambda i: t('꾸미기 · 함께하기', 'Style & together'), None, enabled=False),
             pystray.MenuItem(lambda i: t(f'🛍 부니 상점  (🪙 {self.shop.coins})',
                                          f'🛍 Buni Shop  (🪙 {self.shop.coins})'), on_shop),
+            pystray.MenuItem(lambda i: (t(f'💬 부니 채팅  (방 {self.chat.room_code})', f'💬 Buni Chat  (room {self.chat.room_code})')
+                                        if self.chat.room_code else t('💬 부니 채팅...', '💬 Buni Chat...')), on_chat),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(lambda i: t('작업 도구', 'Work tools'), None, enabled=False,
+                             visible=lambda i: self.awake.supported),
             pystray.MenuItem(self._awake_menu_title, pystray.Menu(*self._awake_menu_items(pystray)),
                              visible=lambda i: self.awake.supported),
-            pystray.MenuItem(lambda i: t('위치 초기화', 'Reset position'), on_reset),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(lambda i: t('설정...', 'Settings...'),     on_settings),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(lambda i: t('종료', 'Quit'),               on_quit),
         ))

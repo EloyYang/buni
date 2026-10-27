@@ -1,0 +1,80 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$room": {
+        ".validate": "$room.matches(/^[A-Z2-9]{6}$/)",
+        "meta": {
+          ".read": "auth != null",
+          ".write": "auth != null && ((!data.exists() && newData.child('owner').val() === auth.uid) || (data.exists() && data.child('owner').val() === auth.uid && !newData.exists()))",
+          ".validate": "newData.hasChildren(['owner', 'createdAt'])",
+          "owner": {
+            ".validate": "newData.isString()"
+          },
+          "createdAt": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "members": {
+          ".read": "auth != null && root.child('rooms/' + $room + '/meta').exists()",
+          "$uid": {
+            ".write": "auth != null && root.child('rooms/' + $room + '/meta').exists() && (auth.uid === $uid || (data.exists() && !newData.exists() && data.child('seen').val() < now - 90000))",
+            ".validate": "newData.hasChildren(['name', 'char', 'motion', 'seen', 'joined'])",
+            "name": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30"
+            },
+            "char": {
+              ".validate": "newData.isString() && newData.val().length <= 20"
+            },
+            "motion": {
+              ".validate": "newData.val() === 'idle' || newData.val() === 'working' || newData.val() === 'done'"
+            },
+            "seen": {
+              ".validate": "newData.isNumber()"
+            },
+            "joined": {
+              ".validate": "newData.isNumber()"
+            },
+            "level": {
+              ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 9999"
+            },
+            "equip": {
+              "$slot": {
+                ".validate": "newData.isString() && newData.val().length <= 30"
+              }
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "messages": {
+          ".read": "auth != null && root.child('rooms/' + $room + '/members/' + auth.uid).exists()",
+          "$msg": {
+            ".write": "auth != null && ((!data.exists() && newData.exists() && root.child('rooms/' + $room + '/members/' + auth.uid).exists()) || (data.exists() && !newData.exists() && (data.child('uid').val() === auth.uid || (root.child('rooms/' + $room + '/members/' + auth.uid).exists() && data.child('ts').val() < now - 60000))))",
+            ".validate": "newData.hasChildren(['uid', 'name', 'text', 'ts']) && newData.child('uid').val() === auth.uid",
+            "uid": {
+              ".validate": "newData.isString()"
+            },
+            "name": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30"
+            },
+            "text": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 100"
+            },
+            "ts": {
+              ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        }
+      }
+    }
+  }
+}

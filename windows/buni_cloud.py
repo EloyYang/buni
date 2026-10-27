@@ -38,11 +38,18 @@ def _appdata_dir() -> Path:
 # ══════════════════════════════════════════════════════════════
 
 class CloudConfig:
-    def __init__(self, project_id, api_key, client_id, client_secret=None):
+    def __init__(self, project_id, api_key, client_id, client_secret=None, database_url=None):
         self.project_id = project_id
         self.api_key = api_key
         self.client_id = client_id
         self.client_secret = client_secret
+        self.database_url = database_url
+
+    @property
+    def rtdb_base(self) -> str:
+        """채팅(Realtime Database) 기본 주소 — 비어 있으면 기본(미국 리전) 주소."""
+        raw = self.database_url or f'https://{self.project_id}-default-rtdb.firebaseio.com'
+        return raw.rstrip('/')
 
     _loaded = False
     _value = None
@@ -69,7 +76,7 @@ class CloudConfig:
                 d = json.loads(path.read_text(encoding='utf-8'))
                 pid, key, cid = d.get('projectId'), d.get('apiKey'), d.get('googleClientId')
                 if pid and key and cid:
-                    return cls(pid, key, cid, d.get('googleClientSecret') or None)
+                    return cls(pid, key, cid, d.get('googleClientSecret') or None, d.get('databaseURL') or None)
             except Exception:
                 continue
         return None
@@ -576,6 +583,10 @@ class CloudSession:
     def _apply_token(self, token: str, expires_in: float):
         self._id_token = token
         self._id_expiry = time.time() + expires_in - 60       # 만료 1분 전에 미리 갱신
+
+    def valid_id_token(self) -> str:
+        """다른 기능(채팅)이 쓰는 유효한 ID 토큰 — 만료됐으면 먼저 갱신한다."""
+        return self._valid_id_token()
 
     def _valid_id_token(self) -> str:
         if self._id_token and time.time() < self._id_expiry:

@@ -57,6 +57,8 @@ Firebase **프로젝트 설정 → 일반**에서 `프로젝트 ID`와 `웹 API 
 로그인은 부니 설정 창의 **계정 연동**이나 상점 창의 **☁ 다른 PC와 연동** 버튼에서 합니다.
 로그인 정보(갱신 토큰)는 Windows DPAPI로 암호화해 `%APPDATA%\Buni\cloud-token.bin`에 보관합니다.
 
+채팅 기능(Realtime Database)을 쓰려면 [`CHAT.md`](CHAT.md)의 서버 설정도 한 번 해 주세요.
+
 ## 무엇이 저장되나요?
 
 `users/{계정 uid}` 문서 하나에 아래 값만 저장됩니다.

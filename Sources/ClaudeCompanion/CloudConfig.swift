@@ -18,6 +18,15 @@ struct CloudConfig: Decodable {
     let googleClientId: String
     /// 데스크톱(설치형 앱) 클라이언트는 토큰 교환에 이 값을 요구한다. 비어 있으면 생략한다.
     let googleClientSecret: String?
+    /// 채팅(Realtime Database)이 쓰는 주소. 비어 있으면 기본 주소(미국 리전)를 쓴다.
+    /// 리전을 서울 가까이(싱가포르 등)로 만들었다면 그 주소를 적는다.
+    let databaseURL: String?
+
+    /// Realtime Database 기본 주소 (끝의 / 없음)
+    var rtdbBase: String {
+        let raw = (databaseURL?.isEmpty == false) ? databaseURL! : "https://\(projectId)-default-rtdb.firebaseio.com"
+        return raw.hasSuffix("/") ? String(raw.dropLast()) : raw
+    }
 
     static let shared: CloudConfig? = load()
 

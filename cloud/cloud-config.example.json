@@ -2,5 +2,6 @@
   "projectId": "your-firebase-project-id",
   "apiKey": "AIza...Firebase 웹 API 키...",
   "googleClientId": "123456789012-abcdefg.apps.googleusercontent.com",
-  "googleClientSecret": "GOCSPX-...데스크톱 클라이언트 보안 비밀..."
+  "googleClientSecret": "GOCSPX-...데스크톱 클라이언트 보안 비밀...",
+  "databaseURL": "https://your-project-default-rtdb.asia-southeast1.firebasedatabase.app"
 }
