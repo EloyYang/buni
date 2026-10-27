@@ -61,4 +61,4 @@ macOS 설치만 할 때: `./build_app.sh --install`
 
 ## 현재 버전
 
-1.5.0
+1.7.0

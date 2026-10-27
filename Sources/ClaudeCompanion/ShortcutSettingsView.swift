@@ -120,6 +120,7 @@ struct ShortcutSettingsView: View {
             content
         }
         .frame(minWidth: 380, minHeight: 360)
+        .background(Color(red: 0.12, green: 0.12, blue: 0.14))
     }
 
     private var content: some View {
@@ -190,8 +191,8 @@ struct ShortcutSettingsView: View {
             }
         }
         .padding(20)
-        .frame(width: 340, height: 290)
-        .background(Color(red: 0.12, green: 0.12, blue: 0.14))
+        // 높이를 고정하면 항목이 많을 때 아래 구역이 위 구역(단축키 칸) 위로 겹쳐 가린다 — 내용 높이대로 두고 스크롤한다
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .onChange(of: store.approve)       { _ in store.save() }
         .onChange(of: store.alwaysApprove) { _ in store.save() }
         .onChange(of: store.deny)          { _ in store.save() }

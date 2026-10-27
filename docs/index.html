@@ -308,6 +308,78 @@
   .wander-demo .bunny-stage svg.bunny.hop-once{ animation:microhop 0.6s ease-out 1; }
   .wander-caption{ position:absolute; right:8px; bottom:6px; font-family:var(--font-pixel); font-size:0.5rem; color:var(--muted); }
 
+
+  /* ── 상점 · 덮개 · 연동 · 채팅 미리보기 (기능 카드 마우스오버) ── */
+  .feature[data-demo="chat"]:hover .feature-demo{ max-height:190px; }
+  .mini-pill{ font-size:0.62rem; font-weight:700; border-radius:999px; padding:3px 9px; white-space:nowrap; transition:background .2s, color .2s; }
+
+  .shop-demo{ display:flex; align-items:center; gap:14px; padding-top:8px; }
+  .shop-demo .sd-stage{ flex:0 0 auto; width:56px; height:62px; }
+  .shop-demo svg.bunny{ width:56px; height:62px; overflow:visible; animation:none; }
+  .shop-demo .sd-side{ display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .sd-coins{ font-family:var(--font-mono); font-size:0.72rem; color:var(--muted); }
+  .sd-coins b{ color:#f2cc26; font-size:0.85rem; }
+  .sd-item{ font-size:0.74rem; font-weight:700; color:var(--ink); white-space:nowrap; }
+  .sd-item small{ color:var(--muted); font-weight:500; margin-left:4px; }
+  .sd-pill{ align-self:flex-start; background:#2f6fd6; color:#fff; }
+  .sd-pill.bought{ background:#2e9e56; }
+
+  .awake-demo{ display:flex; align-items:center; gap:14px; padding-top:8px; }
+  .awake-demo svg.laptop{ flex:0 0 auto; width:84px; height:58px; overflow:visible; }
+  .awake-demo .aw-lid{ transform-box:fill-box; transform-origin:50% 100%; transition:transform .55s cubic-bezier(.4,0,.2,1); }
+  .awake-demo.closed .aw-lid{ transform:scaleY(0.1); }
+  .awake-demo .aw-glow{ transition:opacity .4s; }
+  .awake-demo.closed .aw-glow{ opacity:0; }
+  .aw-side{ display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .aw-status{ display:flex; align-items:center; gap:6px; font-size:0.72rem; font-weight:700; color:var(--ink); }
+  .aw-dot{ width:8px; height:8px; border-radius:50%; background:#6bbf59; box-shadow:0 0 0 0 rgba(107,191,89,.6); }
+  .awake-demo.closed .aw-dot{ animation:awpulse 1.2s ease-out infinite; }
+  @keyframes awpulse{ 0%{ box-shadow:0 0 0 0 rgba(107,191,89,.6); } 100%{ box-shadow:0 0 0 7px rgba(107,191,89,0); } }
+  .aw-time{ font-family:var(--font-mono); font-size:0.72rem; color:var(--muted); }
+  .aw-time b{ color:#e8c34a; font-size:0.85rem; }
+
+  .sync-demo{ display:flex; align-items:center; justify-content:space-between; gap:6px; padding-top:8px; }
+  .sync-dev{ flex:1 1 0; background:rgba(255,255,255,0.05); border:1px solid var(--line); border-radius:10px; padding:7px 8px; text-align:center; transition:border-color .3s, background .3s; }
+  .sync-dev .sy-name{ font-size:0.62rem; color:var(--muted); }
+  .sync-dev .sy-val{ font-family:var(--font-mono); font-size:0.7rem; color:var(--ink); margin-top:2px; white-space:nowrap; }
+  .sync-dev .sy-val b{ color:#f2cc26; }
+  .sync-dev.empty .sy-val{ opacity:.35; }
+  .sync-dev.filled{ border-color:#2e9e56; background:rgba(46,158,86,0.10); }
+  .sync-link{ flex:0 0 auto; width:44px; height:18px; position:relative; }
+  .sync-link::before{ content:""; position:absolute; left:2px; right:2px; top:8px; border-top:2px dashed #3a4150; }
+  .sync-link i{ position:absolute; top:4px; left:0; width:10px; height:10px; border-radius:50%; background:#6bbf59; opacity:0; }
+  .sync-demo.go .sync-link i{ animation:syncdot .7s ease-in-out 1 forwards; }
+  @keyframes syncdot{ 0%{ left:0; opacity:1; } 90%{ opacity:1; } 100%{ left:34px; opacity:0; } }
+  .sync-badge{ font-size:0.6rem; color:#6bbf59; font-weight:700; margin-top:6px; min-height:1em; }
+
+  .chat-demo{ display:flex; justify-content:space-between; gap:6px; padding-top:6px; }
+  .chat-col{ flex:1 1 0; display:flex; flex-direction:column; align-items:center; gap:2px; min-width:0; }
+  .chat-slot{ height:46px; width:100%; position:relative; }
+  .chat-bubble{
+    position:absolute; left:50%; bottom:4px; transform:translateX(-50%) scale(.9); opacity:0;
+    background:#fff; color:#222; font-size:9px; line-height:1.3; border-radius:8px; padding:4px 6px;
+    width:max-content; max-width:92px; text-align:center; box-shadow:0 3px 8px rgba(0,0,0,.3);
+    transition:opacity .2s, transform .2s;
+  }
+  .chat-bubble::after{ content:""; position:absolute; left:50%; bottom:-4px; margin-left:-4px; border:4px solid transparent; border-bottom:0; border-top-color:#fff; }
+  .chat-bubble.show{ opacity:1; transform:translateX(-50%) scale(1); }
+  .chat-col svg.bunny{ width:34px; height:38px; overflow:visible; animation:none; }
+  .chat-tag{ height:18px; display:flex; align-items:center; justify-content:center; width:100%; }
+  .chat-tag .nt{ font-size:9px; font-weight:700; color:#fff; background:rgba(0,0,0,.45); border-radius:999px; padding:1px 6px; white-space:nowrap; }
+  .chat-tag .nt.me{ background:#2f6fd6; }
+  .chat-tag .nt em{ font-style:normal; color:#ffd966; font-size:7px; margin-right:3px; }
+  .chat-tag .inp{
+    display:none; align-items:center; gap:3px; width:92px; height:18px; padding:0 6px;
+    background:#17171c; border:2px solid #2f6fd6; border-radius:999px; box-shadow:0 0 6px rgba(47,111,214,.7);
+    font-size:9px; color:#fff; white-space:nowrap; overflow:hidden;
+  }
+  .chat-tag .inp .ic{ color:#6fa3ff; font-size:8px; }
+  .chat-tag .inp .tx{ flex:1; overflow:hidden; text-align:left; }
+  .chat-tag .inp .cr{ color:rgba(255,255,255,.45); font-weight:700; }
+  .chat-tag.typing .nt{ display:none; }
+  .chat-tag.typing .inp{ display:flex; }
+  .chat-room-cap{ text-align:center; font-family:var(--font-mono); font-size:0.62rem; color:var(--muted); margin-top:4px; }
+
   /* ── download ────────────────────────────────────── */
   .download-panel{
     background:linear-gradient(160deg, var(--surface), var(--surface-2));
@@ -646,10 +718,10 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     { title:'권한 요청 버블', titleEn:'Permission bubble', desc:'도구 실행 허가가 필요하면 당근을 들고 물어봐요. 허용 · 전체 허용 · 거부.', descEn:'When a tool needs approval, Buni holds up a carrot and asks. Allow · Allow all · Deny.', icon:'carrot', demo:'permission' },
     { title:'토큰 얼마나 남았지?', titleEn:'How much do I have left?', desc:'"지금 얼마나 썼지? 언제 다시 넉넉해지지?" — 터미널 안 보고도 한눈에 확인.', descEn:'"How much have I used? When do I get more?" — see it at a glance, no terminal required.', icon:'gauge', demo:'usage' },
     { title:'캐릭터 6종', titleEn:'6 characters', desc:'세션마다 다른 토끼를 배정해 한눈에 구분.', descEn:'Each session gets a different rabbit, so you can tell them apart at a glance.', icon:'chars', demo:'chars' },
-    { title:'부니 상점', titleEn:'Buni Shop', desc:'작업이 끝날 때마다 코인이 쌓여요. 모자·옷·날개, 검과 지팡이까지 — 캐릭터마다 따로 꾸미고, 사기 전에 입어볼 수도 있어요.', descEn:'Every finished task earns coins. Hats, outfits, wings, swords and staffs — dress each rabbit separately, and try things on before you buy.', icon:'shop', badge:true },
-    { title:'덮개 닫아도 계속 실행', titleEn:'Keep running, lid closed', desc:'노트북 덮개를 닫아도 Claude가 계속 일해요. 시간을 정하거나 시간대를 예약하면 알아서 켜고 꺼져요.', descEn:'Close the lid and Claude keeps working. Pick a duration or schedule it — it switches itself on and off.', icon:'awake', badge:true },
-    { title:'다른 PC와 연동', titleEn:'Sync across PCs', desc:'선택 사항이에요. Google로 로그인하면 코인·아이템·레벨이 다른 PC에서도 그대로 이어져요. 안 해도 모든 기능을 쓸 수 있어요.', descEn:'Optional. Sign in with Google and your coins, items and level follow you to other PCs. Everything works without it.', icon:'sync', badge:true },
-    { title:'함께 모여 채팅', titleEn:'Chat together', desc:'방 코드로 최대 5명이 모여 말풍선으로 대화해요. 채팅용 부니는 내 세션 상태에 맞춰 작업 중·완료 모션만 보여줘요.', descEn:'Up to 5 people join a room with a code and chat in speech bubbles. Your chat rabbit just mirrors whether your sessions are working or done — nothing more.', icon:'chat', badge:true },
+    { title:'부니 상점', titleEn:'Buni Shop', desc:'작업이 끝날 때마다 코인이 쌓여요. 모자·옷·날개, 검과 지팡이까지 — 캐릭터마다 따로 꾸미고, 사기 전에 입어볼 수도 있어요.', descEn:'Every finished task earns coins. Hats, outfits, wings, swords and staffs — dress each rabbit separately, and try things on before you buy.', icon:'shop', demo:'shop', badge:true },
+    { title:'덮개 닫아도 계속 실행', titleEn:'Keep running, lid closed', desc:'노트북 덮개를 닫아도 Claude가 계속 일해요. 시간을 정하거나 시간대를 예약하면 알아서 켜고 꺼져요.', descEn:'Close the lid and Claude keeps working. Pick a duration or schedule it — it switches itself on and off.', icon:'awake', demo:'awake', badge:true },
+    { title:'다른 PC와 연동', titleEn:'Sync across PCs', desc:'선택 사항이에요. Google로 로그인하면 코인·아이템·레벨이 다른 PC에서도 그대로 이어져요. 안 해도 모든 기능을 쓸 수 있어요.', descEn:'Optional. Sign in with Google and your coins, items and level follow you to other PCs. Everything works without it.', icon:'sync', demo:'sync', badge:true },
+    { title:'함께 모여 채팅', titleEn:'Chat together', desc:'방 코드로 최대 5명이 모여 말풍선으로 대화해요. 채팅용 부니는 내 세션 상태에 맞춰 작업 중·완료 모션만 보여줘요.', descEn:'Up to 5 people join a room with a code and chat in speech bubbles. Your chat rabbit just mirrors whether your sessions are working or done — nothing more.', icon:'chat', demo:'chat', badge:true },
     { title:'딴짓 방해모드', titleEn:'Nag mode', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', descEn:"If you're idle too long, Buni hops around your screen nagging you back to work.", icon:'wander', demo:'wander' },
     { title:'SSH Remote 지원', titleEn:'SSH remote support', desc:'VS Code(Cursor 포함)로 원격 서버에 붙어도 상태가 그대로 도착해요.', descEn:'Connect to a remote server via VS Code (or Cursor) — status still comes through.', icon:'ssh' },
   ];
@@ -725,6 +797,55 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
             '<div class="wander-caption" id="wanderCaption-'+fi+'">깡총깡총…</div>' +
           '</div>' +
         '</div>';
+    } else if(f.demo === 'shop'){
+      demoHtml =
+        '<div class="feature-demo">' +
+          '<div class="shop-demo">' +
+            '<div class="sd-stage"><svg class="bunny" id="shopBunny-'+fi+'" viewBox="0 0 70 78"></svg></div>' +
+            '<div class="sd-side">' +
+              '<div class="sd-coins">🪙 <b id="sdCoins-'+fi+'">1,240</b></div>' +
+              '<div class="sd-item" id="sdItem-'+fi+'">&nbsp;</div>' +
+              '<span class="mini-pill sd-pill" id="sdPill-'+fi+'">&nbsp;</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    } else if(f.demo === 'awake'){
+      demoHtml =
+        '<div class="feature-demo">' +
+          '<div class="awake-demo" id="awakeDemo-'+fi+'">' +
+            '<svg class="laptop" viewBox="0 0 84 58">' +
+              '<g class="aw-lid"><rect x="12" y="2" width="60" height="38" rx="4" fill="#c7cbd4"/><rect x="16" y="6" width="52" height="30" rx="2" fill="#20242c"/>' +
+                '<g class="aw-glow"><rect x="16" y="6" width="52" height="30" rx="2" fill="#2a3b55"/><rect x="21" y="12" width="26" height="3" rx="1.5" fill="#6bbf59"/><rect x="21" y="19" width="34" height="3" rx="1.5" fill="#8b93a6"/><rect x="21" y="26" width="18" height="3" rx="1.5" fill="#8b93a6"/></g></g>' +
+              '<rect x="4" y="40" width="76" height="6" rx="3" fill="#a7acb8"/><rect x="34" y="41" width="16" height="2" rx="1" fill="#82868f"/>' +
+            '</svg>' +
+            '<div class="aw-side">' +
+              '<div class="aw-status"><span class="aw-dot"></span><span id="awStatus-'+fi+'">&nbsp;</span></div>' +
+              '<div class="aw-time"><span id="awLeft-'+fi+'"></span> <b id="awClock-'+fi+'">2:00:00</b></div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    } else if(f.demo === 'sync'){
+      demoHtml =
+        '<div class="feature-demo">' +
+          '<div class="sync-demo" id="syncDemo-'+fi+'">' +
+            '<div class="sync-dev filled" id="syncA-'+fi+'"><div class="sy-name">Mac</div><div class="sy-val">🪙 <b>1,240</b> · Lv.3</div></div>' +
+            '<div class="sync-link"><i></i></div>' +
+            '<div class="sync-dev empty" id="syncB-'+fi+'"><div class="sy-name">Windows</div><div class="sy-val" id="syncBVal-'+fi+'">🪙 <b>0</b> · Lv.1</div></div>' +
+          '</div>' +
+          '<div class="sync-badge" id="syncBadge-'+fi+'"></div>' +
+        '</div>';
+    } else if(f.demo === 'chat'){
+      var cm = [['Lv.7','민지','Min','rabbit',0,true],['Lv.4','Bob','Bob','brownRabbit',3,false],['Lv.5','Cat','Cat','pinkRabbit',2,false]];
+      var colsHtml = cm.map(function(m, mi){
+        return '<div class="chat-col">' +
+          '<div class="chat-slot"><div class="chat-bubble" id="chatBub-'+fi+'-'+mi+'"></div></div>' +
+          '<svg class="bunny" id="chatBunny-'+fi+'-'+mi+'" viewBox="0 0 70 78"></svg>' +
+          '<div class="chat-tag" id="chatTag-'+fi+'-'+mi+'">' +
+            '<span class="nt'+(m[5]?' me':'')+'"><em>'+m[0]+'</em><span id="chatName-'+fi+'-'+mi+'">'+m[1]+'</span></span>' +
+            (m[5] ? '<span class="inp"><span class="ic">💬</span><span class="tx" id="chatTx-'+fi+'"></span><span class="cr">↵</span></span>' : '') +
+          '</div></div>';
+      }).join('');
+      demoHtml = '<div class="feature-demo"><div class="chat-demo">'+colsHtml+'</div><div class="chat-room-cap" id="chatCap-'+fi+'">🏠 SM2GNY · 3/5</div></div>';
     } else if(f.demo === 'usage'){
       demoHtml =
         '<div class="feature-demo">' +
@@ -774,6 +895,150 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
         wDemo.classList.remove('wandering');
         wStage.style.left = '6px';
       });
+    } else if(f.demo === 'shop'){
+      (function(){
+        var sBunny = document.getElementById('shopBunny-'+fi);
+        var sCoins = document.getElementById('sdCoins-'+fi);
+        var sItem  = document.getElementById('sdItem-'+fi);
+        var sPill  = document.getElementById('sdPill-'+fi);
+        var ITEMS = [
+          { ko:'황금 왕관', en:'Golden crown', price:300, draw:function(svg){
+              ['-1.15','0','1.15'].forEach(function(x){ svg.appendChild(partRect('', +x, -2.95, 0.55, 0.6, '#f2cc26')); });
+              svg.appendChild(partRect('', 0, -2.5, 3.0, 0.55, '#f2cc26'));
+              svg.appendChild(partRect('', 0, -2.5, 0.5, 0.35, '#e2603f')); } },
+          { ko:'동그란 안경', en:'Round glasses', price:50, draw:function(svg){
+              [-1.4, 1.4].forEach(function(x){
+                var r = partRect('', x, -0.9, 1.25, 1.2, 'none');
+                r.setAttribute('stroke', '#2a2a30'); r.setAttribute('stroke-width', '1.8'); svg.appendChild(r); });
+              svg.appendChild(partRect('', 0, -0.9, 0.7, 0.2, '#2a2a30')); } },
+          { ko:'빨간 망토', en:'Red cape', price:90, draw:function(svg){
+              svg.insertBefore(partRect('', 0, 1.7, 6.4, 3.8, '#d9463b'), svg.firstChild); } }
+        ];
+        var sTimers = [], sCoinVal = 1240;
+        function show(i, bought){
+          var it = ITEMS[i];
+          buildRabbitFull(sBunny, CHARACTERS[0]);
+          if(bought !== null) it.draw(sBunny);
+          sItem.innerHTML = (LANG === 'en' ? it.en : it.ko) + '<small>🪙 ' + it.price + '</small>';
+        }
+        function pill(text, ok){ sPill.textContent = text; sPill.classList.toggle('bought', !!ok); }
+        function reset(){
+          sTimers.forEach(clearTimeout); sTimers = [];
+          sCoinVal = 1240; sCoins.textContent = '1,240';
+          buildRabbitFull(sBunny, CHARACTERS[0]);
+          sItem.innerHTML = '&nbsp;'; pill(' ', false);
+        }
+        function cycle(i){
+          var it = ITEMS[i % ITEMS.length];
+          show(i % ITEMS.length, false);
+          pill(LANG === 'en' ? 'Try on' : '입어보기', false);
+          sTimers.push(setTimeout(function(){
+            sCoinVal -= it.price; sCoins.textContent = sCoinVal.toLocaleString('en-US');
+            pill(LANG === 'en' ? 'Bought ✓' : '구매 완료 ✓', true);
+          }, 1000));
+          sTimers.push(setTimeout(function(){
+            if((i + 1) % ITEMS.length === 0){ sCoinVal = 1240; sCoins.textContent = '1,240'; }
+            cycle(i + 1);
+          }, 2100));
+        }
+        reset();
+        el.addEventListener('mouseenter', function(){
+          if(reduceMotion){ show(0, false); pill(LANG === 'en' ? 'Try on' : '입어보기', false); return; }
+          cycle(0);
+        });
+        el.addEventListener('mouseleave', reset);
+        buildRabbitFull(sBunny, CHARACTERS[0]);
+      })();
+    } else if(f.demo === 'awake'){
+      (function(){
+        var wDemo = document.getElementById('awakeDemo-'+fi);
+        var wStatus = document.getElementById('awStatus-'+fi);
+        var wLeft = document.getElementById('awLeft-'+fi);
+        var wClock = document.getElementById('awClock-'+fi);
+        var wTimers = [], wTick = null, secs = 7200;
+        function fmt(n){ var h = Math.floor(n/3600), m = Math.floor(n%3600/60), s = n%60; return h+':'+(m<10?'0':'')+m+':'+(s<10?'0':'')+s; }
+        function labels(){
+          var closed = wDemo.classList.contains('closed');
+          wStatus.textContent = closed ? (LANG === 'en' ? 'Lid closed · still working' : '덮개 닫힘 · 계속 작업 중')
+                                       : (LANG === 'en' ? 'Lid open' : '덮개 열림');
+          wLeft.textContent = LANG === 'en' ? 'time left' : '남은 시간';
+        }
+        function reset(){
+          wTimers.forEach(clearTimeout); wTimers = []; clearInterval(wTick);
+          wDemo.classList.remove('closed'); secs = 7200; wClock.textContent = fmt(secs); labels();
+        }
+        reset();
+        el.addEventListener('mouseenter', function(){
+          if(reduceMotion){ wDemo.classList.add('closed'); labels(); return; }
+          wTimers.push(setTimeout(function(){
+            wDemo.classList.add('closed'); labels();
+            wTick = setInterval(function(){ secs -= 1; wClock.textContent = fmt(secs); }, 1000);
+          }, 700));
+        });
+        el.addEventListener('mouseleave', reset);
+      })();
+    } else if(f.demo === 'sync'){
+      (function(){
+        var yDemo = document.getElementById('syncDemo-'+fi);
+        var yB = document.getElementById('syncB-'+fi);
+        var yVal = document.getElementById('syncBVal-'+fi);
+        var yBadge = document.getElementById('syncBadge-'+fi);
+        var yTimers = [];
+        function filled(){
+          yB.classList.remove('empty'); yB.classList.add('filled');
+          yVal.innerHTML = '🪙 <b>1,240</b> · Lv.3';
+          yBadge.textContent = LANG === 'en' ? '✓ Signed in with Google — synced' : '✓ Google 로그인 · 연동됨';
+        }
+        function reset(){
+          yTimers.forEach(clearTimeout); yTimers = [];
+          yDemo.classList.remove('go');
+          yB.classList.add('empty'); yB.classList.remove('filled');
+          yVal.innerHTML = '🪙 <b>0</b> · Lv.1'; yBadge.textContent = '';
+        }
+        reset();
+        el.addEventListener('mouseenter', function(){
+          if(reduceMotion){ filled(); return; }
+          yBadge.textContent = LANG === 'en' ? 'Syncing…' : '연동 중…';
+          yDemo.classList.add('go');
+          yTimers.push(setTimeout(filled, 650));
+        });
+        el.addEventListener('mouseleave', reset);
+      })();
+    } else if(f.demo === 'chat'){
+      (function(){
+        var CM = [CHARACTERS[0], CHARACTERS[1], CHARACTERS[2]];
+        CM.forEach(function(ch, mi){ buildRabbitFull(document.getElementById('chatBunny-'+fi+'-'+mi), ch); });
+        var tag = document.getElementById('chatTag-'+fi+'-0');
+        var tx  = document.getElementById('chatTx-'+fi);
+        var bubs = [0,1,2].map(function(mi){ return document.getElementById('chatBub-'+fi+'-'+mi); });
+        var cTimers = [];
+        function later(fn, ms){ cTimers.push(setTimeout(fn, ms)); }
+        function say(mi, text, ms){ bubs[mi].textContent = text; bubs[mi].classList.add('show'); later(function(){ bubs[mi].classList.remove('show'); }, ms); }
+        function reset(){
+          cTimers.forEach(clearTimeout); cTimers = [];
+          tag.classList.remove('typing'); tx.textContent = '';
+          bubs.forEach(function(b){ b.classList.remove('show'); });
+        }
+        function run(){
+          var mine = LANG === 'en' ? 'Review pls!' : '리뷰 부탁!';
+          var bob  = LANG === 'en' ? 'On it 👍' : '보는 중이에요 👍';
+          var cat  = LANG === 'en' ? 'Deployed!' : '배포 끝!';
+          // 1) 말하기 — 닉네임 자리에 입력칸이 나온다
+          tag.classList.add('typing'); tx.textContent = '';
+          for(var c = 1; c <= mine.length; c++){ (function(n){ later(function(){ tx.textContent = mine.slice(0, n); }, 350 + n*85); })(c); }
+          var t1 = 350 + mine.length*85 + 450;
+          // 2) 보내면 입력칸이 닉네임으로 돌아가고 말풍선이 뜬다
+          later(function(){ tag.classList.remove('typing'); say(0, mine, 1800); }, t1);
+          later(function(){ say(1, bob, 1500); }, t1 + 1100);
+          later(function(){ say(2, cat, 1300); }, t1 + 2200);
+          later(run, t1 + 3900);
+        }
+        el.addEventListener('mouseenter', function(){
+          if(reduceMotion){ say(0, LANG === 'en' ? 'Review pls!' : '리뷰 부탁!', 600000); return; }
+          run();
+        });
+        el.addEventListener('mouseleave', reset);
+      })();
     } else if(f.demo === 'usage'){
       var uSegs = document.getElementById('udSegs-'+fi);
       var uTotal = 10, uFilled = 6; // 예시: 62% 사용 = 38% 남음
