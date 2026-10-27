@@ -3,6 +3,7 @@ name: Build Windows Installer
 on:
   release:
     types: [published]
+  workflow_dispatch:          # 릴리스 후 Windows 빌드만 다시 돌릴 때 (VERSION 파일의 버전 릴리스에 올린다)
 
 jobs:
   build:
@@ -37,7 +38,8 @@ jobs:
         run: |
           if [ -n "$BUNI_CLOUD_CONFIG" ]; then
             printf '%s' "$BUNI_CLOUD_CONFIG" > cloud-config.json
-            echo "DATA=--add-data cloud-config.json;." >> $GITHUB_OUTPUT
+            # PowerShell 에서 ; 는 명령 구분자라 따옴표로 감싸야 한다
+            echo 'DATA=--add-data "cloud-config.json;."' >> $GITHUB_OUTPUT
           else
             echo "DATA=" >> $GITHUB_OUTPUT
           fi
@@ -64,6 +66,7 @@ jobs:
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
           files: |
             windows/Buni-Windows-Setup-${{ steps.version.outputs.VERSION }}.exe
             dist/Buni-Windows.exe
