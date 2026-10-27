@@ -8,8 +8,9 @@ final class HotkeyMonitor {
     var onDeny:          (() -> Void)?
     var onHide:          (() -> Void)?
     var onAlwaysApprove: (() -> Void)?
+    var onChat:          (() -> Void)?
 
-    private enum Slot: UInt32 { case approve = 1, deny = 2, hide = 3, alwaysApprove = 4 }
+    private enum Slot: UInt32 { case approve = 1, deny = 2, hide = 3, alwaysApprove = 4, chat = 5 }
 
     private var refs:       [Slot: EventHotKeyRef] = [:]
     private var handlerRef: EventHandlerRef?
@@ -18,6 +19,7 @@ final class HotkeyMonitor {
     private var currentDeny:          KeyShortcut?
     private var currentHide:          KeyShortcut?
     private var currentAlwaysApprove: KeyShortcut?
+    private var currentChat:          KeyShortcut?
     private var inPermissionState = false
 
     init() { installHandler() }
@@ -30,11 +32,12 @@ final class HotkeyMonitor {
     // MARK: - Public
 
     func updateShortcuts(approve: KeyShortcut?, deny: KeyShortcut?, hide: KeyShortcut?,
-                         alwaysApprove: KeyShortcut? = nil) {
+                         alwaysApprove: KeyShortcut? = nil, chat: KeyShortcut? = nil) {
         currentApprove       = approve
         currentDeny          = deny
         currentHide          = hide
         currentAlwaysApprove = alwaysApprove
+        currentChat          = chat
         sync()
     }
 
@@ -50,6 +53,8 @@ final class HotkeyMonitor {
     private func sync() {
         // hide: 항상 활성
         register(slot: .hide, shortcut: currentHide)
+        // chat: 항상 활성 (채팅방에 있을 때만 입력창이 열린다)
+        register(slot: .chat, shortcut: currentChat)
         // approve/deny/alwaysApprove: 권한 버블이 보일 때만 활성
         register(slot: .approve,       shortcut: inPermissionState ? currentApprove       : nil)
         register(slot: .deny,          shortcut: inPermissionState ? currentDeny          : nil)
@@ -112,6 +117,7 @@ final class HotkeyMonitor {
             case .deny:          self.onDeny?()
             case .hide:          self.onHide?()
             case .alwaysApprove: self.onAlwaysApprove?()
+            case .chat:          self.onChat?()
             case nil:            break
             }
         }

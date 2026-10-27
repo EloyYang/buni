@@ -10,6 +10,7 @@
 """
 import json
 import random
+import socket
 import threading
 import time
 import urllib.error
@@ -177,6 +178,9 @@ class Stream:
             try:
                 req = urllib.request.Request(url, headers={'Accept': 'text/event-stream'})
                 self._resp = urllib.request.urlopen(req, timeout=120)       # 서버가 30초마다 keep-alive를 보낸다
+                if self._stop.is_set():                                       # 연결되는 사이에 이미 끝내라고 했다
+                    _close_quietly(self._resp)
+                    return
                 event = ''
                 for raw in self._resp:
                     if self._stop.is_set():
@@ -205,12 +209,24 @@ class Stream:
         threading.Thread(target=run, daemon=True).start()
 
     def stop(self):
+        """기다리지 않고 바로 돌아온다 — 연결은 뒤에서 닫는다.
+        (읽는 중인 응답을 곧바로 close() 하면 서버에서 다음 데이터가 올 때까지 막혀서 '나가기'가 한참 걸렸다)"""
         self._stop.set()
-        try:
-            if self._resp:
-                self._resp.close()
-        except Exception:
-            pass
+        resp = self._resp
+        if resp is not None:
+            threading.Thread(target=_close_quietly, args=(resp,), daemon=True).start()
+
+
+def _close_quietly(resp):
+    """소켓을 먼저 끊어서 읽기 대기를 깨운 뒤 응답을 닫는다."""
+    try:
+        resp.fp.raw._sock.shutdown(socket.SHUT_RDWR)
+    except Exception:
+        pass
+    try:
+        resp.close()
+    except Exception:
+        pass
 
 
 # ══════════════════════════════════════════════════════════════

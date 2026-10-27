@@ -912,6 +912,7 @@ class ShortcutSettingsWindow:
         ('always_approve', (t('전체 허용', 'Allow all'),     'Approve all')),
         ('deny',           ('권한 거부',     'Deny')),
         ('hide',           ('숨기기/보이기', 'Hide / show')),
+        ('chat',           ('채팅 입력',     'Chat input')),
     ]
 
     def __init__(self, parent: tk.Tk, persist: 'PersistenceManager',
@@ -930,12 +931,13 @@ class ShortcutSettingsWindow:
     # ── 저장/불러오기 ─────────────────────────────────────
     def _load(self):
         saved = self._persist.get('shortcuts', {})
-        defaults = {'approve': (GlobalHotkeyManager.MOD_CTRL, 0x0D)}  # Ctrl+Enter
+        defaults = {'approve': (GlobalHotkeyManager.MOD_CTRL, 0x0D),                                   # Ctrl+Enter
+                    'chat': (GlobalHotkeyManager.MOD_CTRL | GlobalHotkeyManager.MOD_ALT, 0x43)}        # Ctrl+Alt+C
         for action, _ in self.ACTIONS:
             v = saved.get(action)
             if v:
                 self._shortcuts[action] = (v['mods'], v['vk'])
-            elif action in defaults:
+            elif action in defaults and (action == 'approve' or action not in saved):   # 채팅은 지운 걸 되살리지 않는다
                 self._shortcuts[action] = defaults[action]
             else:
                 self._shortcuts[action] = None
@@ -4014,6 +4016,22 @@ class ChatAvatar(ShopPreview):
             self.blinking = True
 
 
+def draw_name_tag(cv, cx, y, name, me, level=1):
+    """이름표 — 'Lv.N 닉네임' 알약. 배경은 레벨·닉네임 글자 둘 다의 아래에 깐다."""
+    lv = cv.create_text(0, y, text=f'Lv.{level}', font=('Malgun Gothic', 7, 'bold'), fill='#FFD966', anchor='w')
+    tid = cv.create_text(0, y, text=name, font=('Malgun Gothic', 8, 'bold'), fill='white', anchor='w')
+    lw = cv.bbox(lv)[2] - cv.bbox(lv)[0]
+    nw = cv.bbox(tid)[2] - cv.bbox(tid)[0]
+    left = cx - (lw + 4 + nw) / 2
+    cv.coords(lv, left, y)
+    cv.coords(tid, left + lw + 4, y)
+    x0, y0, x1, y1 = cv.bbox(lv, tid)
+    pill = cv.create_polygon(
+        [x0-6, y0, x1+6, y0, x1+8, y0+2, x1+8, y1-2, x1+6, y1, x0-6, y1, x0-8, y1-2, x0-8, y0+2],
+        smooth=True, fill='#3377E0' if me else '#2E2E36', outline='')
+    cv.tag_lower(pill, lv)           # lv가 tid보다 아래에 있으므로 lv 기준으로 내린다
+
+
 class ChatWindow:
     """방 안에서 화면 아래쪽에 뜨는 채팅 패널 — 사람마다 부니 한 마리, 머리 위에 말풍선."""
 
@@ -4158,19 +4176,7 @@ class ChatWindow:
         self._controls()
 
     def _name_tag(self, cx, cy, name, me, level=1):
-        y = cy + self.NAME_DY
-        lv = self.cv.create_text(0, y, text=f'Lv.{level}', font=('Malgun Gothic', 7, 'bold'), fill='#FFD966', anchor='w')
-        tid = self.cv.create_text(0, y, text=name, font=('Malgun Gothic', 8, 'bold'), fill='white', anchor='w')
-        lw = self.cv.bbox(lv)[2] - self.cv.bbox(lv)[0]
-        nw = self.cv.bbox(tid)[2] - self.cv.bbox(tid)[0]
-        left = cx - (lw + 4 + nw) / 2
-        self.cv.coords(lv, left, y)
-        self.cv.coords(tid, left + lw + 4, y)
-        x0, y0, x1, y1 = self.cv.bbox(lv, tid)
-        pill = self.cv.create_polygon(
-            [x0-6, y0, x1+6, y0, x1+8, y0+2, x1+8, y1-2, x1+6, y1, x0-6, y1, x0-8, y1-2, x0-8, y0+2],
-            smooth=True, fill='#3377E0' if me else '#2E2E36', outline='')
-        self.cv.tag_lower(pill, lv)           # 배경은 레벨·닉네임 글자 둘 다의 아래로 (lv가 tid보다 아래라 lv 기준)
+        draw_name_tag(self.cv, cx, cy + self.NAME_DY, name, me, level)
 
     def _bubble(self, cx, oy, text):
         # 글자 수만큼만 감싼다 — 줄임표 없이 전부 보이고, 짧으면 말풍선도 짧아진다
@@ -4297,6 +4303,7 @@ class ChatWindow:
     def open_input(self):
         """내 닉네임 자리에 작은 입력칸이 겹쳐 뜬다 — 캐릭터는 그대로, 입력이 없으면 닉네임으로 돌아온다."""
         if self._input and self._input.winfo_exists():
+            self._input_touched = time.time()
             self._input.lift(); self._entry.focus_force(); return
         w = self._input = tk.Toplevel(self.manager.root)
         w.overrideredirect(True)
@@ -4479,6 +4486,37 @@ class ChatLobbyWindow:
                       bg='#3377E0' if on else '#2F2F3A', fg='white' if on else '#AAAAB4',
                       font=('Malgun Gothic', 8, 'bold'), padx=6, pady=3,
                       activebackground='#3377E0', activeforeground='white', command=pick).pack(side='left', padx=(0, 3))
+
+        self._profile_preview(var)
+
+    def _profile_preview(self, nick_var):
+        """방에 들어가기 전에 "다른 사람에게 내가 이렇게 보여요"를 미리 보여 준다 (닉네임·캐릭터·옷차림·레벨 실시간 반영)."""
+        c, B = self.chat, self.BG
+        box = tk.Frame(self.body, bg='#26262E'); box.pack(fill='x', pady=(10, 0))
+        cv = tk.Canvas(box, width=132, height=108, bg='#26262E', highlightthickness=0)
+        cv.pack(side='left', padx=(6, 0), pady=4)
+        tk.Label(box, text=t('미리보기', 'Preview'), bg='#26262E', fg='white', anchor='w',
+                 font=('Malgun Gothic', 9, 'bold')).place(x=150, y=14)
+        tk.Label(box, bg='#26262E', fg='#8A8A98', justify='left', anchor='nw', wraplength=190, font=('Malgun Gothic', 8),
+                 text=t('방에 들어가면 다른 사람에게 이렇게 보여요.\n닉네임·캐릭터를 바꾸면 바로 바뀌어요. 옷차림은 상점에서 바꿔요.',
+                        'This is how others see you in the room.\nIt updates as you change nickname or character; outfits are changed in the shop.')
+                 ).place(x=150, y=36)
+        av = ChatAvatar(cv, self.manager.shop, 66, 50)
+
+        def tick():
+            try:
+                if not cv.winfo_exists():
+                    return
+            except Exception:
+                return
+            cv.delete('all')
+            nick = nick_var.get().strip()[:buni_chat.MAX_NICKNAME] or c.character_name(c.character)
+            av.apply({'uid': 'me', 'char': c.character, 'motion': 'idle',
+                      'equip': dict(self.manager.shop.equipped.get(c.character, {}))})
+            av.tick_blink(); av.paint()
+            draw_name_tag(cv, 66, 88, nick, True, int(self.manager.shop.level))
+            cv.after(100, tick)
+        tick()
 
     def _lobby(self, button):
         c, B = self.chat, self.BG
@@ -5135,13 +5173,17 @@ class BuniManager:
             'always_approve': self._hk_always_approve,
             'deny':           self._hk_deny,
             'hide':           self._hk_hide,
+            'chat':           self._hk_chat,
         }
         self._hotkey_mgr.start(self.root, callbacks)
         # 저장된 단축키 로드 (ShortcutSettingsWindow 생성 전 직접 적용)
         saved = self.persist.get('shortcuts', {})
-        defaults = {'approve': {'mods': GlobalHotkeyManager.MOD_CTRL, 'vk': 0x0D}}
-        for action in ('approve', 'always_approve', 'deny', 'hide'):
-            v = saved.get(action) or defaults.get(action)
+        defaults = {'approve': {'mods': GlobalHotkeyManager.MOD_CTRL, 'vk': 0x0D},
+                    'chat': {'mods': GlobalHotkeyManager.MOD_CTRL | GlobalHotkeyManager.MOD_ALT, 'vk': 0x43}}
+        for action in ('approve', 'always_approve', 'deny', 'hide', 'chat'):
+            v = saved.get(action)
+            if not v and (action == 'approve' or (action == 'chat' and 'chat' not in saved)):
+                v = defaults[action]
             if v:
                 self._hotkey_mgr.set_shortcut(action, v['mods'], v['vk'])
 
@@ -5163,6 +5205,13 @@ class BuniManager:
                 win._dismiss_completed()
             elif win.state == 'permission':
                 win._decide('approve_all')
+
+    def _hk_chat(self):
+        """채팅 입력 단축키 — 방에 있으면 닉네임 자리에 입력칸을 열고, 방 밖이면 채팅 창(로비)을 연다."""
+        if self.chat.is_in_room and self._chat_window and self._chat_window.is_open():
+            self._chat_window.open_input()
+        else:
+            self.open_chat()
 
     def _hk_hide(self):
         if any(w.is_visible for w in self.sessions.values()):

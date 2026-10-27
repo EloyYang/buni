@@ -59,12 +59,15 @@ class ShortcutStore: ObservableObject {
     @Published var deny:          KeyShortcut?
     @Published var hide:          KeyShortcut?
     @Published var alwaysApprove: KeyShortcut?
+    @Published var chat:          KeyShortcut?          // 채팅 입력창 열기 (채팅방에 있을 때)
 
     private enum UDKey {
         static let approve       = "shortcut.approve"
         static let deny          = "shortcut.deny"
         static let hide          = "shortcut.hide"
         static let alwaysApprove = "shortcut.alwaysApprove"
+        static let chat          = "shortcut.chat"
+        static let chatDefaultApplied = "shortcut.chat.defaultApplied"
     }
 
     init() {
@@ -74,6 +77,15 @@ class ShortcutStore: ObservableObject {
             approve = KeyShortcut(keyCode: 36,
                                   modifiers: NSEvent.ModifierFlags.command.rawValue)
         }
+        // 채팅 입력 기본값: Control+Option+C — 처음 한 번만 넣고, 사용자가 지우면 그대로 비워 둔다
+        if !UserDefaults.standard.bool(forKey: UDKey.chatDefaultApplied) {
+            if chat == nil {
+                chat = KeyShortcut(keyCode: 8,
+                                   modifiers: NSEvent.ModifierFlags([.control, .option]).rawValue)
+            }
+            UserDefaults.standard.set(true, forKey: UDKey.chatDefaultApplied)
+            save()
+        }
     }
 
     func save() {
@@ -82,6 +94,7 @@ class ShortcutStore: ObservableObject {
         UserDefaults.standard.set(try? enc.encode(deny),          forKey: UDKey.deny)
         UserDefaults.standard.set(try? enc.encode(hide),          forKey: UDKey.hide)
         UserDefaults.standard.set(try? enc.encode(alwaysApprove), forKey: UDKey.alwaysApprove)
+        UserDefaults.standard.set(try? enc.encode(chat),          forKey: UDKey.chat)
     }
 
     private func load() {
@@ -93,6 +106,8 @@ class ShortcutStore: ObservableObject {
         hide          = (UserDefaults.standard.data(forKey: UDKey.hide))
             .flatMap { try? dec.decode(KeyShortcut.self, from: $0) }
         alwaysApprove = (UserDefaults.standard.data(forKey: UDKey.alwaysApprove))
+            .flatMap { try? dec.decode(KeyShortcut.self, from: $0) }
+        chat          = (UserDefaults.standard.data(forKey: UDKey.chat))
             .flatMap { try? dec.decode(KeyShortcut.self, from: $0) }
     }
 }

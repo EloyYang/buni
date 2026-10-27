@@ -164,6 +164,8 @@ struct ShortcutSettingsView: View {
                                      shortcut: $store.deny)
                     KeyRecorderField(label: L.t("숨기기/보이기", "Hide / show"),
                                      shortcut: $store.hide)
+                    KeyRecorderField(label: L.t("채팅 입력", "Chat input"),
+                                     shortcut: $store.chat)
                 }
             }
 
@@ -197,6 +199,7 @@ struct ShortcutSettingsView: View {
         .onChange(of: store.alwaysApprove) { _ in store.save() }
         .onChange(of: store.deny)          { _ in store.save() }
         .onChange(of: store.hide)          { _ in store.save() }
+        .onChange(of: store.chat)          { _ in store.save() }
     }
 
     /// 선택 기능 — 로그인하지 않아도 모든 기능을 그대로 쓸 수 있고,

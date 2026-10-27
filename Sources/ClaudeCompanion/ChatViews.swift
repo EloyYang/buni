@@ -97,16 +97,68 @@ struct ChatAvatarView: View {
         }
     }
 
-    @ViewBuilder
-    private var character: some View {
-        switch CharacterType(rawValue: member.character) ?? .rabbit {
-        case .rabbit:        RabbitCharacterView()
-        case .brownRabbit:   BrownRabbitCharacterView()
-        case .pinkRabbit:    PinkRabbitCharacterView()
-        case .orangeRabbit:  OrangeRabbitCharacterView()
-        case .yellowRabbit:  YellowRabbitCharacterView()
-        case .greenRabbit:   GreenRabbitCharacterView()
+    private var character: some View { chatCharacterView(member.character) }
+}
+
+/// 캐릭터 종류(rawValue)에 맞는 토끼 그림
+@ViewBuilder
+func chatCharacterView(_ raw: String) -> some View {
+    switch CharacterType(rawValue: raw) ?? .rabbit {
+    case .rabbit:        RabbitCharacterView()
+    case .brownRabbit:   BrownRabbitCharacterView()
+    case .pinkRabbit:    PinkRabbitCharacterView()
+    case .orangeRabbit:  OrangeRabbitCharacterView()
+    case .yellowRabbit:  YellowRabbitCharacterView()
+    case .greenRabbit:   GreenRabbitCharacterView()
+    }
+}
+
+/// 방에 들어가기 전에 "다른 사람에게 내가 이렇게 보여요"를 미리 보여 준다.
+/// 닉네임·캐릭터·옷차림·레벨이 바뀌면 바로 반영된다.
+struct ChatProfilePreview: View {
+    @ObservedObject private var store = ChatStore.shared
+    @ObservedObject private var shop = ShopStore.shared
+    @StateObject private var controller = CompanionController()
+
+    private var tryOn: TryOnItems {
+        var items: [ItemSlot: String] = [:]
+        for (slot, id) in shop.equipped[store.character] ?? [:] { items[slot] = id }
+        return TryOnItems(items: items)
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            VStack(spacing: 4) {
+                chatCharacterView(store.character.rawValue)
+                    .environment(\.tryOn, tryOn)
+                    .environmentObject(controller)
+                    .frame(width: 60, height: 70)
+                HStack(spacing: 4) {
+                    Text("Lv.\(shop.level)")
+                        .font(.system(size: 8, weight: .bold).monospacedDigit())
+                        .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.40))
+                    Text(store.displayName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .foregroundColor(.white.opacity(0.92))
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .frame(maxWidth: 108)
+                .background(Capsule().fill(Color.accentColor.opacity(0.85)))
+            }
+            .frame(width: 112)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L.t("미리보기", "Preview")).font(.system(size: 11, weight: .semibold))
+                Text(L.t("방에 들어가면 다른 사람에게 이렇게 보여요. 닉네임·캐릭터를 바꾸면 바로 바뀌어요. 옷차림은 상점에서 바꿔요.",
+                         "This is how others will see you in the room. It updates as you change your nickname or character; outfits are changed in the shop."))
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
         }
+        .padding(.vertical, 8).padding(.horizontal, 10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.14)))
     }
 }
 
@@ -252,6 +304,7 @@ struct ChatRoomView: View {
     private var controls: some View {
         HStack(spacing: 6) {
             Button { store.inputActive.toggle() } label: { Text("💬 " + L.t("말하기", "Chat")) }
+                .help(ShortcutStore.shared.chat.map { L.t("단축키: ", "Shortcut: ") + $0.displayString } ?? "")
             Button {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(store.roomCode ?? "", forType: .string)
@@ -307,7 +360,7 @@ struct ChatLobbyView: View {
                      + "motion (idle / working / done) — never what you're working on."))
         }
         .padding(20)
-        .frame(width: 400, height: 470)
+        .frame(width: 400)
     }
 
     private func note(_ text: String) -> some View {
@@ -337,6 +390,7 @@ struct ChatLobbyView: View {
                     }.buttonStyle(.plain)
                 }
             }
+            ChatProfilePreview()
         }
     }
 
@@ -441,11 +495,11 @@ final class ChatWindowController {
 
     func showLobby() {
         if lobby == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 470),
-                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            // 내용 높이에 창이 맞춰지도록 NSHostingController 에 맡긴다 (미리보기·접속자 목록이 늘어도 잘리지 않게)
+            let w = NSWindow(contentViewController: NSHostingController(rootView: ChatLobbyView()))
+            w.styleMask = [.titled, .closable]
             w.title = L.t("부니 채팅", "Buni Chat")
             w.isReleasedWhenClosed = false
-            w.contentView = NSHostingView(rootView: ChatLobbyView())
             w.center()
             lobby = w
         }
@@ -480,6 +534,13 @@ final class ChatWindowController {
     }
 
     private func hidePanel() { panel?.orderOut(nil) }
+
+    /// 단축키로 입력창을 열 때 — 패널이 바로 키 입력을 받게 한다 (이미 열려 있어도 다시 포커스)
+    func focusInput() {
+        guard let p = panel else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        p.makeKeyAndOrderFront(nil)
+    }
 
     /// 내용 크기에 패널을 맞춘다. 아래쪽 중앙을 기준으로 늘어난다.
     private func fitPanel(initial: Bool = false) {

@@ -886,7 +886,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupHotkeyMonitor() {
         let store = ShortcutStore.shared
         hotkeyMonitor.updateShortcuts(approve: store.approve, deny: store.deny,
-                                      hide: store.hide, alwaysApprove: store.alwaysApprove)
+                                      hide: store.hide, alwaysApprove: store.alwaysApprove, chat: store.chat)
         // 승인·거부: 권한 요청 중인 모든 세션에 동시 적용
         hotkeyMonitor.onApprove = { [weak self] in
             self?.sessions.values.forEach {
@@ -900,6 +900,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         hotkeyMonitor.onHide          = { [weak self] in self?.toggleVisibility() }
+        // 채팅 입력: 방에 있으면 닉네임 자리에 입력창을 열고, 방 밖이면 채팅 창(로비)을 연다
+        hotkeyMonitor.onChat = {
+            Task { @MainActor in
+                let chat = ChatStore.shared
+                if chat.isInRoom {
+                    chat.nameEditing = false
+                    chat.inputActive = true
+                    chat.inputTouched = Date()
+                    ChatWindowController.shared.focusInput()
+                } else {
+                    ChatWindowController.shared.showLobby()
+                }
+            }
+        }
         // 전체 허용: 모든 세션에 동시 적용 (완료 상태면 확인으로 동작)
         hotkeyMonitor.onAlwaysApprove = { [weak self] in
             self?.sessions.values.forEach {
@@ -910,16 +924,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupSettingsCallbacks() {
-        Publishers.CombineLatest4(
-            ShortcutStore.shared.$approve,
-            ShortcutStore.shared.$deny,
-            ShortcutStore.shared.$hide,
-            ShortcutStore.shared.$alwaysApprove
+        Publishers.CombineLatest(
+            Publishers.CombineLatest4(
+                ShortcutStore.shared.$approve,
+                ShortcutStore.shared.$deny,
+                ShortcutStore.shared.$hide,
+                ShortcutStore.shared.$alwaysApprove
+            ),
+            ShortcutStore.shared.$chat
         )
         .debounce(for: .milliseconds(80), scheduler: DispatchQueue.main)
-        .sink { [weak self] approve, deny, hide, alwaysApprove in
-            self?.hotkeyMonitor.updateShortcuts(approve: approve, deny: deny,
-                                                hide: hide, alwaysApprove: alwaysApprove)
+        .sink { [weak self] four, chat in
+            self?.hotkeyMonitor.updateShortcuts(approve: four.0, deny: four.1,
+                                                hide: four.2, alwaysApprove: four.3, chat: chat)
         }
         .store(in: &cancellables)
 
