@@ -380,6 +380,25 @@
   .chat-tag.typing .inp{ display:flex; }
   .chat-room-cap{ text-align:center; font-family:var(--font-mono); font-size:0.62rem; color:var(--muted); margin-top:4px; }
 
+
+  /* ── 문의하기 ─────────────────────────────────────── */
+  .contact-panel{ max-width:640px; }
+  .contact-form{ display:grid; gap:14px; margin-top:26px; }
+  .contact-form label{ display:grid; gap:6px; font-size:0.86rem; font-weight:600; color:var(--muted); }
+  .contact-form input, .contact-form select, .contact-form textarea{
+    font:inherit; font-weight:500; font-size:0.98rem; color:var(--ink);
+    background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:11px 13px; width:100%;
+  }
+  .contact-form textarea{ min-height:150px; resize:vertical; line-height:1.55; }
+  .contact-form input:focus-visible, .contact-form select:focus-visible, .contact-form textarea:focus-visible{ outline:2px solid var(--carrot); outline-offset:1px; }
+  .contact-form .hp{ position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
+  .contact-row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .contact-note{ font-size:0.8rem; color:var(--muted); }
+  .contact-note a{ color:var(--muted); }
+  .contact-status{ font-size:0.9rem; font-weight:600; min-height:1.4em; }
+  .contact-status.ok{ color:var(--leaf); } .contact-status.err{ color:#e2603f; }
+  .contact-form button[disabled]{ opacity:.6; cursor:default; }
+
   /* ── download ────────────────────────────────────── */
   .download-panel{
     background:linear-gradient(160deg, var(--surface), var(--surface-2));
@@ -439,6 +458,7 @@
     </div>
     <nav class="nav-links">
       <a href="#features" data-ko="기능" data-en="Features">기능</a>
+      <a href="#contact" data-ko="문의" data-en="Contact">문의</a>
       <a href="https://github.com/EloyYang/buni" target="_blank" rel="noopener">GitHub</a>
     </nav>
     <button class="lang-toggle" id="langToggle" type="button" aria-label="Switch language">EN</button>
@@ -560,6 +580,39 @@
 
       <div class="term">$ git clone https://github.com/EloyYang/buni.git
 $ cd buni <span class="p">&& bash install.sh</span></div>
+    </div>
+  </section>
+
+
+  <!-- ═══ 문의하기 ═══ -->
+  <section id="contact" style="padding-top:0;">
+    <div class="download-panel contact-panel">
+      <span class="eyebrow" data-ko="문의하기" data-en="Contact">문의하기</span>
+      <h2 style="margin-top:14px; font-size:clamp(1.6rem,3vw,2.1rem);" data-ko="궁금한 점이 있나요?" data-en="Got a question?">궁금한 점이 있나요?</h2>
+      <p style="color:var(--muted); margin-top:10px;" data-ko="버그 신고, 기능 제안, 개인정보 관련 요청까지 여기에 남겨 주세요. 남기신 내용은 개발자에게 이메일로 전달돼요." data-en="Bug reports, feature ideas and privacy requests — leave them here. Your message is sent to the developer by email.">버그 신고, 기능 제안, 개인정보 관련 요청까지 여기에 남겨 주세요. 남기신 내용은 개발자에게 이메일로 전달돼요.</p>
+
+      <form class="contact-form" id="contactForm" novalidate>
+        <label><span data-ko="문의 종류" data-en="Topic">문의 종류</span>
+          <select name="topic" id="cfTopic">
+            <option value="일반 문의" data-ko="일반 문의" data-en="General question">일반 문의</option>
+            <option value="버그 신고" data-ko="버그 신고" data-en="Bug report">버그 신고</option>
+            <option value="기능 제안" data-ko="기능 제안" data-en="Feature idea">기능 제안</option>
+            <option value="개인정보 관련 요청" data-ko="개인정보 관련 요청 (열람·삭제 등)" data-en="Privacy request (access, deletion, etc.)">개인정보 관련 요청 (열람·삭제 등)</option>
+          </select>
+        </label>
+        <label><span data-ko="답장 받을 이메일" data-en="Your email (for the reply)">답장 받을 이메일</span>
+          <input type="email" name="email" id="cfEmail" required autocomplete="email" placeholder="you@example.com">
+        </label>
+        <label><span data-ko="내용" data-en="Message">내용</span>
+          <textarea name="message" id="cfMessage" required maxlength="2000"></textarea>
+        </label>
+        <div class="hp" aria-hidden="true"><label>Website <input type="text" name="_honey" id="cfHoney" tabindex="-1" autocomplete="off"></label></div>
+        <div class="contact-row">
+          <button class="btn btn-carrot" type="submit" id="cfSend" data-ko="보내기" data-en="Send">보내기</button>
+          <span class="contact-status" id="cfStatus" role="status" aria-live="polite"></span>
+        </div>
+        <p class="contact-note" data-ko-html="보내기를 누르면 입력한 이메일과 내용이 이메일 전달 서비스(FormSubmit)를 거쳐 개발자에게 전달돼요. 답변 외 용도로는 쓰지 않아요. 자세한 내용은 &lt;a href=&quot;privacy.html&quot;&gt;개인정보처리방침&lt;/a&gt;을 확인해 주세요." data-en-html="When you press Send, your email address and message are passed to the developer through an email-forwarding service (FormSubmit). They are used only to reply. See the &lt;a href=&quot;privacy.html&quot;&gt;Privacy Policy&lt;/a&gt; for details.">보내기를 누르면 입력한 이메일과 내용이 이메일 전달 서비스(FormSubmit)를 거쳐 개발자에게 전달돼요. 답변 외 용도로는 쓰지 않아요. 자세한 내용은 <a href="privacy.html">개인정보처리방침</a>을 확인해 주세요.</p>
+      </form>
     </div>
   </section>
 
@@ -1323,6 +1376,48 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
   var permIdx   = FEATURES.findIndex(function(f){ return f.demo === 'permission'; });
   var usageIdx  = FEATURES.findIndex(function(f){ return f.demo === 'usage'; });
   var wanderIdx = FEATURES.findIndex(function(f){ return f.demo === 'wander'; });
+
+
+  // ── 문의하기: 입력 내용을 이메일로 전달 (FormSubmit) ──
+  (function(){
+    var form = document.getElementById('contactForm');
+    if(!form) return;
+    var ENDPOINT = 'https://formsubmit.co/ajax/ydy01045345836@gmail.com';
+    var send = document.getElementById('cfSend'), status = document.getElementById('cfStatus');
+    var MSG = {
+      ko:{ sending:'보내는 중…', ok:'전달됐어요. 확인하는 대로 답장드릴게요!', need:'이메일과 내용을 입력해 주세요.', badMail:'이메일 주소를 확인해 주세요.', fail:'보내지 못했어요. 잠시 뒤 다시 시도하거나 GitHub Issues에 남겨 주세요.' },
+      en:{ sending:'Sending…', ok:'Sent! We will reply as soon as we can.', need:'Please enter your email and a message.', badMail:'Please check your email address.', fail:"Couldn't send. Please try again later or open a GitHub issue." }
+    };
+    function say(key, cls){ status.className = 'contact-status' + (cls ? ' ' + cls : ''); status.textContent = key ? MSG[LANG][key] : ''; }
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      var email = document.getElementById('cfEmail').value.trim();
+      var message = document.getElementById('cfMessage').value.trim();
+      var topicSel = document.getElementById('cfTopic');
+      if(document.getElementById('cfHoney').value) return;          // 봇이 채운 칸
+      if(!email || !message){ say('need', 'err'); return; }
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ say('badMail', 'err'); return; }
+      send.disabled = true; say('sending');
+      fetch(ENDPOINT, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Accept':'application/json' },
+        body: JSON.stringify({
+          _subject: '[Buni 문의] ' + topicSel.value,
+          _template: 'table',
+          _replyto: email,
+          '문의 종류': topicSel.value,
+          '이메일': email,
+          '내용': message
+        })
+      }).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ return { ok:r.ok, j:j }; }); })
+        .then(function(res){
+          if(res.ok && String(res.j.success) !== 'false'){ say('ok', 'ok'); form.reset(); }
+          else { say('fail', 'err'); }
+        })
+        .catch(function(){ say('fail', 'err'); })
+        .then(function(){ send.disabled = false; });
+    });
+  })();
 
   function applyLang(lang){
     LANG = lang;
