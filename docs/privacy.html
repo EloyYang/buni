@@ -1,0 +1,141 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Buni 개인정보처리방침</title>
+<meta name="description" content="Buni(부니)가 Google 로그인으로 어떤 정보를 쓰고 저장하는지 안내합니다.">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&family=Manrope:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --bg:#14161a; --surface:#1b1e25; --line:#2c313b; --ink:#eef1f6; --muted:#9aa2b4; --carrot:#f28c2e;
+    --font-display:'Fredoka', ui-rounded, system-ui, sans-serif;
+    --font-body:'Manrope', -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f7f5f1; --surface:#ffffff; --line:#e3ded5; --ink:#1d1a16; --muted:#6b645a; --carrot:#c9701a; }
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); line-height:1.7; -webkit-font-smoothing:antialiased; }
+  a{ color:var(--carrot); text-underline-offset:3px; }
+  main{ max-width:760px; margin:0 auto; padding:56px 24px 80px; }
+  .back{ display:inline-block; margin-bottom:28px; font-size:0.9rem; color:var(--muted); text-decoration:none; }
+  .back:hover{ color:var(--ink); }
+  h1{ font-family:var(--font-display); font-size:clamp(1.8rem,4vw,2.4rem); margin:0 0 6px; text-wrap:balance; }
+  h2{ font-family:var(--font-display); font-size:1.2rem; margin:36px 0 8px; }
+  p, li{ color:var(--ink); }
+  .meta{ color:var(--muted); font-size:0.9rem; margin:0 0 20px; }
+  ul{ padding-left:1.2em; margin:8px 0; }
+  li{ margin:4px 0; }
+  table{ width:100%; border-collapse:collapse; margin:10px 0; font-size:0.94rem; }
+  th, td{ text-align:left; vertical-align:top; padding:10px 12px; border-bottom:1px solid var(--line); }
+  th{ color:var(--muted); font-weight:600; font-size:0.82rem; letter-spacing:0.02em; }
+  .box{ background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:6px 18px 14px; margin-top:14px; }
+  .divider{ border:0; border-top:1px solid var(--line); margin:56px 0 0; }
+  .tbl-wrap{ overflow-x:auto; }
+  :focus-visible{ outline:2px solid var(--carrot); outline-offset:2px; }
+</style></head><body>
+<main>
+  <a class="back" href="./">← Buni</a>
+
+  <!-- ═══ 한국어 ═══ -->
+  <section lang="ko">
+    <h1>Buni 개인정보처리방침</h1>
+    <p class="meta">시행일: 2026년 10월 27일</p>
+    <p>Buni(부니)는 Claude Code 작업 상태를 화면 구석의 픽셀 토끼로 보여주는 개인용 데스크톱 앱입니다. 이 문서는 앱이 어떤 정보를 사용하고 저장하는지 설명합니다.
+      <strong>Google 로그인은 선택 사항</strong>이며, 로그인하지 않아도 모든 기본 기능을 쓸 수 있습니다. 로그인하지 않으면 아래 서버 저장은 일어나지 않습니다.</p>
+
+    <h2>1. Google 로그인으로 받는 정보</h2>
+    <p>다른 PC와 설정을 이어 쓰거나 채팅을 쓰려고 로그인할 때, 기본 로그인 권한(<code>openid</code>, <code>email</code>, <code>profile</code>)만 요청합니다.
+      Gmail, 드라이브, 연락처 등 다른 Google 데이터에는 접근하지 않습니다.</p>
+    <div class="tbl-wrap"><table>
+      <tr><th>정보</th><th>사용 목적</th></tr>
+      <tr><td>계정 고유 ID</td><td>내 데이터와 다른 사람의 데이터를 구분</td></tr>
+      <tr><td>표시 이름</td><td>로그인 상태 표시 (채팅에서는 직접 정한 닉네임만 쓰고, 비워 두면 캐릭터 이름이 보입니다)</td></tr>
+      <tr><td>이메일 주소·프로필 사진</td><td>Google 로그인 처리 과정에서만 쓰입니다. Buni의 서비스 데이터에는 저장하지 않으며, 앱 기능에도 사용하지 않습니다.</td></tr>
+    </table></div>
+    <p>로그인 처리는 Google의 Firebase Authentication이 맡습니다. 이 과정에서 Google이 로그인 기록으로 계정의 이메일·이름·프로필 사진 주소를 자체 보관할 수 있습니다.</p>
+
+    <h2>2. 서버에 저장되는 정보 (로그인한 경우에만)</h2>
+    <div class="tbl-wrap"><table>
+      <tr><th>항목</th><th>내용</th><th>보관</th></tr>
+      <tr><td>계정 연동</td><td>코인, 산 아이템, 캐릭터별 착용 상태, 기기별 이번 달 토큰 사용량(레벨 계산용 숫자), 계정 ID, 표시 이름</td><td>사용자가 삭제할 때까지</td></tr>
+      <tr><td>채팅방</td><td>방 코드, 닉네임, 캐릭터·옷차림·레벨, 작업 모션(대기/작업 중/완료)</td><td>방에 있는 동안만 (나가면 삭제)</td></tr>
+      <tr><td>채팅 메시지</td><td>보낸 사람 ID, 닉네임, 메시지(50자 이내)</td><td>약 15초 뒤 보낸 사람이 삭제 — 기록을 남기지 않습니다</td></tr>
+    </table></div>
+    <p><strong>저장하지 않는 것:</strong> Claude와의 대화 내용, 코드, 파일 이름, 어떤 작업을 하고 있는지, 사용 중인 프로젝트 정보. 채팅 상대에게는 작업 모션(대기/작업 중/완료)만 전달됩니다.</p>
+
+    <h2>3. 이 기기에만 저장되는 정보</h2>
+    <ul>
+      <li>설정, 단축키, 상점 상태 등은 이 기기에 저장됩니다.</li>
+      <li>Google 로그인 유지용 토큰은 macOS 키체인 또는 Windows 데이터 보호(DPAPI)로 암호화해 이 기기에 보관합니다.</li>
+    </ul>
+
+    <h2>4. 제3자 제공 및 이용 목적</h2>
+    <p>정보는 위의 기능을 제공하는 목적으로만 사용합니다. 광고에 쓰지 않으며, 판매하거나 제3자에게 제공하지 않습니다.
+      데이터는 Google의 Firebase(Authentication, Firestore, Realtime Database — 채팅은 싱가포르 지역)에 저장됩니다.</p>
+
+    <h2>5. 삭제와 로그아웃</h2>
+    <ul>
+      <li>앱 설정의 <strong>로그아웃</strong>으로 이 기기의 로그인 정보를 지울 수 있습니다.</li>
+      <li>앱 설정의 <strong>서버 데이터 삭제</strong>로 서버에 저장된 계정 연동 데이터를 직접 삭제할 수 있습니다.</li>
+      <li>Google 계정 설정(<a href="https://myaccount.google.com/connections" target="_blank" rel="noopener">myaccount.google.com/connections</a>)에서 Buni에 대한 접근 권한을 언제든 해제할 수 있습니다.</li>
+    </ul>
+
+    <h2>6. 문의</h2>
+    <p>개인정보에 관한 문의·삭제 요청은 <a href="https://github.com/EloyYang/buni/issues" target="_blank" rel="noopener">GitHub Issues</a>로 남겨 주세요.</p>
+
+    <h2>7. 변경</h2>
+    <p>내용이 바뀌면 이 페이지에 시행일과 함께 게시합니다.</p>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ═══ English ═══ -->
+  <section lang="en">
+    <h1 style="margin-top:48px">Buni Privacy Policy</h1>
+    <p class="meta">Effective: October 27, 2026</p>
+    <p>Buni is a personal desktop app that shows your Claude Code status as a pixel rabbit in the corner of your screen. This page explains what information the app uses and stores.
+      <strong>Signing in with Google is optional</strong>; every basic feature works without it. If you don't sign in, none of the server storage below happens.</p>
+
+    <h2>1. What we receive when you sign in with Google</h2>
+    <p>To sync your settings across PCs or to use chat, the app requests only the basic sign-in scopes (<code>openid</code>, <code>email</code>, <code>profile</code>).
+      It does not access Gmail, Drive, Contacts or any other Google data.</p>
+    <div class="tbl-wrap"><table>
+      <tr><th>Information</th><th>Purpose</th></tr>
+      <tr><td>Account unique ID</td><td>Tell your data apart from other people's</td></tr>
+      <tr><td>Display name</td><td>Show your signed-in state (chat uses only the nickname you choose; if empty, your character's name is shown)</td></tr>
+      <tr><td>Email address, profile photo</td><td>Used only while Google processes the sign-in. Not stored in Buni's service data and not used by any app feature.</td></tr>
+    </table></div>
+    <p>Sign-in is handled by Google's Firebase Authentication, which may keep the account's email, name and profile photo address in its own sign-in records.</p>
+
+    <h2>2. What is stored on the server (only if you sign in)</h2>
+    <div class="tbl-wrap"><table>
+      <tr><th>Item</th><th>Contents</th><th>Retention</th></tr>
+      <tr><td>Account sync</td><td>Coins, owned items, per-character outfits, per-device token count for this month (a number used for your level), account ID, display name</td><td>Until you delete it</td></tr>
+      <tr><td>Chat room</td><td>Room code, nickname, character, outfit, level, work motion (idle / working / done)</td><td>Only while you are in the room (removed when you leave)</td></tr>
+      <tr><td>Chat messages</td><td>Sender ID, nickname, message (up to 50 characters)</td><td>Deleted by the sender after about 15 seconds — no history is kept</td></tr>
+    </table></div>
+    <p><strong>Never stored:</strong> your conversations with Claude, code, file names, what task you are working on, or project information. Chat partners only see a work motion (idle / working / done).</p>
+
+    <h2>3. What stays on your device</h2>
+    <ul>
+      <li>Settings, shortcuts and shop state are kept on your device.</li>
+      <li>The token that keeps you signed in is stored on your device, encrypted with the macOS Keychain or Windows DPAPI.</li>
+    </ul>
+
+    <h2>4. Use and sharing</h2>
+    <p>Information is used only to provide the features above. It is not used for advertising and is never sold or shared with third parties.
+      Data is stored in Google Firebase (Authentication, Firestore, Realtime Database — chat is in the Singapore region).</p>
+
+    <h2>5. Deleting your data and signing out</h2>
+    <ul>
+      <li><strong>Sign out</strong> in the app's settings removes the sign-in from this device.</li>
+      <li><strong>Delete server data</strong> in the app's settings deletes your synced account data from the server.</li>
+      <li>You can revoke Buni's access any time in your Google Account settings (<a href="https://myaccount.google.com/connections" target="_blank" rel="noopener">myaccount.google.com/connections</a>).</li>
+    </ul>
+
+    <h2>6. Contact</h2>
+    <p>For privacy questions or deletion requests, please open an issue on <a href="https://github.com/EloyYang/buni/issues" target="_blank" rel="noopener">GitHub Issues</a>.</p>
+
+    <h2>7. Changes</h2>
+    <p>If this policy changes, the new version will be posted on this page with its effective date.</p>
+  </section>
+</main>
+</body></html>
