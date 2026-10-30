@@ -159,7 +159,7 @@ class EventMonitor {
     }
 
     private func updateMonthlyTokens() {
-        let total = TokenUsageReader.readThisMonth()
+        guard let total = TokenUsageReader.readThisMonthShared() else { return }   // 다른 세션이 계산 중이면 건너뛴다
         DispatchQueue.main.async {
             self.controller.monthlyTokens = total
             ShopStore.shared.updateLevel(fromTokens: total)
@@ -182,8 +182,20 @@ class EventMonitor {
         return "/usr/bin/python3"
     }
 
+    /// 세션마다 따로 부르지만 서버 사용량은 계정 전체 값이라, 최근에 가져왔다면 건너뛴다
+    private static let fetchLock = NSLock()
+    private static var lastFetch = Date.distantPast
+
     private func fetchServerUsage() {
         guard FileManager.default.fileExists(atPath: Self.fetchScript) else { return }
+        Self.fetchLock.lock()
+        let recent = Date().timeIntervalSince(Self.lastFetch) < 240
+        if !recent { Self.lastFetch = Date() }
+        Self.fetchLock.unlock()
+        if recent {                                  // 다른 세션이 막 가져왔다 — 그 결과 파일만 읽는다
+            queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.readServerUsageFile() }
+            return
+        }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: Self.findPython3())
         proc.arguments = [Self.fetchScript]
@@ -581,6 +593,8 @@ class EventMonitor {
             let name = tool.replacingOccurrences(of: "_", with: " ")
             return L.t("\(name) 실행 중", "Running \(name)")
         }
+        // 부니 스쿼드 엔진이 적는 팀장 부니 이벤트 — 문구가 이미 완성돼 있다
+        if raw.hasPrefix("squad:") { return String(raw.dropFirst("squad:".count)) }
         switch raw.lowercased() {
         case "bash":      return L.t("터미널 명령 실행 중", "Running command")
         case "read":      return L.t("파일 읽는 중", "Reading file")

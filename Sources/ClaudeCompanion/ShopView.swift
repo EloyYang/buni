@@ -103,7 +103,7 @@ struct ShopView: View {
                 if cloud.isSignedIn {
                     Text(L.t("☁️ 연동됨", "☁️ Synced"))
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(Color(red: 0.30, green: 0.78, blue: 0.50))
+                        .foregroundColor(BT.success)
                         .padding(.trailing, 10)
                 } else {
                     Button(L.t("☁️ 다른 PC와 연동", "☁️ Sync")) { Task { await cloud.signIn() } }
@@ -128,7 +128,7 @@ struct ShopView: View {
         ZStack(alignment: .bottomTrailing) {
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color.white.opacity(0.05))
-            characterPreview
+            TintedCharacter { characterPreview }
                 .environment(\.tryOn, TryOnItems(items: displayedItems()))
                 .environmentObject(preview)
                 .frame(width: 60, height: 70)
@@ -228,9 +228,9 @@ struct ShopView: View {
     }
 
     /// 착용 중 강조색 — 목록 어디서든 눈에 띄도록 초록 계열로 통일한다
-    private let wearColor = Color(red: 0.30, green: 0.78, blue: 0.50)
+    private let wearColor = BT.success
     /// 입어보는 중 강조색 — 착용 중(초록)과 구분되도록 파랑
-    private let tryColor  = Color(red: 0.35, green: 0.62, blue: 0.98)
+    private let tryColor  = BT.info
 
     private func row(_ item: ShopItem) -> some View {
         let owned    = shop.isOwned(item)
@@ -303,7 +303,7 @@ struct ShopView: View {
                 settle(item)
             }
             // 해제는 빨강, 착용은 파랑 — 색만 봐도 누르면 어떻게 되는지 구분된다
-            .buttonStyle(PillButtonStyle(color: equipped ? Color(red: 0.86, green: 0.30, blue: 0.30)
+            .buttonStyle(PillButtonStyle(color: equipped ? BT.danger
                                                          : .accentColor))
         } else {
             // 아직 내 것이 아닌 아이템 — 레벨·코인이 모자라도 입어볼 수는 있다
@@ -324,7 +324,7 @@ struct ShopView: View {
                         shop.buy(item, equipFor: target)
                         settle(item)
                     }
-                    .buttonStyle(PillButtonStyle(color: Color(red: 0.95, green: 0.60, blue: 0.15)))
+                    .buttonStyle(PillButtonStyle(color: BT.accentBase))
                 }
             }
         }

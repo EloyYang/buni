@@ -113,6 +113,7 @@ struct ShortcutSettingsView: View {
     @ObservedObject private var awake = AwakeManager.shared
     @ObservedObject private var cloud = CloudSession.shared
     @ObservedObject private var cloudSync = CloudSync.shared
+    @ObservedObject private var pro   = ProManager.shared
 
     var body: some View {
         // 항목이 늘어도 창에 가려 잘리지 않도록 스크롤 안에 둔다
@@ -120,7 +121,7 @@ struct ShortcutSettingsView: View {
             content
         }
         .frame(minWidth: 380, minHeight: 360)
-        .background(Color(red: 0.12, green: 0.12, blue: 0.14))
+        .background(BT.bgCanvas)
     }
 
     private var content: some View {
@@ -149,6 +150,11 @@ struct ShortcutSettingsView: View {
 
             Divider().background(Color.white.opacity(0.2))
 
+            // ── Pro
+            ProSettingsSection()
+
+            Divider().background(Color.white.opacity(0.2))
+
             // ── 단축키
             VStack(alignment: .leading, spacing: 8) {
                 Text(L.t("단축키", "Shortcuts"))
@@ -166,6 +172,8 @@ struct ShortcutSettingsView: View {
                                      shortcut: $store.hide)
                     KeyRecorderField(label: L.t("채팅 입력", "Chat input"),
                                      shortcut: $store.chat)
+                    KeyRecorderField(label: L.t("부니 스쿼드 열기/닫기", "Open / close Buni Squad"),
+                                     shortcut: $store.squad)
                 }
             }
 
@@ -200,6 +208,7 @@ struct ShortcutSettingsView: View {
         .onChange(of: store.deny)          { _ in store.save() }
         .onChange(of: store.hide)          { _ in store.save() }
         .onChange(of: store.chat)          { _ in store.save() }
+        .onChange(of: store.squad)         { _ in store.save() }
     }
 
     /// 선택 기능 — 로그인하지 않아도 모든 기능을 그대로 쓸 수 있고,
@@ -233,13 +242,16 @@ struct ShortcutSettingsView: View {
                     .foregroundColor(.white.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게
                 HStack(spacing: 8) {
-                    Button(L.t("지금 동기화", "Sync now")) { Task { await cloudSync.syncNow() } }
+                    Button(L.t("지금 동기화", "Sync now")) {
+                        guard ProGate.require(.cloudSync) else { return }
+                        Task { await cloudSync.syncNow() }
+                    }
                         .buttonStyle(PillButtonStyle(color: .accentColor))
                     Button(L.t("로그아웃", "Sign out")) { cloud.signOut() }
                         .buttonStyle(PillButtonStyle(color: .gray))
                     Spacer()
                     Button(L.t("서버 데이터 삭제", "Delete server data")) { confirmDeleteServerData() }
-                        .buttonStyle(PillButtonStyle(color: Color(red: 0.86, green: 0.30, blue: 0.30)))
+                        .buttonStyle(PillButtonStyle(color: BT.danger))
                 }
             } else {
                 Text(L.t("로그인은 선택이에요. 안 해도 모든 기능을 그대로 쓸 수 있고, 다른 PC에서도 같은 설정·레벨을 쓰고 싶을 때만 로그인하세요.\n"
@@ -249,15 +261,29 @@ struct ShortcutSettingsView: View {
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게
-                Button(L.t("Google로 로그인", "Sign in with Google")) { Task { await cloud.signIn() } }
-                    .buttonStyle(PillButtonStyle(color: .accentColor))
-                    .disabled(cloud.isBusy)
+                Button(L.t("Google로 로그인", "Sign in with Google")) {
+                    // 새로 동기화를 켜려면 Pro 가 필요하다 — 이미 쓰던 사용자는 그대로 로그인할 수 있다
+                    guard ProManager.shared.cloudSyncPolicy() != "blocked" else {
+                        _ = ProGate.require(.cloudSync); return
+                    }
+                    Task { await cloud.signIn() }
+                }
+                .buttonStyle(PillButtonStyle(color: .accentColor))
+                .disabled(cloud.isBusy)
+            }
+
+            if cloud.isConfigured, cloud.user != nil, !pro.can(.cloudSync) {
+                Text(L.t("Pro 체험이 끝나서 동기화를 잠시 멈췄어요. 데이터는 그대로 남아 있고, Pro로 돌아오면 이어서 맞춰요.",
+                         "Sync is paused because your Pro trial ended. Your data is untouched and sync resumes with Pro."))
+                    .font(.system(size: 10))
+                    .foregroundColor(BT.warning)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let message = cloud.message {
                 Text(message)
                     .font(.system(size: 10))
-                    .foregroundColor(Color(red: 0.95, green: 0.75, blue: 0.35))
+                    .foregroundColor(BT.warning)
                     .fixedSize(horizontal: false, vertical: true)
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게
             }
@@ -342,15 +368,35 @@ struct ShortcutSettingsView: View {
 
 struct PillButtonStyle: ButtonStyle {
     let color: Color
+    @State private var hover = false
+
+    /// 기본(.accentColor)은 주 버튼 — 당근색 면. 회색은 조용한 보조 버튼. 상태색(위험·성공)은 옅은 면 + 색 글자.
+    private var isPrimary: Bool { color == .accentColor || color == BT.accentBase }
+    private var isQuiet: Bool { color == .gray }
+
     func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
         configuration.label
-            .font(.system(size: 12, weight: .medium))
-            .foregroundColor(.white)
-            .padding(.horizontal, 14)
+            .font(.system(size: BuniTokens.Font.sizeSm, weight: .semibold))
+            .foregroundColor(isPrimary ? BT.textOnAccent : (isQuiet ? BT.textPrimary : color))
+            .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(color.opacity(configuration.isPressed ? 0.7 : 1.0))
+                RoundedRectangle(cornerRadius: BuniTokens.Radius.md, style: .continuous)
+                    .fill(fill(pressed: pressed))
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: BuniTokens.Radius.md, style: .continuous)
+                    .stroke(isPrimary ? Color.clear : BT.borderStrong.opacity(0.7), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: BuniTokens.Radius.md))
+            .onHover { hover = $0 }
+            .animation(.easeOut(duration: BuniTokens.Motion.fast), value: hover)
+    }
+
+    private func fill(pressed: Bool) -> Color {
+        if isPrimary { return pressed ? BT.accentHover.opacity(0.85) : (hover ? BT.accentHover : BT.accentBase) }
+        if isQuiet { return pressed ? BT.surface3 : (hover ? BT.surface3 : BT.surface2) }
+        return color.opacity(pressed ? 0.28 : (hover ? 0.22 : 0.14))
     }
 }

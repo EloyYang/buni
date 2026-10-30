@@ -95,10 +95,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         AwakeManager.shared.restoreOnQuit()
         MainActor.assumeIsolated { ChatStore.shared.leaveBlocking() }     // 채팅방 자리를 비운다
+        MainActor.assumeIsolated { TeamStore.shared.stopDaemon() }       // 부니 스쿼드 상주 프로세스도 함께 끝낸다
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         HookInstaller.ensureInstalled()
+        installEditMenu()
+        wireAppMenuBridge()
         setupSocketServer()
         if !UserDefaults.standard.bool(forKey: "statusBar.hidden") {
             setupStatusBar()
@@ -119,6 +122,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ChatWindowController.shared.start()
         }
         startChatMotionTimer()
+        // 처음 실행이면 짧은 안내를 보여준다 (이미 본 사람에게는 뜨지 않는다)
+        DispatchQueue.main.async { OnboardingWindow.showIfNeeded() }
+        // 부니 스쿼드(에이전트 모드 · 업무 예약) — 예약 시간대에 알아서 시작하는 상주 프로세스를 띄운다
+        Task { @MainActor in
+            TeamStore.shared.start()
+            TeamStore.shared.$jobs
+                .map { jobs in jobs.filter { $0.state == "review" }.count }
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.rebuildMenu() }
+                .store(in: &self.cancellables)
+        }
     }
 
     private func setupSocketServer() {
@@ -374,6 +389,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func wire(_ win: SessionWindow) {
         win.onOpenClaude    = { [weak self] in self?.openClaude() }
+        win.onOpenSquad     = { id in Task { @MainActor in TeamWindowController.shared.show(jobId: id) } }
         win.onOpenSettings  = { [weak self] in self?.openSettings() }
         win.onShowStatusBar = { [weak self] in self?.showStatusBar() }
         win.onRebuildMenu   = { [weak self] in self?.rebuildMenu() }
@@ -487,22 +503,51 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
+    /// 화면의 부니 우클릭 메뉴도 메뉴바 메뉴와 같은 기능을 쓰도록 동작을 이어 준다
+    private func wireAppMenuBridge() {
+        let b = AppMenuBridge.shared
+        // 켜짐·꺼짐이 저절로 바뀌어도(세션 종료·시간 만료) 메뉴 제목이 맞게 바뀐다
+        AwakeManager.shared.$isActive.dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildMenu() }.store(in: &cancellables)
+        b.hideAll                = { [weak self] in self?.hideAll() }
+        b.showAll                = { [weak self] in self?.showAll() }
+        b.openShop               = { [weak self] in self?.openShop() }
+        b.openChat               = { [weak self] in self?.openChat() }
+        b.openTeam               = { [weak self] in self?.openTeam() }
+        b.openUpgrade            = { [weak self] in self?.openUpgrade() }
+        b.openSettings           = { [weak self] in self?.openSettings() }
+        b.toggleFocusMode        = { [weak self] in self?.toggleFocusMode() }
+        b.setFocusIdleMinutes    = { [weak self] m in
+            FocusModeStore.shared.idleMinutes = m; self?.rebuildMenu()
+        }
+        b.promptFocusIdleMinutes = { [weak self] in self?.promptFocusIdleMinutes() }
+        b.startKeepAwake         = { [weak self] sec in
+            AwakeManager.shared.enable(duration: sec); self?.rebuildMenu()
+        }
+        b.startKeepAwakeFollowing = { [weak self] in self?.startKeepAwakeFollowing() }
+        b.stopKeepAwake          = { [weak self] in self?.stopKeepAwake() }
+        // 덮개 닫아도 계속 실행 — "세션이 끝날 때까지" 모드가 보는 '일하는 중' 판단
+        AwakeManager.shared.sessionsRunningProvider = { [weak self] in
+            let visible = self?.sessions.values.contains { $0.controller.state.isRunning } ?? false
+            let squad = MainActor.assumeIsolated { TeamStore.shared.runningJob != nil }
+            return visible || squad
+        }
+        b.installAwakeHelper     = { [weak self] in self?.installAwakeHelper() }
+        b.toggleLaunchAtLogin    = { [weak self] in self?.toggleLaunchAtLogin() }
+        b.hideStatusBar          = { [weak self] in
+            guard self?.statusItem != nil else { return }
+            self?.hideStatusBar(); self?.rebuildMenu()
+        }
+        b.showStatusBar          = { [weak self] in self?.showStatusBar() }
+        b.disableAlwaysApprove   = { [weak self] in self?.disableAlwaysApprove() }
+        b.downloadUpdate         = { [weak self] in self?.downloadUpdate() }
+    }
+
     private func rebuildMenu() {
         syncHotkeyPermissionState()
         refreshSwitchTargets()
+        publishAppMenuState()
         let menu = NSMenu()
-
-        if let ver = availableUpdate {
-            if let status = updateStatus {
-                let item = NSMenuItem(title: status, action: nil, keyEquivalent: "")
-                item.isEnabled = false; menu.addItem(item)
-            } else {
-                let item = NSMenuItem(title: L.t("🆕 v\(ver)로 업데이트…", "🆕 Update to v\(ver)…"),
-                                      action: #selector(downloadUpdate), keyEquivalent: "")
-                item.target = self; menu.addItem(item)
-            }
-            menu.addItem(.separator())
-        }
 
         // 전체 허용 모드 상태 표시
         let anyAlwaysApprove = sessions.values.contains { $0.controller.alwaysApprove }
@@ -513,77 +558,112 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self; menu.addItem(item); menu.addItem(.separator())
         }
 
-        /// 기능별 묶음 머리글 — 눌리지 않는 작은 제목
-        func header(_ ko: String, _ en: String) {
-            if #available(macOS 14.0, *) {
-                menu.addItem(NSMenuItem.sectionHeader(title: L.t(ko, en)))
-            } else {
-                let h = NSMenuItem(title: L.t(ko, en), action: nil, keyEquivalent: "")
-                h.isEnabled = false
-                menu.addItem(h)
-            }
+        /// 메뉴를 짧게 유지하려고 자주 쓰는 3가지만 바로 보이게 하고, 나머지는 접어 둔다
+        func action(_ title: String, _ sel: Selector, key: String = "") -> NSMenuItem {
+            let it = NSMenuItem(title: title, action: sel, keyEquivalent: key)
+            it.target = self
+            return it
+        }
+        func folder(_ title: String, _ build: (NSMenu) -> Void) {
+            let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            build(sub)
+            it.submenu = sub
+            menu.addItem(it)
         }
 
-        // ── 부니 화면
-        // 숨기기/불러오기를 하나로 토글하면, 세션 하나가 소리 없이(예: Claude
-        // 종료 감지) 숨겨졌을 때 "불러오기" 항목 자체가 안 보여서 — 그걸
-        // 보이게 하려고 전체를 숨겼다가 다시 불러와야 하는 번거로움이 생김.
-        // 항상 둘 다 보여주고 각각 명시적으로 동작하게 한다.
-        header("부니 화면", "On screen")
-        menu.addItem(NSMenuItem(title: L.t("전체 부니 숨기기", "Hide all Buni"),
-                                action: #selector(hideAllMenuAction), keyEquivalent: "h"))
-        menu.addItem(NSMenuItem(title: L.t("전체 부니 불러오기", "Show all Buni"),
-                                action: #selector(showAllMenuAction), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: L.t("위치 초기화", "Reset position"),
-                                action: #selector(resetPosition), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: L.t("Claude 열기", "Open Claude"),
-                                action: #selector(openClaude), keyEquivalent: "o"))
-        menu.addItem(.separator())
-
-        // ── 꾸미기 · 함께하기
-        header("꾸미기 · 함께하기", "Style & together")
-        let shopItem = NSMenuItem(title: L.t("🛍 부니 상점  (🪙 \(ShopStore.shared.coins))",
-                                             "🛍 Buni Shop  (🪙 \(ShopStore.shared.coins))"),
-                                  action: #selector(openShop), keyEquivalent: "")
-        shopItem.target = self
-        menu.addItem(shopItem)
-
+        // ── 자주 쓰는 것: 스쿼드 · 상점 · 채팅
+        let reviewCount = MainActor.assumeIsolated { TeamStore.shared.reviewCount }
+        let squadItem = action(reviewCount > 0
+                                ? L.t("🐰 부니 스쿼드…  (검토 대기 \(reviewCount))", "🐰 Buni Squad…  (\(reviewCount) to review)")
+                                : L.t("🐰 부니 스쿼드…", "🐰 Buni Squad…"),
+                            #selector(openTeam))
+        // 단축키를 메뉴 옆에 보여 준다 (실제 동작은 전역 단축키가 맡는다)
+        if let sc = ShortcutStore.shared.squad {
+            let name = KeyShortcut.keyName(for: sc.keyCode)
+            if name.count == 1 {
+                squadItem.keyEquivalent = name.lowercased()
+                squadItem.keyEquivalentModifierMask = NSEvent.ModifierFlags(rawValue: sc.modifiers)
+            }
+        }
+        menu.addItem(squadItem)
+        menu.addItem(action(L.t("🛍 부니 상점  (🪙 \(ShopStore.shared.coins))",
+                                "🛍 Buni Shop  (🪙 \(ShopStore.shared.coins))"),
+                            #selector(openShop)))
         let chatRoom = MainActor.assumeIsolated { ChatStore.shared.roomCode }
-        let chatTitle = chatRoom.map { L.t("💬 부니 채팅  (방 \($0))", "💬 Buni Chat  (room \($0))") }
-                        ?? L.t("💬 부니 채팅…", "💬 Buni Chat…")
-        let chatItem = NSMenuItem(title: chatTitle, action: #selector(openChat), keyEquivalent: "")
-        chatItem.target = self
-        menu.addItem(chatItem)
+        menu.addItem(action(chatRoom.map { L.t("💬 부니 채팅  (방 \($0))", "💬 Buni Chat  (room \($0))") }
+                                ?? L.t("💬 부니 채팅…", "💬 Buni Chat…"),
+                            #selector(openChat)))
+        let proSummary = ProManager.shared.status().summary
+        menu.addItem(action(L.t("⭐ 부니 Pro  (\(proSummary))", "⭐ Buni Pro  (\(proSummary))"), #selector(openUpgrade)))
         menu.addItem(.separator())
 
-        // ── 작업 도구
-        header("작업 도구", "Work tools")
-        menu.addItem(buildKeepAwakeMenuItem())
+        // ── 접어 둔 묶음 (눌러서 펼친다)
+        folder(L.t("부니 화면", "On screen")) { sub in
+            // 숨기기/불러오기를 하나로 토글하면, 세션 하나가 소리 없이(예: Claude
+            // 종료 감지) 숨겨졌을 때 "불러오기" 항목 자체가 안 보여서 — 그걸
+            // 보이게 하려고 전체를 숨겼다가 다시 불러와야 하는 번거로움이 생김.
+            // 항상 둘 다 보여주고 각각 명시적으로 동작하게 한다.
+            sub.addItem(action(L.t("전체 부니 숨기기", "Hide all Buni"), #selector(hideAllMenuAction), key: "h"))
+            sub.addItem(action(L.t("전체 부니 불러오기", "Show all Buni"), #selector(showAllMenuAction)))
+            sub.addItem(action(L.t("위치 초기화", "Reset position"), #selector(resetPosition)))
+            sub.addItem(.separator())
+            sub.addItem(action(L.t("Claude 열기", "Open Claude"), #selector(openClaude), key: "o"))
+        }
 
-        let focusItem = NSMenuItem(title: L.t("딴짓 방해모드", "Distraction mode"),
-                                   action: #selector(toggleFocusMode), keyEquivalent: "")
-        focusItem.state = FocusModeStore.shared.enabled ? .on : .off
-        menu.addItem(focusItem)
-        menu.addItem(.separator())
+        // 켜 둔 기능은 접힌 제목에서도 보이게 한다
+        var toolBadges: [String] = []
+        if AwakeManager.shared.isActive { toolBadges.append("☕️") }
+        if FocusModeStore.shared.enabled { toolBadges.append("🏃") }
+        folder(L.t("작업 도구", "Work tools") + (toolBadges.isEmpty ? "" : "  " + toolBadges.joined(separator: " "))) { sub in
+            sub.addItem(buildKeepAwakeMenuItem())
 
-        // ── 앱 설정
-        header("앱", "App")
-        menu.addItem(NSMenuItem(title: L.t("설정...", "Settings..."),
-                                action: #selector(openSettings), keyEquivalent: ","))
+            let focusItem = action(L.t("딴짓 방해모드", "Distraction mode"), #selector(toggleFocusMode))
+            focusItem.state = FocusModeStore.shared.enabled ? .on : .off
+            sub.addItem(focusItem)
 
-        let loginItem = NSMenuItem(title: L.t("부팅 시 자동 실행", "Launch at login"),
-                                   action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
-        loginItem.state = isLaunchAtLoginEnabled ? .on : .off
-        menu.addItem(loginItem)
+            let idleItem = NSMenuItem(title: L.t("   방해 시작 시간: \(FocusModeStore.shared.idleMinutes)분",
+                                                 "   Starts after: \(FocusModeStore.shared.idleMinutes) min idle"),
+                                      action: nil, keyEquivalent: "")
+            let idleMenu = NSMenu()
+            let current = FocusModeStore.shared.idleMinutes
+            for m in FocusModeStore.presetMinutes {
+                let it = action(L.t("\(m)분", "\(m) min"), #selector(setFocusIdleMinutes(_:)))
+                it.tag = m
+                it.state = m == current ? .on : .off
+                idleMenu.addItem(it)
+            }
+            idleMenu.addItem(.separator())
+            let customIt = action(L.t("직접 입력…", "Custom…"), #selector(promptFocusIdleMinutes))
+            customIt.state = FocusModeStore.presetMinutes.contains(current) ? .off : .on
+            idleMenu.addItem(customIt)
+            idleItem.submenu = idleMenu
+            sub.addItem(idleItem)
+        }
 
-        menu.addItem(NSMenuItem(title: L.t("메뉴바 아이콘 숨기기", "Hide menu bar icon"),
-                                action: #selector(hideStatusBar), keyEquivalent: ""))
+        folder(L.t("앱", "App")) { sub in
+            sub.addItem(action(L.t("설정...", "Settings..."), #selector(openSettings), key: ","))
+            let loginItem = action(L.t("부팅 시 자동 실행", "Launch at login"), #selector(toggleLaunchAtLogin))
+            loginItem.state = isLaunchAtLoginEnabled ? .on : .off
+            sub.addItem(loginItem)
+            sub.addItem(action(L.t("메뉴바 아이콘 숨기기", "Hide menu bar icon"), #selector(hideStatusBar)))
+        }
         menu.addItem(.separator())
 
         let verItem = NSMenuItem(title: "Buni v\(UpdateChecker.currentVersion)",
                                  action: nil, keyEquivalent: "")
         verItem.isEnabled = false
         menu.addItem(verItem)
+
+        // 새 버전이 있으면 지금 버전 바로 아래(종료 위)에 보인다
+        if let ver = availableUpdate {
+            if let status = updateStatus {
+                let item = NSMenuItem(title: status, action: nil, keyEquivalent: "")
+                item.isEnabled = false; menu.addItem(item)
+            } else {
+                menu.addItem(action(L.t("🆕 v\(ver)로 업데이트…", "🆕 Update to v\(ver)…"), #selector(downloadUpdate)))
+            }
+        }
 
         menu.addItem(NSMenuItem(title: L.t("종료", "Quit"),
                                 action: #selector(NSApplication.terminate(_:)),
@@ -592,6 +672,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self
         }
         statusItem?.menu = menu
+    }
+
+    /// 부니 우클릭 메뉴가 보여줄 앱 전체 상태를 내보낸다 (바뀐 때만 반영됨)
+    private func publishAppMenuState() {
+        let anyAlways = sessions.values.contains { $0.controller.alwaysApprove }
+        let (review, room) = MainActor.assumeIsolated { (TeamStore.shared.reviewCount, ChatStore.shared.roomCode) }
+        AppMenuBridge.shared.update(.init(updateVersion: availableUpdate,
+                                          updateStatus: updateStatus,
+                                          statusBarHidden: statusItem == nil,
+                                          anyAlwaysApprove: anyAlways,
+                                          launchAtLogin: isLaunchAtLoginEnabled,
+                                          reviewCount: review,
+                                          chatRoom: room,
+                                          proSummary: ProManager.shared.status().summary))
     }
 
     // MARK: - 덮개 닫아도 계속 실행
@@ -625,6 +719,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.submenu = sub
             return item
         }
+
+        // 세션이 도는 동안만 켜 두고, 다 끝나면 같이 끈다 (시간을 정하지 않아도 되는 쪽)
+        let follow = NSMenuItem(title: L.t("세션 실행 중에만 (끝나면 자동 해제)", "While sessions run (auto-off when done)"),
+                                action: #selector(startKeepAwakeFollowing), keyEquivalent: "")
+        follow.target = self
+        follow.state = awake.followingSessions ? .on : .off
+        sub.addItem(follow)
+        sub.addItem(.separator())
 
         let durations: [(String, String, TimeInterval?)] = [
             ("30분",    "30 min", 30 * 60),
@@ -667,6 +769,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func startKeepAwake(_ sender: NSMenuItem) {
         let seconds = (sender.representedObject as? NSNumber)?.doubleValue
         AwakeManager.shared.enable(duration: seconds)
+        rebuildMenu()
+    }
+
+    @objc private func startKeepAwakeFollowing() {
+        AwakeManager.shared.enableUntilSessionsFinish()
         rebuildMenu()
     }
 
@@ -787,6 +894,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in ChatWindowController.shared.showLobby() }
     }
 
+    /// 메뉴바가 없는(accessory) 앱은 ⌘C·⌘V·⌘X·⌘A·⌘Z 가 어디서도 안 먹는다 — 글씨 복사, 입력창 붙여넣기가 되도록 보이지 않는 편집 메뉴를 단다.
+    private func installEditMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem(); main.addItem(appItem); appItem.submenu = NSMenu()
+        let editItem = NSMenuItem(); main.addItem(editItem)
+        let edit = NSMenu(title: L.t("편집", "Edit"))
+        func add(_ title: String, _ sel: Selector, _ key: String, _ mods: NSEvent.ModifierFlags = .command) {
+            let it = NSMenuItem(title: title, action: sel, keyEquivalent: key)
+            it.keyEquivalentModifierMask = mods
+            edit.addItem(it)
+        }
+        add(L.t("실행 취소", "Undo"), Selector(("undo:")), "z")
+        add(L.t("다시 실행", "Redo"), Selector(("redo:")), "z", [.command, .shift])
+        edit.addItem(.separator())
+        add(L.t("잘라내기", "Cut"), #selector(NSText.cut(_:)), "x")
+        add(L.t("복사", "Copy"), #selector(NSText.copy(_:)), "c")
+        add(L.t("붙여넣기", "Paste"), #selector(NSText.paste(_:)), "v")
+        add(L.t("전체 선택", "Select All"), #selector(NSText.selectAll(_:)), "a")
+        editItem.submenu = edit
+        NSApp.mainMenu = main
+    }
+
+    @objc func openUpgrade() { ProUpgradeWindow.show() }
+
+    @objc func openTeam() {
+        Task { @MainActor in TeamWindowController.shared.show() }
+    }
+
     // MARK: - 채팅 부니 모션
 
     private var chatMotionTimer: Timer?
@@ -824,7 +959,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         win.setContentSize(NSSize(width: 440, height: 600))
         win.contentMinSize = NSSize(width: 420, height: 520)
         win.title = L.t("부니 상점", "Buni Shop")
-        win.backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1)
+        win.backgroundColor = NSColor(BT.bgCanvas)
+        win.titlebarAppearsTransparent = true
         win.isReleasedWhenClosed = false
         win.center()
         win.makeKeyAndOrderFront(nil)
@@ -845,7 +981,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         win.setContentSize(NSSize(width: 400, height: 560))
         win.contentMinSize = NSSize(width: 380, height: 360)
         win.title = L.t("설정", "Settings")
-        win.backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1)
+        win.backgroundColor = NSColor(BT.bgCanvas)
+        win.titlebarAppearsTransparent = true
         win.isReleasedWhenClosed = false
         win.center()
         win.makeKeyAndOrderFront(nil)
@@ -861,7 +998,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - 부팅 시 자동 실행
 
-    private var isLaunchAtLoginEnabled: Bool { SMAppService.mainApp.status == .enabled }
+    /// 메뉴를 다시 만들 때마다 시스템(XPC)에 묻지 않도록 잠깐 기억해 둔다 — 세션이 자주 생기고 사라질 때 메인 스레드가 막히지 않게
+    private var loginStatusCache: (at: Date, enabled: Bool)?
+    private var isLaunchAtLoginEnabled: Bool {
+        if let c = loginStatusCache, Date().timeIntervalSince(c.at) < 30 { return c.enabled }
+        let v = SMAppService.mainApp.status == .enabled
+        loginStatusCache = (Date(), v)
+        return v
+    }
 
     // MARK: - 딴짓 방해모드
 
@@ -870,7 +1014,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
+    @objc private func setFocusIdleMinutes(_ sender: NSMenuItem) {
+        FocusModeStore.shared.idleMinutes = sender.tag
+        rebuildMenu()
+    }
+
+    @objc private func promptFocusIdleMinutes() {
+        let alert = NSAlert()
+        alert.messageText = L.t("딴짓 방해모드", "Distraction mode")
+        alert.informativeText = L.t("마우스·키보드 입력이 몇 분 이상 없으면 부니가 돌아다닐까요?",
+                                    "After how many minutes without mouse/keyboard input should Buni start wandering?")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
+        field.stringValue = "\(FocusModeStore.shared.idleMinutes)"
+        alert.accessoryView = field
+        alert.addButton(withTitle: L.t("확인", "OK"))
+        alert.addButton(withTitle: L.t("취소", "Cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let m = Int(field.stringValue.trimmingCharacters(in: .whitespaces)), m > 0 else { return }
+        FocusModeStore.shared.idleMinutes = min(m, 24 * 60)
+        rebuildMenu()
+    }
+
     @objc private func toggleLaunchAtLogin() {
+        loginStatusCache = nil                       // 바꾸기 직전에는 기억해 둔 값을 믿지 않는다
         do {
             if isLaunchAtLoginEnabled { try SMAppService.mainApp.unregister() }
             else                      { try SMAppService.mainApp.register() }
@@ -878,6 +1046,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.open(
                 URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
         }
+        loginStatusCache = nil
         rebuildMenu()
     }
 
@@ -886,7 +1055,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupHotkeyMonitor() {
         let store = ShortcutStore.shared
         hotkeyMonitor.updateShortcuts(approve: store.approve, deny: store.deny,
-                                      hide: store.hide, alwaysApprove: store.alwaysApprove, chat: store.chat)
+                                      hide: store.hide, alwaysApprove: store.alwaysApprove, chat: store.chat,
+                                      squad: store.squad)
         // 승인·거부: 권한 요청 중인 모든 세션에 동시 적용
         hotkeyMonitor.onApprove = { [weak self] in
             self?.sessions.values.forEach {
@@ -900,6 +1070,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         hotkeyMonitor.onHide          = { [weak self] in self?.toggleVisibility() }
+        hotkeyMonitor.onSquad = { Task { @MainActor in TeamWindowController.shared.toggle() } }
         // 채팅 입력: 방에 있으면 닉네임 자리에 입력창을 열고, 방 밖이면 채팅 창(로비)을 연다
         hotkeyMonitor.onChat = {
             Task { @MainActor in
@@ -931,12 +1102,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 ShortcutStore.shared.$hide,
                 ShortcutStore.shared.$alwaysApprove
             ),
-            ShortcutStore.shared.$chat
+            Publishers.CombineLatest(ShortcutStore.shared.$chat, ShortcutStore.shared.$squad)
         )
         .debounce(for: .milliseconds(80), scheduler: DispatchQueue.main)
-        .sink { [weak self] four, chat in
+        .sink { [weak self] four, extra in
             self?.hotkeyMonitor.updateShortcuts(approve: four.0, deny: four.1,
-                                                hide: four.2, alwaysApprove: four.3, chat: chat)
+                                                hide: four.2, alwaysApprove: four.3,
+                                                chat: extra.0, squad: extra.1)
+            self?.rebuildMenu()          // 메뉴 옆 단축키 표시도 바뀐 값으로
         }
         .store(in: &cancellables)
 

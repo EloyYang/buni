@@ -15,6 +15,8 @@ from pathlib import Path
 import buni_shop
 import buni_items
 import buni_update
+import buni_pro
+import buni_pro_ui
 
 # ── Pixel unit (matches macOS p = 6.5)
 P = 6.5
@@ -38,6 +40,17 @@ CHARACTERS = {
     'yellowRabbit': ('#F5DB38', '#FFF5B8', '#FFF2BF', {'blush': True}),
     'greenRabbit':  ('#73CC61', '#C7F2AD', '#D1F2C7', {}),
 }
+
+
+def char_palette(char_id: str):
+    """CHARACTERS 의 색 + 고른 프리미엄 컬러 변형 (잠겨 있으면 원래 색). 눈썹 같은 extras 는 그대로."""
+    body, ear, nose, extras = CHARACTERS[char_id]
+    tint = buni_pro.shared().active_tint()
+    if tint:
+        body, ear, nose = (buni_pro.tint_hex(c, tint) for c in (body, ear, nose))
+    return body, ear, nose, extras
+
+
 #    (한국어, English) — 표시 언어에 따라 골라 쓴다 (char_display_name)
 CHAR_DISPLAY_NAMES = {
     'rabbit':       ('부니 (흰토끼)',   'Buni (white)'),
@@ -515,9 +528,10 @@ def _run_hook(hook_type: str):
                  'TodoRead', 'NotebookRead', 'AskUserQuestion'}
         # 클로드 자체가 이미 자동 승인하는 모드에서는 부니 게이트를 건너뛴다
         # (클로드가 안 묻는데 부니만 물어보는 문제 방지)
-        AUTO_APPROVE_MODES = {'auto', 'bypassPermissions'}
+        # dontAsk: 허용 목록 밖은 클로드가 묻지 않고 거절한다 — 부니 스쿼드(사람이 없는 시간)의 모드라 승인 창을 띄우지 않는다
+        AUTO_APPROVE_MODES = {'auto', 'bypassPermissions', 'dontAsk'}
         EDIT_TOOLS = {'Write', 'Edit', 'MultiEdit', 'NotebookEdit'}
-        skip_gate = (perm_mode in AUTO_APPROVE_MODES or
+        skip_gate = (bool(os.environ.get('BUNI_TEAM_RUN')) or perm_mode in AUTO_APPROVE_MODES or
                      (perm_mode == 'acceptEdits' and tool in EDIT_TOOLS))
 
         if tool == 'AskUserQuestion':
@@ -913,6 +927,7 @@ class ShortcutSettingsWindow:
         ('deny',           ('권한 거부',     'Deny')),
         ('hide',           ('숨기기/보이기', 'Hide / show')),
         ('chat',           ('채팅 입력',     'Chat input')),
+        ('squad',          ('스쿼드 열기/닫기', 'Open / close Squad')),
     ]
 
     def __init__(self, parent: tk.Tk, persist: 'PersistenceManager',
@@ -932,12 +947,13 @@ class ShortcutSettingsWindow:
     def _load(self):
         saved = self._persist.get('shortcuts', {})
         defaults = {'approve': (GlobalHotkeyManager.MOD_CTRL, 0x0D),                                   # Ctrl+Enter
-                    'chat': (GlobalHotkeyManager.MOD_CTRL | GlobalHotkeyManager.MOD_ALT, 0x43)}        # Ctrl+Alt+C
+                    'chat': (GlobalHotkeyManager.MOD_CTRL | GlobalHotkeyManager.MOD_ALT, 0x43),        # Ctrl+Alt+C
+                    'squad': (GlobalHotkeyManager.MOD_CTRL | GlobalHotkeyManager.MOD_ALT, 0x53)}       # Ctrl+Alt+S
         for action, _ in self.ACTIONS:
             v = saved.get(action)
             if v:
                 self._shortcuts[action] = (v['mods'], v['vk'])
-            elif action in defaults and (action == 'approve' or action not in saved):   # 채팅은 지운 걸 되살리지 않는다
+            elif action in defaults and (action == 'approve' or action not in saved):   # 채팅·스쿼드는 지운 걸 되살리지 않는다
                 self._shortcuts[action] = defaults[action]
             else:
                 self._shortcuts[action] = None
@@ -1050,6 +1066,13 @@ class ShortcutSettingsWindow:
             tk.Frame(win, bg='#3A3A44', height=1).grid(
                 row=row, column=0, columnspan=3, sticky='ew', padx=16, pady=(8, 6))
 
+        # ── 부니 Pro
+        sep(r); r += 1
+        self._pro_frame = tk.Frame(win, bg=BG)
+        buni_pro_ui.fill_settings_section(self._pro_frame, t, buni_pro.shared(),
+                                          mgr.open_upgrade, mgr.show_onboarding)
+        self._pro_frame.grid(row=r, column=0, columnspan=3, sticky='w', padx=20, pady=(0, 2)); r += 1
+
         # ── 계정 연동 (선택)
         sep(r); r += 1
         tk.Label(win, text=t('계정 연동 (선택)', 'Account sync (optional)'), bg=BG, fg='white',
@@ -1075,17 +1098,21 @@ class ShortcutSettingsWindow:
 
         row = tk.Frame(win, bg=BG)
         row.grid(row=r, column=0, columnspan=3, padx=20, sticky='w'); r += 1
-        for i, (minutes, ko, en) in enumerate(buni_awake.DURATIONS):
+        tk.Button(row, text=t('세션 중에만', 'While sessions run'), bg='#2F4A3A', fg='white', relief='flat', bd=0,
+                  font=('Malgun Gothic', 8), padx=7, pady=3, cursor='hand2',
+                  activebackground='#3F6A50', activeforeground='white',
+                  command=awake.enable_until_sessions_finish).grid(row=0, column=0, padx=(0, 6))
+        for i, (minutes, ko, en) in enumerate(buni_awake.DURATIONS, start=1):
             tk.Button(row, text=t(ko, en), bg='#2A2A34', fg='white', relief='flat', bd=0,
                       font=('Malgun Gothic', 8), padx=7, pady=3, cursor='hand2',
                       activebackground='#3A3A50', activeforeground='white',
                       command=lambda m=minutes: awake.enable(m)).grid(
-                row=0, column=i, padx=(0 if i == 0 else 3, 0))
+                row=0, column=i, padx=(3, 0))
         self._awake_off = tk.Button(
             row, text=t('끄기', 'Off'), bg='#8A3A3A', fg='white', relief='flat', bd=0,
             font=('Malgun Gothic', 8), padx=7, pady=3, cursor='hand2',
             activebackground='#A04848', activeforeground='white', command=awake.disable)
-        self._awake_off.grid(row=0, column=len(buni_awake.DURATIONS), padx=(8, 0))
+        self._awake_off.grid(row=0, column=len(buni_awake.DURATIONS) + 1, padx=(8, 0))
 
         # 시간대 예약 — 매일 같은 시간에 자동으로 켜고 끈다
         sch = tk.Frame(win, bg=BG)
@@ -1145,6 +1172,9 @@ class ShortcutSettingsWindow:
             return
         BG, DIM = '#1E1E24', '#8A8A98'
         mgr, cloud = self._manager, self._manager.cloud
+        pf = getattr(self, '_pro_frame', None)
+        if pf is not None:
+            buni_pro_ui.fill_settings_section(pf, t, buni_pro.shared(), mgr.open_upgrade, mgr.show_onboarding)
         for w in self._acct.winfo_children():
             w.destroy()
 
@@ -1161,7 +1191,7 @@ class ShortcutSettingsWindow:
             row = tk.Frame(self._acct, bg=BG); row.pack(anchor='w', pady=(4, 0))
             # 같은 줄에 나란히
             for txt, cmd, color in ((t('지금 동기화', 'Sync now'),
-                                     lambda: threading.Thread(target=cloud.sync_now, daemon=True).start(), '#2A2A34'),
+                                     lambda: mgr.gate('cloud_sync') and threading.Thread(target=cloud.sync_now, daemon=True).start(), '#2A2A34'),
                                     (t('로그아웃', 'Sign out'), cloud.sign_out, '#2A2A34'),
                                     (t('서버 데이터 삭제', 'Delete server data'), self._confirm_delete, '#6A3A3A')):
                 tk.Button(row, text=txt, bg=color, fg='white', relief='flat', bd=0,
@@ -1184,6 +1214,11 @@ class ShortcutSettingsWindow:
                           activeforeground='white', command=mgr.cloud_sign_in_ui,
                           state='disabled' if cloud.busy else 'normal')
             b.pack(anchor='w', pady=(6, 0))
+        if cloud.is_signed_in and not buni_pro.shared().can('cloud_sync'):
+            tk.Label(self._acct, bg=BG, fg='#D9B25A', font=('Malgun Gothic', 8), wraplength=330, justify='left', anchor='w',
+                     text=t('Pro 체험이 끝나서 동기화를 잠시 멈췄어요. 데이터는 그대로 남아 있고, Pro로 돌아오면 이어서 맞춰요.',
+                            'Sync is paused because your Pro trial ended. Your data is untouched and sync resumes with Pro.')
+                     ).pack(anchor='w', pady=(4, 0))
         if cloud.message:
             tk.Label(self._acct, text=cloud.message, bg=BG, fg='#D9B25A', font=('Malgun Gothic', 8),
                      wraplength=330, justify='left', anchor='w').pack(anchor='w', pady=(4, 0))
@@ -1511,7 +1546,7 @@ class CharacterDrawMixin:
     # ── Character parts ───────────────────────────────────────
 
     def _draw_ears(self):
-        body, ear, *_ = CHARACTERS[self.character]
+        body, ear, *_ = char_palette(self.character)
         ch = self.character
         # Ear dimensions per character (matching Swift views)
         if ch == 'pinkRabbit':
@@ -1532,7 +1567,7 @@ class CharacterDrawMixin:
             self._rect(sx, yb + (-yo - P*0.1 - yb) * s,   iw, ih * s, ear)
 
     def _draw_body(self):
-        body, ear, nose, extras = CHARACTERS[self.character]
+        body, ear, nose, extras = char_palette(self.character)
         ch = self.character
         # Body size per character
         if ch == 'orangeRabbit':
@@ -1543,7 +1578,7 @@ class CharacterDrawMixin:
             self._rect(0, P*1.5, 4.5, 2.5, body)
 
     def _draw_arms(self):
-        body = CHARACTERS[self.character][0]
+        body = char_palette(self.character)[0]
         ch = self.character
         # Arms (with dark outline when holding laptop/doc)
         arm_x = P*2.70 if ch == 'orangeRabbit' else P*2.68 if ch == 'greenRabbit' else P*2.65
@@ -1556,7 +1591,7 @@ class CharacterDrawMixin:
         self._rect(rx, ry, 1.5, 0.9, body)
 
     def _draw_feet(self):
-        body = CHARACTERS[self.character][0]
+        body = char_palette(self.character)[0]
         ch = self.character
         # Foot size per character
         if ch in ('orangeRabbit', 'greenRabbit'):
@@ -1567,7 +1602,7 @@ class CharacterDrawMixin:
             self._rect( P*1.2, P*2.9, 1.5, 0.9, body)
 
     def _draw_head(self):
-        body, ear, nose, extras = CHARACTERS[self.character]
+        body, ear, nose, extras = char_palette(self.character)
         ch = self.character
 
         # ── Head size (per-character, matching each Swift view)
@@ -2591,7 +2626,23 @@ class SessionWindow(CharacterDrawMixin):
         TITLE_H  = 20
         BTN_H    = 28
         GAP      = 6
-        WIN_H_   = PAD + TITLE_H + GAP + BTN_H + PAD
+        # 부니 스쿼드가 돌린 세션이면 '스쿼드 결과 보기' 버튼을 하나 더 둔다
+        squad_job = None
+        try:
+            import buni_team
+            squad_job = buni_team.find_job_for_session(self.session_id)
+        except Exception:
+            squad_job = None
+        squad_job_data = None
+        if squad_job:
+            try:
+                squad_job_data = buni_team.load_job(squad_job)
+            except Exception:
+                squad_job_data = None
+            if not squad_job_data:
+                squad_job = None
+        BW = 190 if squad_job else BW
+        WIN_H_   = PAD + TITLE_H + GAP + BTN_H + PAD + ((BTN_H + GAP) if squad_job else 0)
 
         def _get_geometry(h):
             self.win.update_idletasks()
@@ -2644,27 +2695,33 @@ class SessionWindow(CharacterDrawMixin):
             b = max(0, int(hex_color[5:7], 16) - 30)
             return f'#{r:02X}{g:02X}{b:02X}'
 
+        def _button(label, bg, btn_y, on_click, tag):
+            bw = max(len(label) * 9 + 20, 60) if label.isascii() else len(label) * 12 + 20
+            bx, br = PAD, 7
+            by0, by1 = btn_y, btn_y + BTN_H
+            tags = (tag, tag + 'bg', 'bubble')
+            for dx0, dy0, dx1, dy1, st in [
+                    (bx, by0, bx+2*br, by0+2*br, 90), (bx+bw-2*br, by0, bx+bw, by0+2*br, 0),
+                    (bx, by1-2*br, bx+2*br, by1, 180), (bx+bw-2*br, by1-2*br, bx+bw, by1, 270)]:
+                cv.create_arc(dx0, dy0, dx1, dy1, start=st, extent=90, fill=bg, outline=bg, tags=tags)
+            cv.create_rectangle(bx+br, by0, bx+bw-br, by1, fill=bg, outline=bg, tags=tags)
+            cv.create_rectangle(bx, by0+br, bx+bw, by1-br, fill=bg, outline=bg, tags=tags)
+            cv.create_text(bx + bw//2, btn_y + BTN_H//2, text=label, font=('Malgun Gothic', 9, 'bold'),
+                           fill='white', tags=(tag, 'bubble'))
+            cv.tag_bind(tag, '<Button-1>', lambda _: on_click())
+            cv.tag_bind(tag, '<Enter>', lambda _: cv.itemconfig(tag + 'bg', fill=_darken(bg), outline=_darken(bg)))
+            cv.tag_bind(tag, '<Leave>', lambda _: cv.itemconfig(tag + 'bg', fill=bg, outline=bg))
+
         btn_y = PAD + TITLE_H + GAP
-        bg    = '#2DB357'
-        label = t('확인', 'OK')
-        bw    = len(label) * 9 + 20
-        bx    = PAD
-        br    = 7
-        by0, by1 = btn_y, btn_y + BTN_H
-        for dx0,dy0,dx1,dy1,st in [
-            (bx,by0,bx+2*br,by0+2*br,90),(bx+bw-2*br,by0,bx+bw,by0+2*br,0),
-            (bx,by1-2*br,bx+2*br,by1,180),(bx+bw-2*br,by1-2*br,bx+bw,by1,270)]:
-            cv.create_arc(dx0,dy0,dx1,dy1, start=st, extent=90,
-                          fill=bg, outline=bg, tags=('btn', 'btnbg', 'bubble'))
-        cv.create_rectangle(bx+br, by0, bx+bw-br, by1, fill=bg, outline=bg, tags=('btn','btnbg','bubble'))
-        cv.create_rectangle(bx, by0+br, bx+bw, by1-br,  fill=bg, outline=bg, tags=('btn','btnbg','bubble'))
-        cv.create_text(bx + bw//2, btn_y + BTN_H//2, text=label,
-                       font=('Consolas', 9, 'bold'), fill='white', tags=('btn','bubble'))
-        cv.tag_bind('btn', '<Button-1>', lambda _: self._dismiss_completed())
-        cv.tag_bind('btn', '<Enter>',
-                    lambda _: cv.itemconfig('btnbg', fill=_darken(bg), outline=_darken(bg)))
-        cv.tag_bind('btn', '<Leave>',
-                    lambda _: cv.itemconfig('btnbg', fill=bg, outline=bg))
+        if squad_job:
+            finished = squad_job_data.get('status') in ('review', 'done')
+            def _open_squad():
+                self._dismiss_completed()
+                self.manager.root.after(0, lambda: self.manager.open_team(squad_job))
+            _button(t('🐰 스쿼드 결과 보기', '🐰 See squad result') if finished else t('🐰 스쿼드 보기', '🐰 Open squad'),
+                    '#7350D9', btn_y, _open_squad, 'sqbtn')
+            btn_y += BTN_H + GAP
+        _button(t('확인', 'OK'), '#2DB357', btn_y, self._dismiss_completed, 'btn')
 
     # ── Ask-user popup (AskUserQuestion — 클로드 열기 버튼 제공) ──
 
@@ -3090,6 +3147,14 @@ class SessionWindow(CharacterDrawMixin):
                                    command=lambda c=cid: self._set_character(c))
         self._menu.add_cascade(label=t('캐릭터 변경', 'Change character'), menu=char_menu)
 
+        tint_menu = tk.Menu(self._menu, tearoff=0)
+        tint_menu.add_command(label=t('원래 색', 'Original'), command=lambda: self._set_tint(None))
+        pro = buni_pro.shared()
+        for tid, ko, en, *_ in buni_pro.TINTS:
+            lock = '' if pro.item_unlocked(tid) else '🔒 '
+            tint_menu.add_command(label=lock + t(ko, en), command=lambda i=tid: self._set_tint(i))
+        self._menu.add_cascade(label=t('컬러 변형 (Pro)', 'Color variant (Pro)'), menu=tint_menu)
+
         label = t('메모 추가...', 'Add note...') if not self.memo else t('메모 편집...', 'Edit note...')
         self._menu.add_command(label=label, command=self._edit_memo)
         if self.memo:
@@ -3100,6 +3165,7 @@ class SessionWindow(CharacterDrawMixin):
         self._menu.add_command(label=t(f'🛍 부니 상점  (🪙 {self.shop.coins})', f'🛍 Buni Shop  (🪙 {self.shop.coins})'),
                                command=lambda: self.manager.open_shop(self.character))
         self._menu.add_command(label=t('💬 부니 채팅...', '💬 Buni Chat...'), command=self.manager.open_chat)
+        self._menu.add_command(label=t('⭐ 부니 Pro...', '⭐ Buni Pro...'), command=self.manager.open_upgrade)
 
         # ── 앱
         self._menu.add_separator()
@@ -3121,6 +3187,15 @@ class SessionWindow(CharacterDrawMixin):
             os.startfile('claude')
         except Exception:
             pass
+
+    def _set_tint(self, tint_id):
+        """프리미엄 컬러 변형을 고른다 — 잠겨 있으면 업그레이드 안내."""
+        if tint_id is not None and not buni_pro.shared().item_unlocked(tint_id):
+            self.manager.open_upgrade(t(*buni_pro.item_lock_message(tint_id)))
+            return
+        buni_pro.shared().set_tint(tint_id)
+        for w in self.manager.sessions.values():
+            w._draw()
 
     def _set_character(self, char_id: str):
         self.character = char_id
@@ -3418,6 +3493,8 @@ class SessionWindow(CharacterDrawMixin):
             parts = raw.split('__')
             tool  = ' '.join(parts[2:]) if len(parts) > 2 else raw
             return f"{tool.replace('_', ' ')} 실행 중"
+        if raw.startswith('squad:'):          # 부니 스쿼드 엔진이 적는 팀장 부니 이벤트 — 문구가 이미 완성돼 있다
+            return raw[len('squad:'):]
         return {
             'bash':      t('터미널 명령 실행 중', 'Running command'),
             'read':      t('파일 읽는 중', 'Reading file'),
@@ -4587,7 +4664,16 @@ class BuniManager:
         self._chat_window:  'ChatWindow | None' = None
         self._chat_lobby:   'ChatLobbyWindow | None' = None
         self.chat.add_listener(lambda: self._ui(self._on_chat_changed))
+        # 부니 스쿼드(에이전트 모드 · 업무 예약) — 엔진은 buni_team.py, 화면은 buni_team_ui.py
+        import buni_team
+        self.team_sched = buni_team.Scheduler(notify=lambda kind, job: self._ui(lambda: self._on_team_event(kind, job)))
+        self.team_sched.recover()
+        self._team_window = None
         self.awake    = buni_awake.AwakeManager(self.persist, self.root, t)
+        # "세션이 끝날 때까지" 모드가 보는 '일하는 중' 판단 — 부니 세션 + 스쿼드 작업
+        self.awake.sessions_running = lambda: (
+            any(sw.state in SessionWindow.RUNNING_STATES for sw in list(self.sessions.values()))
+            or self.team_sched.running_job_id is not None)
         self._shop_window: 'ShopWindow | None' = None
         self.shop.add_listener(lambda: self._ui(self._on_shop_changed))
         self.cloud.add_listener(lambda: self._ui(self._on_cloud_changed))
@@ -4621,6 +4707,8 @@ class BuniManager:
         # Poll sessions on main thread
         self._poll_sessions()
         self.root.after(2000, self._chat_motion_tick)
+        self.root.after(1500, self._maybe_onboard)   # 처음 실행이면 짧은 안내
+        self.root.after(5000, self._team_tick)
 
         # System tray
         self._start_tray()
@@ -5000,6 +5088,44 @@ class BuniManager:
             char = sw.character if sw else 'rabbit'
         self._shop_window = ShopWindow(self, char)
 
+    # ── Pro ───────────────────────────────────────────────────
+
+    def open_upgrade(self, reason: str | None = None):
+        """업그레이드 창 — 잠긴 기능을 눌렀으면 그 안내(reason)를 위에 보여준다."""
+        win = getattr(self, '_upgrade_window', None)
+        if win and win.is_open():
+            win.show(reason)
+            return
+        self._upgrade_window = buni_pro_ui.ProUpgradeWindow(
+            self.root, t, buni_pro.shared(), reason, on_change=self._on_pro_changed)
+
+    def gate(self, feature: str) -> bool:
+        """Pro 기능을 써도 되면 True. 잠겨 있으면 업그레이드 안내를 띄우고 False."""
+        store = buni_pro.shared()
+        if store.can(feature):
+            return True
+        self.open_upgrade(t(*buni_pro.lock_message(feature)))
+        return False
+
+    def show_onboarding(self):
+        win = getattr(self, '_onboarding', None)
+        if win and win.is_open():
+            return
+        self._onboarding = buni_pro_ui.OnboardingWindow(
+            self.root, t, buni_pro.shared(), on_upgrade=self.open_upgrade)
+
+    def _maybe_onboard(self):
+        if not buni_pro.shared().onboarding_done:
+            self.show_onboarding()
+
+    def _on_pro_changed(self):
+        """키를 등록하면 설정·트레이·세션 그림을 새 상태로 다시 맞춘다."""
+        self._refresh_settings()
+        self._refresh_tray_menu()
+        for w in self.sessions.values():
+            try: w._draw()
+            except Exception: pass
+
     # ── 채팅 ──────────────────────────────────────────────────
 
     def _on_chat_changed(self):
@@ -5020,6 +5146,48 @@ class BuniManager:
             return
         self._chat_lobby = ChatLobbyWindow(self)
 
+    # ── 부니 스쿼드 ─────────────────────────────────────────────
+
+    def open_team(self, job_id=None):
+        import buni_team_ui
+        if self._team_window and self._team_window.is_open():
+            self._team_window.show(job_id)
+            return
+        self._team_window = buni_team_ui.TeamWindow(self, t)
+        if job_id:
+            self._team_window.show(job_id)
+
+    def _team_tick(self):
+        """20초마다 예약 시간대인지 보고 대기열을 진행한다 (진행 중이면 PC가 잠들지 않게 한다)."""
+        try:
+            self.team_sched.tick()
+            if self.team_sched.running_job_id and sys.platform.startswith('win'):
+                ctypes.windll.kernel32.SetThreadExecutionState(0x00000001)       # ES_SYSTEM_REQUIRED
+        except Exception:
+            pass
+        self.root.after(20000, self._team_tick)
+
+    def _team_unseen(self) -> int:
+        try:
+            import buni_team
+            return sum(1 for j in buni_team.list_jobs() if j['status'] == 'review')
+        except Exception:
+            return 0
+
+    def _on_team_event(self, kind, job):
+        msg = {'job_done': t(f"✅ 스쿼드 작업 완료 — {job['title']}\n트레이 메뉴 → 부니 스쿼드에서 결과를 검토하세요", f"✅ Squad job finished — {job['title']}\nReview it from the tray menu → Buni Squad"),
+               'job_failed': t(f"⚠ 스쿼드 작업이 멈췄어요 — {job['title']}", f"⚠ Squad job stopped — {job['title']}"),
+               'limit_wait': t(f"⏸ 플랜 한도에 걸려 잠시 기다려요 — {job['title']}", f"⏸ Waiting for the plan limit — {job['title']}"),
+               'paused': t(f"🌙 예약 시간이 끝나 멈췄어요 — {job['title']}", f"🌙 Scheduled time ended, paused — {job['title']}")}.get(kind)
+        if msg and self._tray_icon is not None:
+            try:
+                self._tray_icon.notify(msg, 'Buni')
+            except Exception:
+                pass
+        self._refresh_tray_menu()
+        if self._team_window and self._team_window.is_open():
+            self._team_window.refresh(force=True)
+
     def _chat_motion_tick(self):
         """내 세션들의 상태를 한 가지 모션으로 요약해 채팅방에 알린다.
         하나라도 작업 중이면 작업 중, 아니면 완료된 세션이 있으면 완료, 그 밖엔 대기.
@@ -5038,6 +5206,10 @@ class BuniManager:
         """"다른 PC와 연동" — 바로 Google 로그인으로 넘어간다."""
         cloud = self.cloud
         if cloud.busy:
+            return
+        # 새로 동기화를 켜려면 Pro 가 필요하다 — 이미 쓰던 사용자는 그대로 로그인할 수 있다
+        if buni_pro.shared().cloud_policy() == 'blocked':
+            self.gate('cloud_sync')
             return
         cloud.give_consent()          # 안내는 설정 창의 계정 영역에 글로 두고, 로그인 때는 경고 창을 띄우지 않는다
         threading.Thread(target=cloud.sign_in, daemon=True).start()
@@ -5174,15 +5346,17 @@ class BuniManager:
             'deny':           self._hk_deny,
             'hide':           self._hk_hide,
             'chat':           self._hk_chat,
+            'squad':          self._hk_squad,
         }
         self._hotkey_mgr.start(self.root, callbacks)
         # 저장된 단축키 로드 (ShortcutSettingsWindow 생성 전 직접 적용)
         saved = self.persist.get('shortcuts', {})
         defaults = {'approve': {'mods': GlobalHotkeyManager.MOD_CTRL, 'vk': 0x0D},
-                    'chat': {'mods': GlobalHotkeyManager.MOD_CTRL | GlobalHotkeyManager.MOD_ALT, 'vk': 0x43}}
-        for action in ('approve', 'always_approve', 'deny', 'hide', 'chat'):
+                    'chat': {'mods': GlobalHotkeyManager.MOD_CTRL | GlobalHotkeyManager.MOD_ALT, 'vk': 0x43},
+                    'squad': {'mods': GlobalHotkeyManager.MOD_CTRL | GlobalHotkeyManager.MOD_ALT, 'vk': 0x53}}
+        for action in ('approve', 'always_approve', 'deny', 'hide', 'chat', 'squad'):
             v = saved.get(action)
-            if not v and (action == 'approve' or (action == 'chat' and 'chat' not in saved)):
+            if not v and (action == 'approve' or (action in ('chat', 'squad') and action not in saved)):
                 v = defaults[action]
             if v:
                 self._hotkey_mgr.set_shortcut(action, v['mods'], v['vk'])
@@ -5212,6 +5386,20 @@ class BuniManager:
             self._chat_window.open_input()
         else:
             self.open_chat()
+
+    def _hk_squad(self):
+        """스쿼드 단축키 — 닫혀 있으면 열고, 앞에 떠 있으면 닫고, 가려졌으면 앞으로 가져온다."""
+        win = self._team_window
+        if win and win.is_open():
+            try:
+                if self.root.focus_displayof() is not None and str(self.root.focus_get()).startswith(str(win.win)):
+                    win.close()
+                    return
+            except Exception:
+                pass
+            win.show()
+        else:
+            self.open_team()
 
     def _hk_hide(self):
         if any(w.is_visible for w in self.sessions.values()):
@@ -5267,9 +5455,15 @@ class BuniManager:
         def toggle_schedule(icon, item):
             self.root.after(0, lambda: self.awake.set_schedule(enabled=not self.awake.schedule_enabled))
 
-        items = [pystray.MenuItem(
+        def follow(icon, item):
+            self.root.after(0, self.awake.enable_until_sessions_finish)
+
+        items = [pystray.MenuItem(lambda i: t('세션 실행 중에만 (끝나면 자동 해제)', 'While sessions run (auto-off when done)'),
+                                  follow, checked=lambda i: self.awake.following),
+                 pystray.Menu.SEPARATOR]
+        items += [pystray.MenuItem(
                     (lambda ko, en: (lambda i: t(ko, en)))(ko, en), start(minutes))
-                 for minutes, ko, en in buni_awake.DURATIONS]
+                  for minutes, ko, en in buni_awake.DURATIONS]
         items += [
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(lambda i: t('지금 끄기', 'Turn off now'), off,
@@ -5339,8 +5533,14 @@ class BuniManager:
         def on_shop(icon, item):
             self.root.after(0, self.open_shop)
 
+        def on_pro(icon, item):
+            self.root.after(0, self.open_upgrade)
+
         def on_chat(icon, item):
             self.root.after(0, self.open_chat)
+
+        def on_team(icon, item):
+            self.root.after(0, self.open_team)
 
         def on_reset(icon, item):
             self.root.after(0, lambda: [
@@ -5366,9 +5566,6 @@ class BuniManager:
             self.root.after(0, self.start_update)
 
         icon = pystray.Icon('Buni', make_icon(), 'Buni', pystray.Menu(
-            pystray.MenuItem(lambda i: t(f'🆕 v{self._update_info["version"]}로 업데이트…',
-                                         f'🆕 Update to v{self._update_info["version"]}…') if self._update_info else '',
-                             on_update, visible=lambda i: bool(self._update_info) and not self._update_busy),
             pystray.MenuItem(lambda i: t('⚡ 전체 허용 모드 켜짐 — 클릭하여 끄기',
                                          '⚡ Approve-all is ON — click to turn off'),
                               on_disable_always_approve, visible=_any_always_approve),
@@ -5384,6 +5581,10 @@ class BuniManager:
                                          f'🛍 Buni Shop  (🪙 {self.shop.coins})'), on_shop),
             pystray.MenuItem(lambda i: (t(f'💬 부니 채팅  (방 {self.chat.room_code})', f'💬 Buni Chat  (room {self.chat.room_code})')
                                         if self.chat.room_code else t('💬 부니 채팅...', '💬 Buni Chat...')), on_chat),
+            pystray.MenuItem(lambda i: t(f'⭐ 부니 Pro  ({t(*buni_pro.status_text(buni_pro.shared().status()))})',
+                                         f'⭐ Buni Pro  ({t(*buni_pro.status_text(buni_pro.shared().status()))})'), on_pro),
+            pystray.MenuItem(lambda i: (t(f'🐰 부니 스쿼드...  (검토 대기 {self._team_unseen()})', f'🐰 Buni Squad...  ({self._team_unseen()} to review)')
+                                        if self._team_unseen() else t('🐰 부니 스쿼드...', '🐰 Buni Squad...')), on_team),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(lambda i: t('작업 도구', 'Work tools'), None, enabled=False,
                              visible=lambda i: self.awake.supported),
@@ -5393,6 +5594,9 @@ class BuniManager:
             pystray.MenuItem(lambda i: t('설정...', 'Settings...'),     on_settings),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(f'Buni v{buni_update.current_version()}', None, enabled=False),
+            pystray.MenuItem(lambda i: t(f'🆕 v{self._update_info["version"]}로 업데이트…',
+                                         f'🆕 Update to v{self._update_info["version"]}…') if self._update_info else '',
+                             on_update, visible=lambda i: bool(self._update_info) and not self._update_busy),
             pystray.MenuItem(lambda i: t('종료', 'Quit'),               on_quit),
         ))
         self._tray_icon = icon

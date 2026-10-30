@@ -131,6 +131,10 @@ class CompanionController: ObservableObject {
     @Published var switchTargets: [SessionSwitchTarget] = []
     /// 완료 버블 확인 버튼 클릭 시 세션 제거 요청
     var onDismissCompleted: (() -> Void)?
+    /// 이 세션이 부니 스쿼드 작업의 세션이면 그 작업 id — 완료 말풍선에 '스쿼드 결과 보기' 버튼이 뜬다
+    @Published var squadJobId: String?
+    /// 스쿼드 화면을 그 작업으로 연다
+    var onOpenSquadRequest: ((String) -> Void)?
 
     private var autoHideTask: DispatchWorkItem?
     private var limitNoticeCancellable: AnyCancellable?

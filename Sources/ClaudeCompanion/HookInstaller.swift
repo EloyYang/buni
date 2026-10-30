@@ -9,7 +9,7 @@ enum HookInstaller {
     /// 설치된 스크립트가 이 버전보다 낮으면 자동으로 새 내용으로 갱신해서,
     /// 이미 설치해 쓰던 사용자도 새 기능(예: 백그라운드 작업 추적)을 받게 된다.
     /// 갱신 전 원본은 <이름>.bak 으로 백업한다.
-    static let scriptVersion = 4
+    static let scriptVersion = 6
     private static let versionMarker = "# buni-hook-version:"
 
     static func ensureInstalled() {
@@ -173,8 +173,11 @@ enum HookInstaller {
 
     private static let pretoolScript = #"""
 #!/usr/bin/env python3
-# buni-hook-version: 4
+# buni-hook-version: 6
 import sys, json, os, uuid, time
+# 부니 스쿼드가 띄운 세션(BUNI_TEAM_RUN)은 부니를 따로 만들지 않는다 — 스쿼드 전체를 팀장 부니 하나가 대신 보여 주고 알려 준다.
+if os.environ.get("BUNI_TEAM_RUN"):
+    sys.exit(0)
 
 SAFE_TOOLS = {"Read", "Glob", "Grep", "LS", "WebSearch", "WebFetch",
               "TodoRead", "NotebookRead", "AskUserQuestion"}
@@ -182,7 +185,9 @@ BUNI_PORT = 58765
 
 # ── Claude 자체가 이미 자동 승인하는 모드인지 판정 ──────────────────────
 # 클로드가 사용자에게 안 묻는 상황에서 부니만 승인 창을 띄우는 문제 방지.
-AUTO_APPROVE_MODES = {"auto", "bypassPermissions"}
+# dontAsk: 허용 목록에 없는 건 클로드가 묻지 않고 거절한다 — 부니 스쿼드(사람이 없는 시간)이 쓰는 모드라
+# 부니가 승인 창을 띄우고 60초씩 기다리면 안 된다. BUNI_TEAM_RUN 은 부니 스쿼드이 띄운 세션 표시.
+AUTO_APPROVE_MODES = {"auto", "bypassPermissions", "dontAsk"}
 EDIT_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 
 
@@ -200,7 +205,7 @@ def _t(ko, en):
 
 
 def _skip_gate(tool, perm_mode):
-    if perm_mode in AUTO_APPROVE_MODES:
+    if os.environ.get("BUNI_TEAM_RUN") or perm_mode in AUTO_APPROVE_MODES:
         return True
     # acceptEdits는 편집 도구만 자동 승인 — Bash 등은 그대로 승인 UI 사용
     return perm_mode == "acceptEdits" and tool in EDIT_TOOLS
@@ -362,8 +367,11 @@ except Exception:
 
     private static let posttoolScript = #"""
 #!/usr/bin/env python3
-# buni-hook-version: 4
+# buni-hook-version: 6
 import sys, json, os, re
+# 부니 스쿼드가 띄운 세션(BUNI_TEAM_RUN)은 부니를 따로 만들지 않는다 — 스쿼드 전체를 팀장 부니 하나가 대신 보여 주고 알려 준다.
+if os.environ.get("BUNI_TEAM_RUN"):
+    sys.exit(0)
 
 BUNI_PORT = 58765
 
@@ -434,8 +442,11 @@ except Exception:
 
     private static let notificationScript = #"""
 #!/usr/bin/env python3
-# buni-hook-version: 4
+# buni-hook-version: 6
 import sys, json, os, time
+# 부니 스쿼드가 띄운 세션(BUNI_TEAM_RUN)은 부니를 따로 만들지 않는다 — 스쿼드 전체를 팀장 부니 하나가 대신 보여 주고 알려 준다.
+if os.environ.get("BUNI_TEAM_RUN"):
+    sys.exit(0)
 
 BUNI_PORT = 58765
 
@@ -472,8 +483,11 @@ except Exception:
 
     private static let stopScript = #"""
 #!/usr/bin/env python3
-# buni-hook-version: 4
+# buni-hook-version: 6
 import sys, json, os
+# 부니 스쿼드가 띄운 세션(BUNI_TEAM_RUN)은 부니를 따로 만들지 않는다 — 스쿼드 전체를 팀장 부니 하나가 대신 보여 주고 알려 준다.
+if os.environ.get("BUNI_TEAM_RUN"):
+    sys.exit(0)
 
 BUNI_PORT = 58765
 
@@ -538,8 +552,11 @@ except Exception:
 
     private static let promptScript = #"""
 #!/usr/bin/env python3
-# buni-hook-version: 4
+# buni-hook-version: 6
 import sys, json, os, time
+# 부니 스쿼드가 띄운 세션(BUNI_TEAM_RUN)은 부니를 따로 만들지 않는다 — 스쿼드 전체를 팀장 부니 하나가 대신 보여 주고 알려 준다.
+if os.environ.get("BUNI_TEAM_RUN"):
+    sys.exit(0)
 
 BUNI_PORT = 58765
 

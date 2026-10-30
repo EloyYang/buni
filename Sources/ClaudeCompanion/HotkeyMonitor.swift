@@ -9,8 +9,9 @@ final class HotkeyMonitor {
     var onHide:          (() -> Void)?
     var onAlwaysApprove: (() -> Void)?
     var onChat:          (() -> Void)?
+    var onSquad:         (() -> Void)?
 
-    private enum Slot: UInt32 { case approve = 1, deny = 2, hide = 3, alwaysApprove = 4, chat = 5 }
+    private enum Slot: UInt32 { case approve = 1, deny = 2, hide = 3, alwaysApprove = 4, chat = 5, squad = 6 }
 
     private var refs:       [Slot: EventHotKeyRef] = [:]
     private var handlerRef: EventHandlerRef?
@@ -20,6 +21,7 @@ final class HotkeyMonitor {
     private var currentHide:          KeyShortcut?
     private var currentAlwaysApprove: KeyShortcut?
     private var currentChat:          KeyShortcut?
+    private var currentSquad:         KeyShortcut?
     private var inPermissionState = false
 
     init() { installHandler() }
@@ -32,12 +34,14 @@ final class HotkeyMonitor {
     // MARK: - Public
 
     func updateShortcuts(approve: KeyShortcut?, deny: KeyShortcut?, hide: KeyShortcut?,
-                         alwaysApprove: KeyShortcut? = nil, chat: KeyShortcut? = nil) {
+                         alwaysApprove: KeyShortcut? = nil, chat: KeyShortcut? = nil,
+                         squad: KeyShortcut? = nil) {
         currentApprove       = approve
         currentDeny          = deny
         currentHide          = hide
         currentAlwaysApprove = alwaysApprove
         currentChat          = chat
+        currentSquad         = squad
         sync()
     }
 
@@ -55,6 +59,8 @@ final class HotkeyMonitor {
         register(slot: .hide, shortcut: currentHide)
         // chat: 항상 활성 (채팅방에 있을 때만 입력창이 열린다)
         register(slot: .chat, shortcut: currentChat)
+        // squad: 항상 활성 (눌러서 열고, 앞에 떠 있으면 닫는다)
+        register(slot: .squad, shortcut: currentSquad)
         // approve/deny/alwaysApprove: 권한 버블이 보일 때만 활성
         register(slot: .approve,       shortcut: inPermissionState ? currentApprove       : nil)
         register(slot: .deny,          shortcut: inPermissionState ? currentDeny          : nil)
@@ -118,6 +124,7 @@ final class HotkeyMonitor {
             case .hide:          self.onHide?()
             case .alwaysApprove: self.onAlwaysApprove?()
             case .chat:          self.onChat?()
+            case .squad:         self.onSquad?()
             case nil:            break
             }
         }

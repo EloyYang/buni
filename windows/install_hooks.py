@@ -19,6 +19,9 @@ SETTINGS   = CLAUDE_DIR / 'settings.json'
 PRETOOL = f'''\
 #!/usr/bin/env python3
 import sys, json, uuid, time, fnmatch, os
+import os as _os
+if _os.environ.get("BUNI_TEAM_RUN"):   # 스쿼드 세션은 부니를 따로 만들지 않는다 (팀장 부니 하나가 대신 알려 준다)
+    sys.exit(0)
 from pathlib import Path
 
 TEMP     = Path(r"{TEMP}")
@@ -173,6 +176,9 @@ if __name__ == "__main__":
 POSTTOOL = f'''\
 #!/usr/bin/env python3
 import sys, json
+import os as _os
+if _os.environ.get("BUNI_TEAM_RUN"):   # 스쿼드 세션은 부니를 따로 만들지 않는다 (팀장 부니 하나가 대신 알려 준다)
+    sys.exit(0)
 from pathlib import Path
 
 TEMP = Path(r"{TEMP}")
@@ -201,6 +207,9 @@ except Exception:
 NOTIFICATION = f'''\
 #!/usr/bin/env python3
 import sys, json
+import os as _os
+if _os.environ.get("BUNI_TEAM_RUN"):   # 스쿼드 세션은 부니를 따로 만들지 않는다 (팀장 부니 하나가 대신 알려 준다)
+    sys.exit(0)
 from pathlib import Path
 
 TEMP = Path(r"{TEMP}")
@@ -231,6 +240,9 @@ except Exception:
 STOP = f'''\
 #!/usr/bin/env python3
 import sys, json
+import os as _os
+if _os.environ.get("BUNI_TEAM_RUN"):   # 스쿼드 세션은 부니를 따로 만들지 않는다 (팀장 부니 하나가 대신 알려 준다)
+    sys.exit(0)
 from pathlib import Path
 
 TEMP = Path(r"{TEMP}")
@@ -259,6 +271,9 @@ except Exception:
 PERMISSION = f'''\
 #!/usr/bin/env python3
 import sys, json, uuid, time
+import os as _os
+if _os.environ.get("BUNI_TEAM_RUN"):   # 스쿼드 세션은 부니를 따로 만들지 않는다 (팀장 부니 하나가 대신 알려 준다)
+    sys.exit(0)
 from pathlib import Path
 
 TEMP = Path(r"{TEMP}")

@@ -51,6 +51,9 @@ if [ -f "$SCRIPT_DIR/cloud-config.json" ]; then
 else
     echo "- cloud-config.json 없음 (계정 연동은 꺼진 채로 빌드)"
 fi
+# ── 스쿼드 엔진(파이썬) — 맥 앱은 `python3 buni_team.py daemon` 으로 띄워 쓴다 (Windows 앱과 같은 파일)
+cp "$SCRIPT_DIR/windows/buni_team.py" "$APP_BUNDLE/Contents/Resources/buni_team.py"
+echo "✓ 스쿼드 엔진 포함됨"
 echo "✓ 바이너리 복사됨"
 
 # ── 4. Info.plist 생성

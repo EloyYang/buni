@@ -61,6 +61,8 @@ final class CloudSync: ObservableObject {
 
     func syncNow() async {
         guard !isSyncing, let config = CloudConfig.shared, let user = CloudSession.shared.user else { return }
+        // Pro 가 아니면 동기화만 멈춘다 — 서버·로컬 데이터는 그대로 두고, 오류도 띄우지 않는다
+        guard ProManager.shared.cloudSyncPolicy() == "allow" else { return }
         isSyncing = true
         defer { isSyncing = false }
 
@@ -80,6 +82,7 @@ final class CloudSync: ObservableObject {
                 suppressUntil = Date().addingTimeInterval(8)
                 ShopStore.shared.applyCloud(result.doc, tokensThisMonth: result.tokensThisMonth, uid: user.uid)
                 lastSync = Date()
+                ProManager.shared.markCloudSynced()
                 return
             }
             CloudSession.shared.report(L.t("다른 PC와 동시에 바뀌어서 잠시 후 다시 맞출게요",

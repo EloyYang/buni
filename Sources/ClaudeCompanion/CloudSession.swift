@@ -45,12 +45,12 @@ final class CloudSession: ObservableObject {
     // MARK: - 앱 시작 시: 저장된 로그인이 있을 때만 조용히 복원
 
     func restore() async {
-        guard isConfigured, let refresh = Self.keychainRead() else { return }
+        guard isConfigured, let refresh = await Self.readRefreshToken() else { return }
         do {
             try await refreshTokens(using: refresh)
         } catch {
             // 만료·취소된 로그인 — 사용자를 방해하지 않고 로그아웃 상태로 둔다
-            Self.keychainDelete()
+            Self.forgetRefreshToken()
             user = nil
         }
     }
@@ -80,7 +80,7 @@ final class CloudSession: ObservableObject {
     }
 
     func signOut() {
-        Self.keychainDelete()
+        Self.forgetRefreshToken()
         idToken = nil; idTokenExpiry = .distantPast
         user = nil
         message = L.t("로그아웃했어요. 이 PC의 설정은 그대로 남아 있어요.",
@@ -132,7 +132,7 @@ final class CloudSession: ObservableObject {
         let seconds = Double(json["expiresIn"] as? String ?? "") ?? 3600
         apply(idToken: token, expiresIn: seconds)
         user = CloudUser(uid: uid, name: json["displayName"] as? String)
-        Self.keychainWrite(refresh)
+        await Self.storeRefreshToken(refresh)
         UserDefaults.standard.set(uid, forKey: Keys.lastUser)
     }
 
@@ -152,7 +152,7 @@ final class CloudSession: ObservableObject {
             throw GoogleSignInError.badCallback
         }
         apply(idToken: token, expiresIn: Double(json["expires_in"] as? String ?? "") ?? 3600)
-        if let newRefresh = json["refresh_token"] as? String { Self.keychainWrite(newRefresh) }
+        if let newRefresh = json["refresh_token"] as? String { await Self.storeRefreshToken(newRefresh) }
         // 이름은 갱신 응답에 없으니 직전 값을 유지한다
         user = CloudUser(uid: uid, name: user?.name)
     }
@@ -165,7 +165,7 @@ final class CloudSession: ObservableObject {
     /// 요청에 쓸 유효한 ID 토큰 — 만료됐으면 먼저 갱신한다
     func validIdToken() async throws -> String {
         if let idToken, Date() < idTokenExpiry { return idToken }
-        guard let refresh = Self.keychainRead() else { throw GoogleSignInError.cancelled }
+        guard let refresh = await Self.readRefreshToken() else { throw GoogleSignInError.cancelled }
         try await refreshTokens(using: refresh)
         guard let idToken else { throw GoogleSignInError.badCallback }
         return idToken
@@ -173,13 +173,13 @@ final class CloudSession: ObservableObject {
 
     // MARK: - 키체인 (갱신 토큰 보관)
 
-    private static func baseQuery() -> [String: Any] {
+    nonisolated private static func baseQuery() -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: Keys.service,
          kSecAttrAccount as String: Keys.account]
     }
 
-    private static func keychainWrite(_ value: String) {
+    nonisolated private static func keychainWrite(_ value: String) {
         keychainDelete()
         var query = baseQuery()
         query[kSecValueData as String] = Data(value.utf8)
@@ -188,10 +188,10 @@ final class CloudSession: ObservableObject {
     }
 
     /// 이번 실행에서 키체인 안내를 이미 보여 줬는지
-    private static var keychainExplained = false
+    nonisolated(unsafe) private static var keychainExplained = false
 
     /// macOS가 허용 창을 띄우게 될 상황인지 — 창 없이 조용히 읽어 보고, 물어봐야 한다면 true
-    private static func keychainWouldPrompt() -> Bool {
+    nonisolated private static func keychainWouldPrompt() -> Bool {
         var query = baseQuery()
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -201,7 +201,7 @@ final class CloudSession: ObservableObject {
     }
 
     /// 허용 창이 뜨기 직전에, 그 창이 왜 뜨는지 먼저 알려 준다 (앱이 새로 설치·업데이트되면 macOS가 다시 묻는다)
-    private static func explainKeychainPromptIfNeeded() {
+    nonisolated private static func explainKeychainPromptIfNeeded() {
         guard !keychainExplained, keychainWouldPrompt() else { return }
         keychainExplained = true
         let show = {
@@ -225,7 +225,7 @@ final class CloudSession: ObservableObject {
         if Thread.isMainThread { show() } else { DispatchQueue.main.sync(execute: show) }
     }
 
-    private static func keychainRead() -> String? {
+    nonisolated private static func keychainRead() -> String? {
         explainKeychainPromptIfNeeded()
         var query = baseQuery()
         query[kSecReturnData as String] = true
@@ -236,7 +236,18 @@ final class CloudSession: ObservableObject {
         return String(data: data, encoding: .utf8)
     }
 
-    private static func keychainDelete() {
+    nonisolated private static func keychainDelete() {
         SecItemDelete(baseQuery() as CFDictionary)
+    }
+
+    // 키체인은 허용 창(비밀번호 입력)을 기다리며 오래 멈출 수 있다 — 메인 스레드(메뉴바·창)가 같이 얼지 않도록 늘 뒤에서 부른다
+    private static func readRefreshToken() async -> String? {
+        await Task.detached(priority: .utility) { keychainRead() }.value
+    }
+    private static func storeRefreshToken(_ value: String) async {
+        await Task.detached(priority: .utility) { keychainWrite(value) }.value
+    }
+    private static func forgetRefreshToken() {
+        Task.detached(priority: .utility) { keychainDelete() }
     }
 }

@@ -48,7 +48,7 @@ class SessionWindow {
     private var dragMonitor:  Any?
     private var mouseMonitor: Any?
 
-    /// 딴짓 방해모드 — 대기 중일 때 화면을 돌아다니는 상태
+    /// 딴짓 방해모드 — 무입력 상태에서 화면을 돌아다니는 중
     private var focusModeCancellable: AnyCancellable?
     /// 마우스 통과 여부를 주기적으로 다시 판단하는 타이머
     private var passthroughTimer: Timer?
@@ -81,6 +81,7 @@ class SessionWindow {
     /// 사용자가 이 패널을 직접 숨겼을 때 AppDelegate에 알린다 — 숨긴 직후
     /// 새로 만들어지는 패널(레거시 대기 세션 포함)이 대신 튀어나오지 않게 한다.
     var onUserHide: (() -> Void)?
+    var onOpenSquad: ((String) -> Void)?
     /// 이 세션이 실제로 새 작업을 시작했을 때 알린다 — 전역 숨김도 함께 풀린다.
     var onRunStart: (() -> Void)?
     /// 다른 세션으로 전환 요청 (우클릭 메뉴 "다른 세션으로 전환") — 대상 세션 id 전달
@@ -437,20 +438,20 @@ class SessionWindow {
                       width: panelWidth, height: panelHeight)
     }
 
-    // MARK: - 딴짓 방해모드 (대기 중일 때 화면을 돌아다니며 주의 끌기)
+    // MARK: - 딴짓 방해모드 (무입력 시간이 지나면 화면을 돌아다니며 주의 끌기)
 
-    /// 전역 켜짐/꺼짐 상태(FocusModeStore)와 세션 상태를 함께 구독해,
-    /// "대기(ready) 상태 + 모드 켜짐"일 때만 돌아다니게 한다.
+    /// 모드가 켜져 있고 사용자의 마우스·키보드 입력이 설정 시간 이상 없으면 돌아다니고,
+    /// 입력이 다시 감지되면 원래 자리로 복귀한다.
     private func setupFocusMode() {
-        focusModeCancellable = Publishers.CombineLatest(FocusModeStore.shared.$enabled, controller.$state)
+        focusModeCancellable = FocusModeStore.shared.$isUserIdle
+            .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] enabled, state in
-                self?.updateFocusMode(enabled: enabled, state: state)
+            .sink { [weak self] idle in
+                self?.updateFocusMode(shouldWander: idle)
             }
     }
 
-    private func updateFocusMode(enabled: Bool, state: CompanionState) {
-        let shouldWander = enabled && state == .ready
+    private func updateFocusMode(shouldWander: Bool) {
         guard shouldWander != isWandering else { return }
         isWandering = shouldWander
         if shouldWander {
@@ -493,7 +494,7 @@ class SessionWindow {
         }
     }
 
-    /// 모드가 꺼지거나 세션이 다시 진행 상태가 되면 원래 지정된 자리(슬롯 위치)로 복귀
+    /// 모드가 꺼지거나 사용자 입력이 다시 감지되면 원래 지정된 자리(슬롯 위치)로 복귀
     private func returnToAssignedPosition() {
         guard let panel = panel, panel.isVisible, !isDragging, let screen = NSScreen.main else { return }
         controller.isSliding = true
@@ -505,7 +506,7 @@ class SessionWindow {
     }
 
     private func animatePanel(isIdle: Bool) {
-        guard !controller.isSliding else { return }
+        guard !controller.isSliding, !isWandering else { return }
         guard let panel = panel, let screen = NSScreen.main else { return }
         // 사용자가 숨긴 패널은 애니메이션 금지 — animator()가 hidden 패널을 깨울 수 있음
         guard panel.isVisible else { return }
@@ -595,6 +596,20 @@ class SessionWindow {
         controller.onEditMemoRequest      = { [weak self] in self?.showMemoEditDialog() }
         controller.onClearMemoRequest     = { [weak self] in self?.clearMemoToSessionDefault() }
         controller.onSwitchSessionRequest = { [weak self] targetId in self?.onSwitchSession?(targetId) }
+        controller.onOpenSquadRequest     = { [weak self] jobId in self?.onOpenSquad?(jobId) }
+
+        // 끝났을 때 이 세션이 스쿼드 작업의 것인지 확인한다 (파일을 읽으니 메인 스레드는 피한다)
+        controller.$state
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                guard let self, case .completed = state else { return }
+                let sid = self.sessionId
+                DispatchQueue.global(qos: .utility).async {
+                    let id = TeamStore.jobId(forSession: sid)
+                    DispatchQueue.main.async { self.controller.squadJobId = id }
+                }
+            }
+            .store(in: &cancellables)
 
         // 메모 변경 시 세션 UUID + 슬롯 키 모두 저장 (슬롯 키로 다음 세션에 복원)
         controller.$memo

@@ -399,6 +399,31 @@
   .contact-status.ok{ color:var(--leaf); } .contact-status.err{ color:#e2603f; }
   .contact-form button[disabled]{ opacity:.6; cursor:default; }
 
+
+  /* ── 부니 스쿼드 · 업무 예약 미리보기 ── */
+  .feature[data-demo="team"]:hover .feature-demo, .feature[data-demo="schedule"]:hover .feature-demo{ max-height:210px; }
+  .team-demo{ padding-top:8px; display:grid; gap:6px; }
+  .td-lead{ display:flex; align-items:center; gap:8px; font-size:0.74rem; font-weight:700; color:var(--ink); }
+  .td-lead .td-bub{ font-weight:500; color:var(--muted); font-size:0.68rem; }
+  .td-role{ display:flex; align-items:center; gap:8px; background:rgba(255,255,255,0.05); border:1px solid var(--line); border-radius:9px; padding:5px 9px; font-size:0.72rem; font-weight:600; transition:border-color .25s, background .25s; }
+  .td-role .td-st{ margin-left:auto; font-size:0.64rem; font-weight:700; color:var(--muted); white-space:nowrap; }
+  .td-role.work{ border-color:#2e9e56; } .td-role.work .td-st{ color:#6bbf59; }
+  .td-role.done{ background:rgba(46,158,86,0.12); border-color:#2e9e56; } .td-role.done .td-st{ color:#6bbf59; }
+  .td-role.redo{ border-color:#e8c34a; } .td-role.redo .td-st{ color:#e8c34a; }
+  .td-final{ font-size:0.7rem; color:var(--muted); min-height:1.2em; }
+  .td-final.ok{ color:#6bbf59; font-weight:700; }
+
+  .sched-demo{ padding-top:8px; }
+  .sd-bar{ position:relative; height:22px; border-radius:7px; overflow:hidden; display:flex; background:rgba(255,255,255,0.05); border:1px solid var(--line); }
+  .sd-bar i{ display:block; height:100%; }
+  .sd-bar .night{ background:rgba(95,110,200,0.38); } .sd-bar .busy{ background:rgba(232,195,74,0.25); } .sd-bar .free{ background:transparent; }
+  .sd-needle{ position:absolute; top:-2px; bottom:-2px; width:2px; background:#f28c2e; left:0; transition:left .35s linear; }
+  .sd-ticks{ display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:0.58rem; color:var(--muted); margin-top:3px; }
+  .sd-steps{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:8px; }
+  .sd-step{ background:rgba(255,255,255,0.05); border:1px solid var(--line); border-radius:9px; padding:5px 6px; font-size:0.64rem; text-align:center; color:var(--muted); transition:all .25s; }
+  .sd-step.on{ color:var(--ink); border-color:#f28c2e; background:rgba(242,140,46,0.12); font-weight:700; }
+  .sd-note{ font-size:0.66rem; color:var(--muted); margin-top:6px; min-height:1.2em; }
+
   /* ── download ────────────────────────────────────── */
   .download-panel{
     background:linear-gradient(160deg, var(--surface), var(--surface-2));
@@ -429,6 +454,31 @@
   }
   .term .p{ color:var(--muted); }
 
+  /* ── 가격표 · Pro ─────────────────────────────────── */
+  .pro-list{ list-style:none; padding:0; margin:22px auto 0; max-width:640px; display:grid; gap:10px; }
+  .pro-list li{ background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:12px 16px; font-size:0.95rem; }
+  .pro-list b{ color:var(--carrot); }
+  .price-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-top:32px; }
+  @media (max-width:900px){ .price-grid{ grid-template-columns:1fr 1fr; } }
+  @media (max-width:560px){ .price-grid{ grid-template-columns:1fr; } }
+  .price-card{ background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:22px; display:flex; flex-direction:column; gap:10px; }
+  .price-card.best{ border-color:var(--carrot); box-shadow:0 0 0 1px var(--carrot) inset; }
+  .price-card h3{ margin:0; font-size:1.05rem; }
+  .price-amt{ font-family:var(--font-display); font-size:2rem; font-weight:700; }
+  .price-amt small{ font-family:var(--font-body); font-size:0.82rem; font-weight:500; color:var(--muted); margin-left:4px; }
+  .price-card ul{ list-style:none; padding:0; margin:0; font-size:0.86rem; color:var(--muted); display:grid; gap:6px; flex:1; }
+  .price-card ul li::before{ content:"✓ "; color:var(--leaf); font-weight:700; }
+  .price-card .btn{ justify-content:center; }
+  .btn[aria-disabled="true"]{ opacity:.55; cursor:default; pointer-events:none; }
+  .price-note{ font-size:0.82rem; color:var(--muted); margin-top:14px; text-align:center; }
+  .pack-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:18px; }
+  @media (max-width:640px){ .pack-grid{ grid-template-columns:1fr; } }
+  .pack-card{ background:var(--bg); border:1px solid var(--line); border-radius:14px; padding:16px; display:flex; flex-direction:column; gap:6px; }
+  .pack-card .pk-name{ font-weight:700; }
+  .pack-card .pk-price{ font-family:var(--font-mono); font-size:0.82rem; color:var(--muted); }
+  .pack-card .pk-price s{ opacity:.6; }
+  .pack-card .btn{ justify-content:center; margin-top:6px; }
+
   footer{ border-top:1px solid var(--line); padding:36px 0; }
   .foot-inner{ display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; align-items:center; font-size:0.85rem; color:var(--muted); }
   .foot-inner a{ text-decoration:underline; text-underline-offset:3px; }
@@ -458,6 +508,7 @@
     </div>
     <nav class="nav-links">
       <a href="#features" data-ko="기능" data-en="Features">기능</a>
+      <a href="#pricing" data-ko="가격" data-en="Pricing">가격</a>
       <a href="#contact" data-ko="문의" data-en="Contact">문의</a>
       <a href="https://github.com/EloyYang/buni" target="_blank" rel="noopener">GitHub</a>
     </nav>
@@ -551,6 +602,87 @@
     <div class="features" id="featureGrid"></div>
   </section>
 
+  <!-- ═══ 가격 · PRO ═══ -->
+  <section id="pricing">
+    <div class="section-head">
+      <span class="eyebrow" data-ko="가격" data-en="Pricing">가격</span>
+      <h2 data-ko="기본 기능은 계속 무료, 더 쓰고 싶다면 Pro" data-en="Core features stay free. Go Pro for more.">기본 기능은 계속 무료, 더 쓰고 싶다면 Pro</h2>
+      <p data-ko="세션 패널, 상태 표시, 채팅 같은 지금의 기능은 그대로 무료예요. Pro는 아래 기능을 열어줘요." data-en="Session panels, status display, chat and everything you use today stay free. Pro unlocks the items below.">세션 패널, 상태 표시, 채팅 같은 지금의 기능은 그대로 무료예요. Pro는 아래 기능을 열어줘요.</p>
+    </div>
+    <ul class="pro-list">
+      <li data-ko-html="<b>스쿼드 고급 기능</b> — 업무 예약, 여러 작업 병렬 실행 (기본 단일 작업은 무료)" data-en-html="<b>Advanced squad</b> — scheduled jobs and parallel runs (a single job stays free)"><b>스쿼드 고급 기능</b> — 업무 예약, 여러 작업 병렬 실행 (기본 단일 작업은 무료)</li>
+      <li data-ko-html="<b>프로 캐릭터·테마</b> — 새 색상 캐릭터와 테마 (기존 캐릭터·테마는 그대로 무료)" data-en-html="<b>Pro characters &amp; themes</b> — new color characters and themes (existing ones stay free)"><b>프로 캐릭터·테마</b> — 새 색상 캐릭터와 테마 (기존 캐릭터·테마는 그대로 무료)</li>
+      <li data-ko-html="<b>클라우드 동기화</b> — 새로 켜는 경우 Pro 필요. 이미 쓰던 동기화는 멈출 뿐 데이터는 지우지 않아요" data-en-html="<b>Cloud sync</b> — Pro needed to turn it on. If you already sync, it only pauses; your data is never deleted"><b>클라우드 동기화</b> — 새로 켜는 경우 Pro 필요. 이미 쓰던 동기화는 멈출 뿐 데이터는 지우지 않아요</li>
+    </ul>
+
+    <div class="price-grid" id="priceGrid">
+      <div class="price-card">
+        <h3 data-ko="무료" data-en="Free">무료</h3>
+        <div class="price-amt">$0</div>
+        <ul>
+          <li data-ko="세션 패널·상태 표시" data-en="Session panels &amp; status">세션 패널·상태 표시</li>
+          <li data-ko="채팅방" data-en="Chat rooms">채팅방</li>
+          <li data-ko="기존 캐릭터·테마" data-en="Existing characters &amp; themes">기존 캐릭터·테마</li>
+          <li data-ko="단일 스쿼드 작업" data-en="Single squad job">단일 스쿼드 작업</li>
+        </ul>
+        <a class="btn btn-ghost" href="#download" data-ko="다운로드" data-en="Download">다운로드</a>
+      </div>
+      <div class="price-card">
+        <h3 data-ko="Pro 월간" data-en="Pro Monthly">Pro 월간</h3>
+        <div class="price-amt">$3<small data-ko="/ 월" data-en="/ month">/ 월</small></div>
+        <ul>
+          <li data-ko="Pro 기능 전체" data-en="All Pro features">Pro 기능 전체</li>
+          <li data-ko="개별 팩 30% 할인" data-en="30% off single packs">개별 팩 30% 할인</li>
+        </ul>
+        <a class="btn btn-carrot" data-plan="monthly" href="#pricing" data-ko="월간 시작하기" data-en="Start monthly">월간 시작하기</a>
+      </div>
+      <div class="price-card best">
+        <h3 data-ko="Pro 연간" data-en="Pro Yearly">Pro 연간</h3>
+        <div class="price-amt">$24<small data-ko="/ 년" data-en="/ year">/ 년</small></div>
+        <ul>
+          <li data-ko="월 $2 꼴 (월간 대비 33% 저렴)" data-en="About $2/month (33% less than monthly)">월 $2 꼴 (월간 대비 33% 저렴)</li>
+          <li data-ko="Pro 기능 전체" data-en="All Pro features">Pro 기능 전체</li>
+          <li data-ko="개별 팩 30% 할인" data-en="30% off single packs">개별 팩 30% 할인</li>
+        </ul>
+        <a class="btn btn-carrot" data-plan="yearly" href="#pricing" data-ko="연간 시작하기" data-en="Start yearly">연간 시작하기</a>
+      </div>
+      <div class="price-card">
+        <h3 data-ko="Pro 평생" data-en="Pro Lifetime">Pro 평생</h3>
+        <div class="price-amt">$49<small data-ko="한 번만" data-en="one-time">한 번만</small></div>
+        <ul>
+          <li data-ko="한 번 결제로 계속 사용" data-en="Pay once, keep using it">한 번 결제로 계속 사용</li>
+          <li data-ko="Pro 기능 전체" data-en="All Pro features">Pro 기능 전체</li>
+          <li data-ko="개별 팩 30% 할인" data-en="30% off single packs">개별 팩 30% 할인</li>
+        </ul>
+        <a class="btn btn-carrot" data-plan="lifetime" href="#pricing" data-ko="평생 이용권 받기" data-en="Get lifetime">평생 이용권 받기</a>
+      </div>
+    </div>
+    <p class="price-note" data-ko="신규 사용자는 14일, 기존 사용자는 30일 동안 Pro를 무료로 체험해요. 결제 후 받은 라이선스 키를 앱에 붙여 넣으면 끝이고, 로그인이나 서버 확인은 필요 없어요." data-en="New users get a 14-day Pro trial; existing users get 30 days. After paying, paste the license key into the app — no account or server check needed.">신규 사용자는 14일, 기존 사용자는 30일 동안 Pro를 무료로 체험해요. 결제 후 받은 라이선스 키를 앱에 붙여 넣으면 끝이고, 로그인이나 서버 확인은 필요 없어요.</p>
+
+    <div class="download-panel" style="margin-top:36px;">
+      <span class="eyebrow" data-ko="코스메틱 팩" data-en="Cosmetic packs">코스메틱 팩</span>
+      <h3 style="margin:14px 0 4px;" data-ko="마음에 드는 것만 골라서" data-en="Pick only what you like">마음에 드는 것만 골라서</h3>
+      <p style="color:var(--muted); margin:0;" data-ko="프로 컬러 캐릭터·프로 테마는 Pro 전용이고, 아래 팩은 Pro 없이 개별 구매할 수 있어요. Pro 회원은 30% 할인돼요." data-en="Pro color characters and Pro themes are Pro-only. The packs below can be bought on their own without Pro; Pro members get 30% off.">프로 컬러 캐릭터·프로 테마는 Pro 전용이고, 아래 팩은 Pro 없이 개별 구매할 수 있어요. Pro 회원은 30% 할인돼요.</p>
+      <div class="pack-grid">
+        <div class="pack-card">
+          <span class="pk-name" data-ko="벚꽃 팩" data-en="Sakura pack">벚꽃 팩</span>
+          <span class="pk-price"><b>$2.99</b> · Pro <b>$2.09</b></span>
+          <a class="btn btn-ghost btn-sm" data-pack="sakura" href="#pricing" data-ko="구매" data-en="Buy">구매</a>
+        </div>
+        <div class="pack-card">
+          <span class="pk-name" data-ko="우주 팩" data-en="Space pack">우주 팩</span>
+          <span class="pk-price"><b>$3.49</b> · Pro <b>$2.44</b></span>
+          <a class="btn btn-ghost btn-sm" data-pack="space" href="#pricing" data-ko="구매" data-en="Buy">구매</a>
+        </div>
+        <div class="pack-card">
+          <span class="pk-name" data-ko="카페 팩" data-en="Cafe pack">카페 팩</span>
+          <span class="pk-price"><b>$3.99</b> · Pro <b>$2.79</b></span>
+          <a class="btn btn-ghost btn-sm" data-pack="cafe" href="#pricing" data-ko="구매" data-en="Buy">구매</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ═══ DOWNLOAD ═══ -->
   <section id="download">
     <div class="download-panel">
@@ -625,6 +757,7 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
   </div>
 </footer>
 
+<script src="site-config.js"></script>
 <script>
 (function(){
   "use strict";
@@ -775,6 +908,8 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     { title:'덮개 닫아도 계속 실행', titleEn:'Keep running, lid closed', desc:'노트북 덮개를 닫아도 Claude가 계속 일해요. 시간을 정하거나 시간대를 예약하면 알아서 켜고 꺼져요.', descEn:'Close the lid and Claude keeps working. Pick a duration or schedule it — it switches itself on and off.', icon:'awake', demo:'awake', badge:true },
     { title:'다른 PC와 연동', titleEn:'Sync across PCs', desc:'선택 사항이에요. Google로 로그인하면 코인·아이템·레벨이 다른 PC에서도 그대로 이어져요. 안 해도 모든 기능을 쓸 수 있어요.', descEn:'Optional. Sign in with Google and your coins, items and level follow you to other PCs. Everything works without it.', icon:'sync', demo:'sync', badge:true },
     { title:'함께 모여 채팅', titleEn:'Chat together', desc:'방 코드로 최대 10명이 모여 말풍선으로 대화해요. 채팅용 부니는 내 세션 상태에 맞춰 작업 중·완료 모션만 보여줘요.', descEn:'Up to 10 people join a room with a code and chat in speech bubbles. Your chat rabbit just mirrors whether your sessions are working or done — nothing more.', icon:'chat', demo:'chat', badge:true },
+    { title:'부니 스쿼드 — 팀장 에이전트', titleEn:'Buni Squad — team-lead agent', desc:'"이거 만들어줘" 한마디면 팀장 Claude가 디자인·개발·마케팅 같은 팀원을 직접 정하고, 일을 나누고, 검토해서 되돌리고, 합쳐서 결과물을 내놔요. 팀원마다 부니가 한 마리씩 나타나요.', descEn:'Say "build this" and a team-lead Claude picks the teammates it needs — design, dev, marketing — splits the work, reviews and sends back what falls short, then merges the result. Each teammate shows up as its own rabbit.', icon:'team', demo:'team', badge:true },
+    { title:'밤에 맡기는 업무 예약', titleEn:'Overnight job scheduling', desc:'낮에는 플랜 사용량이 모자라니까, 맡긴 일은 밤 10시~새벽 6시에 진행해요. 새벽엔 물어볼 수 없으니 시작 전에 "사전요구서"로 필요한 걸 전부 확정하고, 한도에 걸리면 풀릴 때까지 기다렸다 이어가요.', descEn:'Your plan is busy by day, so jobs run from 10 PM to 6 AM. Nobody can answer at night, so everything is settled up front in a "requirements" document — and if the plan limit hits, it waits and continues.', icon:'night', demo:'schedule', badge:true },
     { title:'딴짓 방해모드', titleEn:'Nag mode', desc:'대기 중이면 화면을 깡총깡총 돌아다니며 다시 일하라고 보챕니다.', descEn:"If you're idle too long, Buni hops around your screen nagging you back to work.", icon:'wander', demo:'wander' },
     { title:'SSH Remote 지원', titleEn:'SSH remote support', desc:'VS Code(Cursor 포함)로 원격 서버에 붙어도 상태가 그대로 도착해요.', descEn:'Connect to a remote server via VS Code (or Cursor) — status still comes through.', icon:'ssh' },
   ];
@@ -789,6 +924,8 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     awake: '<rect x="8" y="7" width="22" height="14" rx="2" fill="none" stroke="#8b93a6" stroke-width="2.2"/><path d="M4 26h30" stroke="#8b93a6" stroke-width="2.4" stroke-linecap="round"/><path d="M22 10a4.5 4.5 0 1 0 3.5 7.5A5.5 5.5 0 0 1 22 10z" fill="#e8c34a"/>',
     sync: '<path d="M11 25a6 6 0 0 1-.5-12 8 8 0 0 1 15.2 1.5A5 5 0 0 1 26 25z" fill="none" stroke="#6bbf59" stroke-width="2.4" stroke-linejoin="round"/><path d="M15 19l3 3 6-6" stroke="#6bbf59" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
     chat: '<path d="M6 8h26a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H18l-6 5v-5H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z" fill="none" stroke="#f28c2e" stroke-width="2.4" stroke-linejoin="round"/><circle cx="13" cy="16" r="1.8" fill="#f28c2e"/><circle cx="19" cy="16" r="1.8" fill="#f28c2e"/><circle cx="25" cy="16" r="1.8" fill="#f28c2e"/>',
+    team: '<circle cx="19" cy="9" r="4.5" fill="none" stroke="#f28c2e" stroke-width="2.2"/><path d="M19 14v4M9 27v-4h20v4" stroke="#f28c2e" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="28" r="3" fill="#6bbf59"/><circle cx="19" cy="28" r="3" fill="#e8c34a"/><circle cx="29" cy="28" r="3" fill="#8b93a6"/>',
+    night: '<path d="M24 5a11 11 0 1 0 8 17A9 9 0 0 1 24 5z" fill="none" stroke="#8b93f2" stroke-width="2.4" stroke-linejoin="round"/><path d="M8 8l1.2 2.4L11.6 11.6 9.2 12.8 8 15.2 6.8 12.8 4.4 11.6l2.4-1.2z" fill="#e8c34a"/>',
     ssh: '<rect x="6" y="9" width="26" height="18" rx="2.4" fill="none" stroke="#8b93a6" stroke-width="2.2"/><path d="M12 15l4 3.5-4 3.5" stroke="#6bbf59" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 22h6" stroke="#6bbf59" stroke-width="2.2" stroke-linecap="round"/>'
   };
 
@@ -899,6 +1036,31 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
           '</div></div>';
       }).join('');
       demoHtml = '<div class="feature-demo"><div class="chat-demo">'+colsHtml+'</div><div class="chat-room-cap" id="chatCap-'+fi+'">🏠 SM2GNY · 3/10</div></div>';
+    } else if(f.demo === 'team'){
+      demoHtml =
+        '<div class="feature-demo">' +
+          '<div class="team-demo">' +
+            '<div class="td-lead"><span>🧑‍💼 <span data-ko="팀장" data-en="Team lead">팀장</span></span><span class="td-bub" id="tdBub-'+fi+'"></span></div>' +
+            '<div class="td-role" id="tdR0-'+fi+'"><span>🎨 <span data-ko="디자인" data-en="Design">디자인</span></span><span class="td-st"></span></div>' +
+            '<div class="td-role" id="tdR1-'+fi+'"><span>📣 <span data-ko="마케팅" data-en="Marketing">마케팅</span></span><span class="td-st"></span></div>' +
+            '<div class="td-role" id="tdR2-'+fi+'"><span>💻 <span data-ko="개발" data-en="Dev">개발</span></span><span class="td-st"></span></div>' +
+            '<div class="td-final" id="tdFin-'+fi+'"></div>' +
+          '</div>' +
+        '</div>';
+    } else if(f.demo === 'schedule'){
+      demoHtml =
+        '<div class="feature-demo">' +
+          '<div class="sched-demo">' +
+            '<div class="sd-bar" id="sdBar-'+fi+'"><i class="night" style="width:25%"></i><i class="free" style="width:12.5%"></i><i class="busy" style="width:37.5%"></i><i class="free" style="width:8.3%"></i><i class="night" style="width:16.7%"></i><b class="sd-needle" id="sdNeedle-'+fi+'"></b></div>' +
+            '<div class="sd-ticks"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>' +
+            '<div class="sd-steps">' +
+              '<div class="sd-step" id="sdS0-'+fi+'"><span data-ko="📝 사전요구서 승인" data-en="📝 Approve brief">📝 사전요구서 승인</span></div>' +
+              '<div class="sd-step" id="sdS1-'+fi+'"><span data-ko="🌙 밤에 진행" data-en="🌙 Runs overnight">🌙 밤에 진행</span></div>' +
+              '<div class="sd-step" id="sdS2-'+fi+'"><span data-ko="☀ 아침 보고서" data-en="☀ Morning report">☀ 아침 보고서</span></div>' +
+            '</div>' +
+            '<div class="sd-note" id="sdNote-'+fi+'"></div>' +
+          '</div>' +
+        '</div>';
     } else if(f.demo === 'usage'){
       demoHtml =
         '<div class="feature-demo">' +
@@ -1088,6 +1250,65 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
         }
         el.addEventListener('mouseenter', function(){
           if(reduceMotion){ say(0, LANG === 'en' ? 'Review pls!' : '리뷰 부탁!', 600000); return; }
+          run();
+        });
+        el.addEventListener('mouseleave', reset);
+      })();
+    } else if(f.demo === 'team'){
+      (function(){
+        var roles = [0,1,2].map(function(i){ return document.getElementById('tdR'+i+'-'+fi); });
+        var fin = document.getElementById('tdFin-'+fi), bub = document.getElementById('tdBub-'+fi);
+        var timers = [];
+        function later(fn, ms){ timers.push(setTimeout(fn, ms)); }
+        function st(i, cls, ko, en){ roles[i].className = 'td-role' + (cls ? ' ' + cls : ''); roles[i].querySelector('.td-st').textContent = LANG === 'en' ? en : ko; }
+        function reset(){
+          timers.forEach(clearTimeout); timers = [];
+          st(0, '', '대기', 'Waiting'); st(1, '', '대기', 'Waiting'); st(2, '', '대기', 'Waiting');
+          fin.textContent = ''; fin.className = 'td-final'; bub.textContent = '';
+        }
+        function run(){
+          reset();
+          bub.textContent = LANG === 'en' ? '"Build a landing page" → forming the team…' : '“랜딩페이지 만들어줘” → 팀을 짜는 중…';
+          later(function(){ bub.textContent = LANG === 'en' ? 'Splitting the work' : '업무를 나눴어요'; st(0, 'work', '작업 중', 'Working'); st(1, 'work', '작업 중', 'Working'); }, 1000);
+          later(function(){ st(0, 'done', '통과 ✓', 'Accepted ✓'); bub.textContent = LANG === 'en' ? 'Reviewing…' : '검토 중…'; }, 2300);
+          later(function(){ st(2, 'work', '작업 중', 'Working'); st(1, 'redo', '다시 작업', 'Revising'); }, 3000);
+          later(function(){ st(1, 'done', '통과 ✓', 'Accepted ✓'); }, 4000);
+          later(function(){ st(2, 'done', '통과 ✓', 'Accepted ✓'); bub.textContent = LANG === 'en' ? 'Merging results…' : '결과를 합치는 중…'; }, 4900);
+          later(function(){ fin.textContent = LANG === 'en' ? '✅ Final result + report ready' : '✅ 최종 결과물 + 보고서 완성'; fin.className = 'td-final ok'; bub.textContent = ''; }, 5800);
+          later(run, 8200);
+        }
+        reset();
+        el.addEventListener('mouseenter', function(){
+          if(reduceMotion){ st(0, 'done', '통과 ✓', 'Accepted ✓'); st(1, 'done', '통과 ✓', 'Accepted ✓'); st(2, 'done', '통과 ✓', 'Accepted ✓'); fin.textContent = LANG === 'en' ? '✅ Final result + report ready' : '✅ 최종 결과물 + 보고서 완성'; fin.className = 'td-final ok'; return; }
+          run();
+        });
+        el.addEventListener('mouseleave', reset);
+      })();
+    } else if(f.demo === 'schedule'){
+      (function(){
+        var needle = document.getElementById('sdNeedle-'+fi), note = document.getElementById('sdNote-'+fi);
+        var steps = [0,1,2].map(function(i){ return document.getElementById('sdS'+i+'-'+fi); });
+        var iv = null, tm = [];
+        function on(n){ steps.forEach(function(s, i){ s.classList.toggle('on', i === n); }); }
+        function reset(){ clearInterval(iv); tm.forEach(clearTimeout); tm = []; needle.style.left = '0%'; on(-1); note.textContent = ''; }
+        function run(){
+          reset();
+          on(0); note.textContent = LANG === 'en' ? '2 PM — you approve the brief; nothing starts yet' : '오후 2시 — 사전요구서를 승인해 두면 바로 시작하진 않아요';
+          needle.style.left = '58%';
+          tm.push(setTimeout(function(){
+            on(1); note.textContent = LANG === 'en' ? '10 PM – 6 AM — runs while you sleep (waits if the plan limit hits)' : '밤 10시~새벽 6시 — 자는 동안 진행 (한도에 걸리면 풀릴 때까지 대기)';
+            var x = 91.7; needle.style.left = x + '%';
+            iv = setInterval(function(){ x += 2; if(x > 100) x -= 100; needle.style.left = x + '%'; }, 90);
+          }, 1500));
+          tm.push(setTimeout(function(){
+            clearInterval(iv); needle.style.left = '25%'; on(2);
+            note.textContent = LANG === 'en' ? '6 AM — report waiting: what was built, assumptions, what to check' : '새벽 6시 — 보고서가 기다려요: 만든 것·가정·확인할 것';
+          }, 4800));
+          tm.push(setTimeout(run, 8000));
+        }
+        reset();
+        el.addEventListener('mouseenter', function(){
+          if(reduceMotion){ on(2); note.textContent = LANG === 'en' ? 'Approve by day, runs 10 PM – 6 AM, report in the morning' : '낮에 승인 → 밤 10시~6시 진행 → 아침 보고서'; needle.style.left = '25%'; return; }
           run();
         });
         el.addEventListener('mouseleave', reset);
@@ -1419,6 +1640,27 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     });
   })();
 
+  // ── 결제 링크: site-config.js 값이 https일 때만 버튼을 열고, 아니면 '준비 중' ──
+  function payLink(plan, pack){
+    var c = window.BUNI_SITE_CONFIG, v = '';
+    try{ v = pack ? c.stripeLinks.packs[pack] : c.stripeLinks[plan]; }catch(e){}
+    return (typeof v === 'string' && /^https:\/\//i.test(v.trim())) ? v.trim() : '';
+  }
+  function renderPay(){
+    var btns = document.querySelectorAll('[data-plan],[data-pack]');
+    for(var i=0; i<btns.length; i++){
+      var b = btns[i], link = payLink(b.getAttribute('data-plan'), b.getAttribute('data-pack'));
+      if(link){
+        b.href = link; b.target = '_blank'; b.rel = 'noopener';
+        b.removeAttribute('aria-disabled');
+      } else {
+        b.href = '#pricing'; b.removeAttribute('target');
+        b.setAttribute('aria-disabled', 'true');
+        b.textContent = LANG === 'en' ? 'Coming soon' : '준비 중';
+      }
+    }
+  }
+
   function applyLang(lang){
     LANG = lang;
     document.documentElement.lang = lang;
@@ -1482,6 +1724,7 @@ $ cd buni <span class="p">&& bash install.sh</span></div>
     }
 
     renderDLMeta();
+    renderPay();
 
     var toggleBtn = document.getElementById('langToggle');
     if(toggleBtn) toggleBtn.textContent = lang === 'en' ? '한국어' : 'EN';

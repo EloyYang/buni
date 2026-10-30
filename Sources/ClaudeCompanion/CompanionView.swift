@@ -6,6 +6,11 @@ struct CompanionView: View {
     @ObservedObject private var shop = ShopStore.shared
     /// 언어를 바꾸면 모든 문구가 바로 다시 그려지도록 구독
     @ObservedObject private var lang = LanguageStore.shared
+    /// 메뉴바 아이콘 메뉴와 같은 앱 전체 메뉴를 우클릭 메뉴에 붙이기 위한 상태 구독
+    @ObservedObject private var appMenu = AppMenuBridge.shared
+    @ObservedObject private var focusMode = FocusModeStore.shared
+    @ObservedObject private var awake = AwakeManager.shared
+    @ObservedObject private var team = TeamStore.shared
 
     // 리셋 시간 갱신 (30초마다)
     @State private var resetTimeTick = Date()
@@ -82,7 +87,7 @@ struct CompanionView: View {
     /// 캐릭터 + 플랜 사용량 바 + 메모 태그 + 드래그/우클릭 메뉴
     private var characterBlock: some View {
         VStack(spacing: -5) {
-            characterView
+            TintedCharacter { characterView }
                 .frame(width: 60, height: 70)
 
             UsageBarView(percent: ctrl.displayUsagePercent,
@@ -143,13 +148,22 @@ struct CompanionView: View {
         // 만들어진 뒤 안 바뀌는 경우가 있어(NSMenu 캐싱 문제로 보임), 전환 대상
         // 목록이 바뀔 때마다 뷰 자체를 새로 만들도록 강제해 메뉴가 항상 다시
         // 지어지게 한다.
-        .id(ctrl.switchTargets.map(\.id).joined(separator: ","))
+        // 앱 전체 메뉴의 체크 표시·상태도 같은 방식으로 최신으로 유지한다.
+        .id(ctrl.switchTargets.map(\.id).joined(separator: ",")
+            + "|\(appMenu.state)|\(focusMode.enabled)|\(focusMode.idleMinutes)"
+            + "|\(awake.isActive)|\(awake.followingSessions)|\(awake.isHelperInstalled)|\(awake.scheduleEnabled)")
         .contextMenu {
+            // 이 부니에만 해당하는 것
             Button(L.t("숨기기", "Hide")) { ctrl.onHideRequest?() }
-            Button(L.t("메뉴바 아이콘 표시", "Show menu bar icon")) { ctrl.onShowStatusBarRequest?() }
-            Divider()
-            Button(L.t("Claude 열기", "Open Claude")) { ctrl.onOpenClaudeRequest?() }
-            Divider()
+            Button(ctrl.memo.isEmpty ? L.t("메모 추가...", "Add note...") : L.t("메모 편집...", "Edit note...")) {
+                ctrl.onEditMemoRequest?()
+            }
+            if !ctrl.memo.isEmpty {
+                Button(L.t("메모 지우기", "Clear note")) {
+                    // 지우면 빈 메모가 아니라 기본값(세션 이름)으로 되돌린다
+                    ctrl.onClearMemoRequest?()
+                }
+            }
             Menu(L.t("캐릭터 변경", "Change character")) {
                 ForEach(CharacterType.allCases, id: \.self) { type in
                     Button {
@@ -165,6 +179,18 @@ struct CompanionView: View {
                     }
                 }
             }
+            Menu(L.t("컬러 변형 (Pro)", "Color variant (Pro)")) {
+                Button(L.t("원래 색", "Original")) { CharacterStore.shared.tint = nil }
+                ForEach(CharacterTint.all) { t in
+                    let open = ProManager.shared.itemUnlocked(t.id)
+                    Button {
+                        if open { CharacterStore.shared.tint = t.id }
+                        else { ProUpgradeWindow.show(reason: ProManager.shared.itemLockMessage(t.id)) }
+                    } label: {
+                        Text((open ? "" : "🔒 ") + t.name)
+                    }
+                }
+            }
             if !ctrl.switchTargets.isEmpty {
                 Menu(L.t("다른 세션으로 전환", "Switch session")) {
                     ForEach(ctrl.switchTargets) { t in
@@ -173,19 +199,8 @@ struct CompanionView: View {
                 }
             }
             Divider()
-            Button(ctrl.memo.isEmpty ? L.t("메모 추가...", "Add note...") : L.t("메모 편집...", "Edit note...")) {
-                ctrl.onEditMemoRequest?()
-            }
-            if !ctrl.memo.isEmpty {
-                Button(L.t("메모 지우기", "Clear note")) {
-                    // 지우면 빈 메모가 아니라 기본값(세션 이름)으로 되돌린다
-                    ctrl.onClearMemoRequest?()
-                }
-            }
-            Divider()
-            Button(L.t("설정...", "Settings...")) { ctrl.onOpenSettingsRequest?() }
-            Divider()
-            Button(L.t("위치 초기화", "Reset position")) { ctrl.onResetPositionRequest?() }
+            // 메뉴바 아이콘 메뉴와 같은 기능 (접어 둔 묶음)
+            appMenuItems()
         }
     }
 
@@ -233,6 +248,15 @@ struct CompanionView: View {
                         .font(.system(.callout, design: .monospaced))
                         .fontWeight(.bold)
                         .foregroundColor(.black)
+                }
+                if let jobId = ctrl.squadJobId {
+                    // 부니 스쿼드가 돌린 세션이면 — 눌러서 스쿼드 화면의 그 작업으로 간다
+                    let finished = ["review", "done"].contains(team.jobs.first { $0.id == jobId }?.state ?? "")
+                    confirmButton(finished ? L.t("🐰 스쿼드 결과 보기", "🐰 See squad result") : L.t("🐰 스쿼드 보기", "🐰 Open squad"),
+                                  color: Color(red: 0.45, green: 0.30, blue: 0.85)) {
+                        ctrl.onOpenSquadRequest?(jobId)
+                        ctrl.dismissCompleted()
+                    }
                 }
                 HStack {
                     Spacer()

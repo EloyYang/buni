@@ -10,6 +10,7 @@ Windows에서는 두 가지를 함께 한다.
   · 켤 때 지정한 시간이 지나면 자동으로 되돌린다(무제한 선택 시 제외).
   · 앱이 종료될 때 반드시 되돌린다 — 켜둔 채 꺼지면 덮개를 닫아도 영영 안 자게 된다.
   · 앱이 뜰 때도 한 번 정리한다(지난번에 비정상 종료된 경우 대비).
+  · "세션이 끝날 때까지" 모드는 실행 중인 세션이 모두 끝나면 알아서 되돌린다.
 """
 import json
 import os
@@ -66,6 +67,11 @@ class AwakeManager:
         self.active_until = None          # epoch 초 — None이면 무제한
         self.activated_by_schedule = False
         self.last_error = None
+        self.following = False            # "세션이 끝날 때까지" 모드
+        self.sessions_running = None      # 지금 일하는 세션이 있는지 알려 주는 함수 (buni.py 가 채운다)
+        self._follow_saw_running = False
+        self._follow_idle_since = None
+        self._follow_job = None
         self._listeners = []
         self._expiry_job = None
         self._keeper = None               # ES_SYSTEM_REQUIRED를 쥐고 있는 스레드
@@ -113,6 +119,7 @@ class AwakeManager:
         self.last_error = None
         self.activated_by_schedule = by_schedule
         self.is_active = True
+        self._stop_following()            # 시간·무제한·예약으로 켜면 "세션 따라가기"는 해제
 
         if self._expiry_job:
             self.root.after_cancel(self._expiry_job)
@@ -125,7 +132,52 @@ class AwakeManager:
         self._notify()
         return True
 
+    # "세션이 끝날 때까지" — 실행 중인 세션이 있는 동안만 켜 두고, 모두 끝나고 잠시 뒤 자동으로 끈다.
+    FOLLOW_GRACE = 60            # 세션이 끝난 뒤 잠깐 더 기다린다 (도구 사이의 짧은 틈에 끄지 않도록)
+    FOLLOW_START_WAIT = 600      # 켰는데 세션이 한 번도 시작되지 않으면 이만큼 기다렸다 포기
+
+    def enable_until_sessions_finish(self) -> bool:
+        if not self.enable(None):
+            return False
+        self.following = True
+        self._follow_saw_running = False
+        self._follow_idle_since = time.time()
+        self._follow_tick()
+        self._notify()
+        return True
+
+    def _follow_tick(self):
+        if not self.following:
+            return
+        try:
+            running = bool(self.sessions_running()) if self.sessions_running else False
+        except Exception:
+            running = True                              # 판단이 안 되면 끄지 않는다
+        if running:
+            self._follow_saw_running = True
+            self._follow_idle_since = None
+        else:
+            if self._follow_idle_since is None:
+                self._follow_idle_since = time.time()
+            limit = self.FOLLOW_GRACE if self._follow_saw_running else self.FOLLOW_START_WAIT
+            if time.time() - self._follow_idle_since >= limit:
+                self.disable()
+                return
+        self._follow_job = self.root.after(5000, self._follow_tick)
+
+    def _stop_following(self):
+        if self._follow_job:
+            try:
+                self.root.after_cancel(self._follow_job)
+            except Exception:
+                pass
+            self._follow_job = None
+        self.following = False
+        self._follow_saw_running = False
+        self._follow_idle_since = None
+
     def disable(self):
+        self._stop_following()
         if self._expiry_job:
             try:
                 self.root.after_cancel(self._expiry_job)
@@ -155,6 +207,9 @@ class AwakeManager:
         · 시간대 예약으로 켜진 경우: "18:00까지 (3시간 12분 남음)"
         · 직접 무제한으로 켠 경우만 "무제한" """
         t = self.t
+        if self.following:
+            return (t('세션이 끝나면 자동 해제', 'off when sessions finish') if self._follow_saw_running
+                    else t('세션이 시작되길 기다리는 중', 'waiting for a session to start'))
         if self.active_until is not None:
             return self._left(int(max(0, self.active_until - time.time())) // 60)
         if self.activated_by_schedule:

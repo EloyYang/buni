@@ -1,0 +1,84 @@
+{
+  "_note": "시험 전용 벡터 — 맥(Swift)·Windows(Python)가 같은 파일로 검증한다. 실제 키가 아니다.",
+  "public_key_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+  "now": 1800000000,
+  "cases": [
+    {
+      "name": "yearly_valid",
+      "key": "BUNI-djF8eWVhcmx5fDIwMjcxMjMxfDZhNmMyNjE5NWMzNjgyZmE.3PBNeFAC5y-TgTxJdw_Sq5NL06hjbTAY-yGqk4GtTc8esHtZJF0H8fZdCfFqaNl67NHrtR68KfCv36G6tTstAw",
+      "valid": true,
+      "plan": "yearly",
+      "reason": ""
+    },
+    {
+      "name": "lifetime_valid",
+      "key": "BUNI-djF8bGlmZXRpbWV8MHww.wrNOe0qkKUVjJA4ZyHBH-avYgC6XU5SUAV_He753ySZrUUON7TgRf-fkmF_Ai0q409h6kTdTUk3pACpQGeb7AA",
+      "valid": true,
+      "plan": "lifetime",
+      "reason": ""
+    },
+    {
+      "name": "pack_valid",
+      "key": "BUNI-djF8cGFjazpzYWt1cmF8MHww.dHUxBx3nfbKx4Yv6acvMHoqgREFLwJ6jSQXMXnqbZ8mGlinC0N5L-VWbZeQjuYUcaw7pWiH8xzBhDnq_Ut2VCQ",
+      "valid": true,
+      "plan": "pack:sakura",
+      "reason": ""
+    },
+    {
+      "name": "expired",
+      "key": "BUNI-djF8bW9udGhseXwyMDI2MDEwMXww.m-hVTDj9yAiKqPYhovuMLUVP4-Qx1AvusBAHGlF_PLIC3SOU7MkGdlkLW1eZXp3L-k6ixBDv-jnnz3UWcIAKDQ",
+      "valid": false,
+      "plan": "monthly",
+      "reason": "expired"
+    },
+    {
+      "name": "tampered_payload",
+      "key": "BUNI-djF8bGlmZXRpbWV8MHww.m-hVTDj9yAiKqPYhovuMLUVP4-Qx1AvusBAHGlF_PLIC3SOU7MkGdlkLW1eZXp3L-k6ixBDv-jnnz3UWcIAKDQ",
+      "valid": false,
+      "plan": "",
+      "reason": "signature"
+    },
+    {
+      "name": "tampered_signature",
+      "key": "BUNI-djF8bGlmZXRpbWV8MHww.ArNOe0qkKUVjJA4ZyHBH-avYgC6XU5SUAV_He753ySZrUUON7TgRf-fkmF_Ai0q409h6kTdTUk3pACpQGeb7AA",
+      "valid": false,
+      "plan": "",
+      "reason": "signature"
+    },
+    {
+      "name": "signed_by_other_key",
+      "key": "BUNI-djF8bGlmZXRpbWV8MHww.BtZ9l0zH0YYjRWvCsepPFWEs_3_YmiJzSc6TlbeQfnzNyGeb7d_5aE_3rkcpSOso-x3FxgZiHZPyGQ7NhONLAQ",
+      "valid": false,
+      "plan": "",
+      "reason": "signature"
+    },
+    {
+      "name": "no_prefix",
+      "key": "djF8bGlmZXRpbWV8MHww.wrNOe0qkKUVjJA4ZyHBH-avYgC6XU5SUAV_He753ySZrUUON7TgRf-fkmF_Ai0q409h6kTdTUk3pACpQGeb7AA",
+      "valid": false,
+      "plan": "",
+      "reason": "format"
+    },
+    {
+      "name": "no_dot",
+      "key": "BUNI-djF8bGlmZXRpbWV8MHwwwrNOe0qkKUVjJA4ZyHBH-avYgC6XU5SUAV_He753ySZrUUON7TgRf-fkmF_Ai0q409h6kTdTUk3pACpQGeb7AA",
+      "valid": false,
+      "plan": "",
+      "reason": "format"
+    },
+    {
+      "name": "garbage",
+      "key": "BUNI-!!!.???",
+      "valid": false,
+      "plan": "",
+      "reason": "format"
+    },
+    {
+      "name": "empty",
+      "key": "",
+      "valid": false,
+      "plan": "",
+      "reason": "format"
+    }
+  ]
+}

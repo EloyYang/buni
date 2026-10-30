@@ -351,7 +351,7 @@ struct ChatLobbyView: View {
             }
 
             if let err = store.lastError {
-                Text(err).font(.system(size: 11)).foregroundColor(Color(red: 0.95, green: 0.55, blue: 0.45))
+                Text(err).font(.system(size: 11)).foregroundColor(BT.danger)
             }
             Spacer(minLength: 0)
             note(L.t("방에는 최대 10명까지 들어올 수 있어요. 다른 사람에게는 내 닉네임·캐릭터·옷차림·대화와 "
@@ -409,7 +409,7 @@ struct ChatLobbyView: View {
                     .font(.system(size: 13, design: .monospaced))
                     .onSubmit { enter() }
                 Button(L.t("입장", "Join")) { enter() }
-                    .buttonStyle(PillButtonStyle(color: Color(red: 0.95, green: 0.60, blue: 0.15)))
+                    .buttonStyle(PillButtonStyle(color: BT.accentBase))
                     .disabled(busy || codeInput.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -442,12 +442,12 @@ struct ChatLobbyView: View {
                 }
             }
             Button(L.t("방 나가기", "Leave room")) { store.leave() }
-                .buttonStyle(PillButtonStyle(color: Color(red: 0.86, green: 0.30, blue: 0.30)))
+                .buttonStyle(PillButtonStyle(color: BT.danger))
         }
     }
 
     private func color(_ m: ChatMotion) -> Color {
-        switch m { case .idle: return .gray; case .working: return Color(red: 0.95, green: 0.75, blue: 0.2); case .done: return Color(red: 0.30, green: 0.78, blue: 0.50) }
+        switch m { case .idle: return .gray; case .working: return Color(red: 0.95, green: 0.75, blue: 0.2); case .done: return BT.success }
     }
     private func label(_ m: ChatMotion) -> String {
         switch m { case .idle: return L.t("대기", "Idle"); case .working: return L.t("작업 중", "Working"); case .done: return L.t("완료", "Done") }

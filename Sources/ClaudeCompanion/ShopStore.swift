@@ -206,7 +206,7 @@ final class ShopStore: ObservableObject {
     /// 이번 달 누적 토큰을 다시 읽어 레벨을 갱신한다 (파일을 훑으므로 백그라운드)
     func refreshLevel() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let tokens = TokenUsageReader.readThisMonth()
+            guard let tokens = TokenUsageReader.readThisMonthShared() else { return }
             DispatchQueue.main.async { self?.updateLevel(fromTokens: tokens) }
         }
     }

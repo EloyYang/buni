@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+import buni_pro
 import buni_shop
 
 
@@ -648,6 +649,9 @@ class CloudSession:
         cfg = CloudConfig.shared()
         if self._syncing or cfg is None or not self.user:
             return
+        # Pro 가 아니면 동기화만 멈춘다 — 서버·로컬 데이터는 그대로 두고, 오류도 띄우지 않는다
+        if buni_pro.shared().cloud_policy() != 'allow':
+            return
         self._syncing = True
         t = self.t
         try:
@@ -665,6 +669,7 @@ class CloudSession:
                 self._suppress_until = time.time() + 8
                 self.shop.apply_cloud(doc, tokens_total, uid)
                 self.last_sync = time.time()
+                buni_pro.shared().mark_cloud_synced()
                 self._notify()
                 return
             self.report(t('다른 PC와 동시에 바뀌어서 잠시 후 다시 맞출게요',

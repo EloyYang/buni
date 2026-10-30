@@ -15,6 +15,7 @@ import IOKit
 ///  · 켤 때 지정한 시간이 지나면 자동으로 되돌린다(무제한 선택 시 제외).
 ///  · 앱이 종료될 때 반드시 되돌린다 — 켜둔 채 꺼지면 맥이 영영 안 자게 된다.
 ///  · 앱이 뜰 때도 한 번 정리한다(지난번에 비정상 종료된 경우 대비).
+///  · "세션이 끝날 때까지" 모드는 실행 중인 세션이 모두 끝나면 알아서 되돌린다.
 final class AwakeManager: ObservableObject {
     static let shared = AwakeManager()
 
@@ -24,6 +25,8 @@ final class AwakeManager: ObservableObject {
     @Published private(set) var isActive = false
     /// 자동 해제 예정 시각 — nil이면 무제한
     @Published private(set) var activeUntil: Date?
+    /// "세션이 끝날 때까지" 모드 — 실행 중인 세션이 있는 동안 유지하고, 모두 끝나면 같이 끈다
+    @Published private(set) var followingSessions = false
     /// 마지막 실패 사유 (메뉴에 표시)
     @Published private(set) var lastError: String?
     /// 비밀번호 없이 pmset을 쓸 수 있게 등록돼 있는지 — 실제 실행으로 확인한 값
@@ -59,6 +62,16 @@ final class AwakeManager: ObservableObject {
 
     private static let pmsetPath   = "/usr/bin/pmset"
     private static let sudoersPath = "/etc/sudoers.d/buni-keepawake"
+
+    /// 지금 일하는 세션이 있는지 알려 주는 쪽 (AppDelegate 가 채운다 — 부니 세션 + 스쿼드 작업)
+    var sessionsRunningProvider: (() -> Bool)?
+    private var followTimer: Timer?
+    private var followSawRunning = false
+    private var followIdleSince: Date?
+    /// 세션이 끝난 뒤 잠깐 더 기다린다 — 도구 사이의 짧은 틈에 끄지 않도록
+    private static let followGrace: TimeInterval = 60
+    /// 켰는데 세션이 한 번도 시작되지 않으면 이만큼 기다렸다 포기한다
+    private static let followStartWait: TimeInterval = 10 * 60
 
     private var expiryTimer: Timer?
     private var scheduleTimer: Timer?
@@ -100,6 +113,7 @@ final class AwakeManager: ObservableObject {
         lastError = nil
         activatedBySchedule = bySchedule
         isActive = true
+        stopFollowing()                       // 시간·무제한·예약으로 켜면 "세션 따라가기"는 해제
 
         expiryTimer?.invalidate(); expiryTimer = nil
         if let duration {
@@ -115,7 +129,43 @@ final class AwakeManager: ObservableObject {
         return true
     }
 
+    /// 실행 중인 세션이 있는 동안만 켜 둔다 — 모두 끝나고 잠시 지나면 자동으로 끈다.
+    /// 시간 제한 없이 켜지만 세션이 없으면 알아서 풀리므로 "깜빡 켜 두고 가방에 넣는" 일이 없다.
+    @discardableResult
+    func enableUntilSessionsFinish() -> Bool {
+        guard enable(duration: nil) else { return false }
+        followingSessions = true
+        followSawRunning = false
+        followIdleSince = Date()
+        followTimer?.invalidate()
+        followTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            self?.evaluateFollowing()
+        }
+        return true
+    }
+
+    private func evaluateFollowing() {
+        guard followingSessions else { return }
+        if sessionsRunningProvider?() == true {
+            followSawRunning = true
+            followIdleSince = nil
+            return
+        }
+        let since = followIdleSince ?? Date()
+        followIdleSince = since
+        let limit = followSawRunning ? Self.followGrace : Self.followStartWait
+        if Date().timeIntervalSince(since) >= limit { disable() }
+    }
+
+    private func stopFollowing() {
+        followTimer?.invalidate(); followTimer = nil
+        followingSessions = false
+        followSawRunning = false
+        followIdleSince = nil
+    }
+
     func disable() {
+        stopFollowing()
         stopLidWatch()
         expiryTimer?.invalidate(); expiryTimer = nil
         activeUntil = nil
@@ -135,6 +185,11 @@ final class AwakeManager: ObservableObject {
     ///  · 시간대 예약으로 켜진 경우: "18:00까지 (3시간 12분 남음)"
     ///  · 직접 무제한으로 켠 경우만 "무제한"
     var statusText: String {
+        if followingSessions {
+            return followSawRunning
+                ? L.t("세션이 끝나면 자동 해제", "off when sessions finish")
+                : L.t("세션이 시작되길 기다리는 중", "waiting for a session to start")
+        }
         if let until = activeUntil {
             return Self.leftText(Int(max(0, until.timeIntervalSinceNow)) / 60)
         }

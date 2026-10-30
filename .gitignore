@@ -5,3 +5,6 @@ AppIcon.iconset/
 .DS_Store
 Buni.app/
 cloud-config.json
+__pycache__/
+*.pyc
+*.key
