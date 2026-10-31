@@ -5,7 +5,17 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="Buni"
-APP_BUNDLE="$SCRIPT_DIR/$APP_NAME.app"
+
+# 클라우드 동기화 폴더(SynologyDrive 등) 안에서 빌드하면 수많은 중간 파일을 동기화하느라
+# 컴파일러가 파일을 읽다가 멈추는 일이 있고, 번들을 지우고 다시 만드는 순간 동기화가 겹치면
+# "Buni 2.app" · "Buni 3.app" 같은 충돌 복사본이 폴더에 남는다 — 그런 경로면 빌드 산출물(번들 포함)을 폴더 밖에 둔다.
+BUILD_DIR="${BUNI_BUILD_DIR:-}"
+if [ -z "$BUILD_DIR" ] && [[ "$SCRIPT_DIR" == *"/CloudStorage/"* ]]; then
+    BUILD_DIR="$HOME/.cache/buni-build"
+fi
+OUT_DIR="${BUILD_DIR:-$SCRIPT_DIR}"
+mkdir -p "$OUT_DIR"
+APP_BUNDLE="$OUT_DIR/$APP_NAME.app"
 
 # VERSION 파일에서 버전 읽기
 VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "1.0.0")"
@@ -18,12 +28,6 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "▶ Swift 빌드 중..."
 cd "$SCRIPT_DIR"
-# 클라우드 동기화 폴더(SynologyDrive 등) 안에서 빌드하면 수많은 중간 파일을 동기화하느라
-# 컴파일러가 파일을 읽다가 멈추는 일이 있다 — 그런 경로면 빌드 산출물을 폴더 밖에 둔다.
-BUILD_DIR="${BUNI_BUILD_DIR:-}"
-if [ -z "$BUILD_DIR" ] && [[ "$SCRIPT_DIR" == *"/CloudStorage/"* ]]; then
-    BUILD_DIR="$HOME/.cache/buni-build"
-fi
 if [ -n "$BUILD_DIR" ]; then
     swift build -c release --scratch-path "$BUILD_DIR"
     BINARY="$BUILD_DIR/release/ClaudeCompanion"

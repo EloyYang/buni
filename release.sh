@@ -5,9 +5,16 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION="${1:?사용법: ./release.sh <버전>  예) ./release.sh 1.0.1}"
-APP_BUNDLE="$SCRIPT_DIR/Buni.app"
+# 번들·ZIP 을 두는 곳 — build_app.sh 와 같은 규칙 (동기화 폴더 안이면 폴더 밖 ~/.cache/buni-build)
+OUT_DIR="${BUNI_BUILD_DIR:-}"
+if [ -z "$OUT_DIR" ] && [[ "$SCRIPT_DIR" == *"/CloudStorage/"* ]]; then
+    OUT_DIR="$HOME/.cache/buni-build"
+fi
+OUT_DIR="${OUT_DIR:-$SCRIPT_DIR}"
+mkdir -p "$OUT_DIR"
+APP_BUNDLE="$OUT_DIR/Buni.app"
 ZIP_NAME="Buni-macOS-${VERSION}.zip"
-ZIP_PATH="$SCRIPT_DIR/$ZIP_NAME"
+ZIP_PATH="$OUT_DIR/$ZIP_NAME"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Buni v$VERSION 릴리즈"
@@ -26,7 +33,7 @@ echo "▶ 앱 빌드 중..."
 echo ""
 echo "▶ ZIP 패키징 중..."
 rm -f "$ZIP_PATH"
-cd "$SCRIPT_DIR"
+cd "$OUT_DIR"
 zip -r "$ZIP_NAME" "Buni.app" > /dev/null
 echo "✓ $ZIP_NAME 생성됨"
 
