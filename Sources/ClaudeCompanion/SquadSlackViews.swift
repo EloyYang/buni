@@ -787,11 +787,50 @@ struct SquadPresence: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             SquadAvatar(icon: icon, id: id, size: 20)
+                .overlay { if working { SquadWorkingRing() } }
             Circle().fill(color).frame(width: 7, height: 7)
                 .overlay(Circle().stroke(SQ.rail, lineWidth: 1.5))
                 .opacity(working ? 1 : 0.9)
                 .offset(x: 2, y: 2)
         }
+    }
+}
+
+/// 업무 중 팀원 아바타의 빛나는 테두리. 업무 중인 행에만 붙고(그려지는 동안만 시계가 돈다),
+/// Windows 와 같은 규칙: 굵기 2 · 색 ok(초록) · 글로우 반경 4 ↔ 0 이 SquadGlowClock.period 마다 번갈아 바뀐다.
+/// BUNI_PREVIEW 이거나 움직임 줄이기가 켜져 있으면 움직이지 않는 고정 테두리.
+struct SquadWorkingRing: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var clock = SquadGlowClock.shared
+    private var still: Bool { reduceMotion || SquadGlowClock.preview }
+    var body: some View {
+        let bright = still || clock.bright
+        Circle().inset(by: -2).stroke(Color.buniOk.opacity(bright ? 0.95 : 0.5), lineWidth: 2)
+            .shadow(color: Color.buniOk.opacity(bright ? 0.7 : 0), radius: bright ? 4 : 0)
+            .onAppear { if !still { clock.retain() } }
+            .onDisappear { if !still { clock.release() } }
+    }
+}
+
+/// 테두리 깜빡임 시계 하나 — 업무 중인 행이 하나라도 있을 때만 Timer 가 돌고, 없으면 멈춘다. (무한 애니메이션 안 씀)
+final class SquadGlowClock: ObservableObject {
+    static let shared = SquadGlowClock()
+    static let period: TimeInterval = 0.6          // 0.5초 이상 (배터리)
+    static let preview = ProcessInfo.processInfo.environment["BUNI_PREVIEW"] != nil
+    @Published var bright = true
+    private var users = 0
+    private var timer: Timer?
+    func retain() {
+        users += 1
+        guard timer == nil else { return }
+        let t = Timer(timeInterval: Self.period, repeats: true) { [weak self] _ in self?.bright.toggle() }
+        t.tolerance = 0.2
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+    func release() {
+        users = max(0, users - 1)
+        if users == 0 { timer?.invalidate(); timer = nil; bright = true }
     }
 }
 

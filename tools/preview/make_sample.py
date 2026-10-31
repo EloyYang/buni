@@ -31,6 +31,7 @@ job = {
     'events': [{'ts': T0 + 100, 'msg': '업무를 시작했어요'}, {'ts': T0 + 800, 'msg': '결과를 내 폴더에 반영했어요'}],
     'cost_usd': 0.5,
 }
+job['roles'][roles[1]['id']] = {'status': 'running', 'attempts': 1, 'started': T0 + 600}      # 업무 중인 팀원 한 명 — 왼쪽 목록의 빛나는 테두리가 보이게
 
 
 def png(path, w, h, rgb, bar):

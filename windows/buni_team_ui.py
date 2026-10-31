@@ -14,6 +14,7 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 
+import buni_ring
 import buni_team
 import buni_watch
 
@@ -444,6 +445,9 @@ class TeamWindow:
         win.minsize(860, 560)
         win.protocol('WM_DELETE_WINDOW', self.close)
         win.bind_all('<Key>', self._note_key, add='+')
+        # 업무 중 팀원 아바타 테두리 시계 — 업무 중인 행이 있을 때만 after() 가 돌고, 가려지면 멈춘다
+        self._ring_clock = buni_ring.RingClock(win.after, win.after_cancel, self._draw_avatar, still=buni_ring.is_still(),
+                                               active=lambda: not self._is_hidden())
         self._build_frame()
         jobs = buni_team.list_jobs()
         pending = [j for j in jobs if j['status'] == 'review']
@@ -515,6 +519,7 @@ class TeamWindow:
 
     def close(self):
         self._flush_drafts()
+        self._ring_clock.clear()                  # 창을 닫으면 테두리 타이머도 남기지 않는다
         try:
             self.win.destroy()
         except Exception:
@@ -570,8 +575,10 @@ class TeamWindow:
             if err:
                 messagebox.showinfo(self.t('부니 스쿼드', 'Buni Squad'), err, parent=self.win)
             if self._is_hidden():                  # 최소화·숨김이면 디스크를 읽지 않고 가끔만 확인
+                self._ring_clock.stop()            # 테두리 깜빡임도 멈춘다 (다시 보이면 resume)
                 self.win.after(self.HIDDEN_TICK_MS, self._tick)
                 return
+            self._ring_clock.resume()
             typing = time.time() - self._last_key < self.TYPING_IDLE_S
             if typing:                             # 글자를 치는 중에는 갱신을 미룬다 — 끝나면 쌓인 변화를 한 번에 반영
                 self.win.after(self.TYPING_TICK_MS, self._tick)
@@ -668,11 +675,37 @@ class TeamWindow:
         except Exception:
             pass
 
-    def _nav_row(self, parent, text, cmd, selected=False, sub='', sub_color=DIM, unread=0, indent=18, bold=False, tint=None):
+    AVATAR_PX = 28
+
+    def _draw_avatar(self, cv, bright):
+        """팀원 아바타 — 업무 중이면 ok 토큰 테두리와 글로우 (cv._ring). 맥 SquadAvatar + SquadWorkingRing 과 같은 모양."""
+        cv.delete('all')
+        s = self.AVATAR_PX
+        if getattr(cv, '_ring', False):
+            r = buni_ring.ring_colors(bright)
+            if r['glow_w']:
+                cv.create_oval(1, 1, s - 2, s - 2, outline=r['glow'], width=r['glow_w'])
+            cv.create_oval(4, 4, s - 5, s - 5, outline=r['ring'], width=r['width'])
+        cv.create_text(s // 2, s // 2, text=cv._icon, font=(FONT, 10), fill=FG)
+
+    def _avatar(self, parent, bg, icon, working):
+        s = self.AVATAR_PX
+        cv = tk.Canvas(parent, width=s, height=s, bg=bg, highlightthickness=0, bd=0)
+        cv._icon, cv._ring = icon, bool(working)
+        if working:
+            self._ring_clock.register(cv)
+        else:
+            self._draw_avatar(cv, True)
+        return cv
+
+    def _nav_row(self, parent, text, cmd, selected=False, sub='', sub_color=DIM, unread=0, indent=18, bold=False, tint=None, avatar=None):
         """사이드바 한 줄. tint 가 있으면(진행 중 = 초록, 확인 필요 = 주황) 행 전체를 그 색으로 물들여 눈에 띄게 한다."""
         base = RAISED if selected else (tint or RAIL)
         row = tk.Frame(parent, bg=base, cursor='hand2', highlightthickness=1 if tint and not selected else 0,
                        highlightbackground=tint or RAIL); row.pack(fill='x', padx=8, pady=1)
+        if avatar:                                           # (아이콘, 업무 중인가)
+            self._avatar(row, base, *avatar).pack(side='left', padx=(indent, 0), pady=2)
+            indent = 6
         strong = selected or unread or bold or bool(tint)
         tk.Label(row, text=text, bg=base, fg=FG if strong else INK2,
                  font=(FONT, 9, 'bold' if strong else 'normal'), anchor='w').pack(side='left', padx=(indent, 4), pady=4)
@@ -697,6 +730,7 @@ class TeamWindow:
         tk.Label(parent, text=text.upper(), bg=RAIL, fg=DIM, font=(FONT, 8, 'bold'), anchor='w').pack(fill='x', padx=16, pady=(12, 2))
 
     def _draw_list(self, jobs):
+        self._ring_clock.clear()                  # 옛 아바타는 사라진다 — 업무 중인 행이 다시 등록돼야 시계가 돈다
         for w in self.list_frame.winfo_children():
             w.destroy()
         t = self.t
@@ -765,11 +799,12 @@ class TeamWindow:
                 rko, ren, color = ROLE_STATUS.get(rs.get('status', 'pending'), ('대기', 'Waiting', DIM))
                 pane = 'dm:' + m['id']
                 rst = rs.get('status')
-                self._nav_row(lf, f"{m['icon']}  {m['name']}", lambda p=pane: self.set_pane(job['id'], p), cur == pane,
+                self._nav_row(lf, m['name'], lambda p=pane: self.set_pane(job['id'], p), cur == pane,
                               sub=t('보관됨', 'archived') if m['archived'] else ('⏳ ' if rst == 'running' else '● ') + t(rko, ren),
                               sub_color=DIM if m['archived'] else color,
                               unread=self._unread(job, pane, msgs),
-                              tint='#1F3A2A' if rst == 'running' else ('#3A3320' if rst == 'done_unreviewed' else None))
+                              tint='#1F3A2A' if rst == 'running' else ('#3A3320' if rst == 'done_unreviewed' else None),
+                              avatar=(m['icon'], buni_ring.is_working(rs.get('status')) and not m['archived']))
         n_arch = sum(1 for g in buni_team.team_structure(job, include_archived=True) for m in g['members'] if m['archived'])
         if n_arch:
             tog = tk.Label(lf, text=t('보관된 팀원 숨기기', 'Hide archived teammates') if self._show_archived
