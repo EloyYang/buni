@@ -112,6 +112,58 @@ class CaptureEngine(unittest.TestCase):
         self.assertFalse(s[0]['captured'])
 
 
+class CaptureDiag(unittest.TestCase):
+    """`capture-diag` — 읽기 전용 진단. Pillow 가 없으면 캡처 실패 때와 같은 이유 문구가 나온다."""
+
+    def setUp(self):
+        self._win, self._plat = bt.IS_WIN, sys.platform
+
+    def tearDown(self):
+        bt.IS_WIN = self._win
+        bt.sys.platform = self._plat
+
+    def test_windows_without_pillow_shows_reason(self):
+        import builtins
+        real = builtins.__import__
+
+        def fake(name, *a, **k):
+            if name.startswith('PIL'):
+                raise ImportError(name)
+            return real(name, *a, **k)
+        bt.IS_WIN = True
+        bt.sys.platform = 'win32'
+        builtins.__import__ = fake
+        try:
+            d = bt.capture_diag()
+        finally:
+            builtins.__import__ = real
+        self.assertFalse(d['ok'])
+        self.assertEqual(d['why'], bt.CAPTURE_WHY_NO_PILLOW)
+        self.assertIn(bt.SCREEN_NOT_CAPTURED, d['line'])
+        self.assertIn(bt.CAPTURE_WHY_NO_PILLOW, d['line'])
+
+    def test_unsupported_os_and_mac_without_tool(self):
+        bt.IS_WIN = False
+        bt.sys.platform = 'linux'
+        self.assertFalse(bt.capture_diag()['ok'])
+        bt.sys.platform = 'darwin'
+        real = bt.shutil.which
+        bt.shutil.which = lambda n: None
+        try:
+            self.assertIn('screencapture', bt.capture_diag()['why'])
+        finally:
+            bt.shutil.which = real
+            bt.sys.platform = self._plat
+
+    def test_cli_is_read_only(self):
+        home = tempfile.TemporaryDirectory()
+        env = dict(os.environ, BUNI_TEAM_HOME=home.name)
+        r = subprocess.run([sys.executable, str(HERE.parent / 'windows/buni_team.py'), 'capture-diag'], capture_output=True, text=True, env=env)
+        d = json.loads(r.stdout)
+        self.assertEqual(set(d), {'ok', 'platform', 'why', 'line'})
+        self.assertFalse(list(Path(home.name).rglob('*.png')))
+
+
 class NotCaptureInViews(unittest.TestCase):
     swift = (HERE.parent / 'Sources/ClaudeCompanion/SquadBoardViews.swift').read_text(encoding='utf-8')
     py = (HERE.parent / 'windows/buni_team_ui.py').read_text(encoding='utf-8')

@@ -91,9 +91,55 @@ BUNI_UI_TEST=1 python3 -m unittest tests.test_board_ui      # 저장소 루트�
 | 4-7 | 개인정보 링크 | `privacy.html` 이 열리고 같은 톤 | |
 | 4-8 | 분석 자리 | Plausible 도메인이 비어 있으면 외부 요청을 보내지 않는다(개발자 도구 네트워크 탭에 외부 요청 없음) | |
 
+## 5. 변경 전·후 화면 캡처 실기 점검 (`capture` 명령)
+
+엔진 `windows/buni_team.py` 의 `grab_screen`/`capture_screen` 이 실제로 PNG 를 만드는지, 못 찍을 때 `캡처 아님 — 이유` 가 뜨는지 본다. 임시 폴더를 쓰면 내 작업 데이터는 건드리지 않는다.
+
+**맥** (터미널, 프로젝트 폴더에서):
+
+```bash
+export BUNI_TEAM_HOME=$(mktemp -d)
+python3 windows/buni_team.py capture-diag                      # 읽기 전용 진단: "캡처 진단 · mac · 가능"
+python3 windows/buni_team.py capture chk home before           # 실제 screencapture
+python3 windows/buni_team.py capture chk home after
+ls "$BUNI_TEAM_HOME"/jobs/chk/screens/                    # home.before.png, home.after.png
+```
+
+**Windows** (Pillow 확인, 읽기 전용): `python windows\buni_team.py capture-diag` → `캡처 진단 · windows · 가능`. Pillow 가 없으면 `캡처 진단 · windows · 캡처 아님 — Pillow(PIL)가 없어 화면을 찍지 못했어요`.
+
+| # | 확인 | 기대 모습 | O/X |
+|---|---|---|---|
+| 5-1 | 맥 `capture-diag` | `ok: true`, 줄이 `캡처 진단 · mac · 가능` | |
+| 5-2 | 맥 before/after 찍기 | 두 명령 모두 `"ok": true`, `screens/` 에 PNG 두 장, 열면 실제 화면 | |
+| 5-3 | 화면 기록 권한 없을 때 | 시스템 설정 ▸ 개인정보 보호 및 보안 ▸ 화면 기록에서 터미널 허용을 끄고 다시 찍으면 `"ok": false`, 이유가 `캡처 도구가 실패했어요 (화면 기록 권한을 확인해 주세요)`(또는 빈/깨진 PNG 이유), `screens` 명령에서 `captured: false`, 부니 화면에 `캡처 아님 — 이유` | |
+| 5-4 | Windows `capture-diag` | Pillow 있으면 `가능`, 없으면 `캡처 아님 — Pillow(PIL)가 없어 화면을 찍지 못했어요` | |
+| 5-5 | Windows 찍기 | 5-2 와 같은 명령(`python windows\buni_team.py capture chk home before`)으로 PNG 생성 | |
+
+점검이 끝나면 임시 폴더(`$BUNI_TEAM_HOME`)는 직접 지운다. 맥·Windows 안내 문구는 `CAPTURE_HELP_KO/EN` 과 같다.
+
+## 6. 재설치 후 확인 (맥·Windows 같은 항목)
+
+앱을 새로 설치(맥 `./build_app.sh --install`, Windows 설치형/포터블 새 버전)하고 부니를 다시 켠 뒤 본다. 스쿼드 작업은 아무 프로젝트나 하나 시작해서 쓴다.
+
+| # | 확인 | 기대 모습 | 맥 O/X | Windows O/X |
+|---|---|---|---|---|
+| 6-1 | 스쿼드 작업 중 팀장 패널 수 | 작업을 시작하고 지시를 여러 번 보내 팀원이 일하는 동안에도 `스쿼드 팀장 부니` 패널이 작업당 하나만 보인다 | | |
+| 6-2 | 앱 재시작 뒤 중복 정리 | 패널이 둘 이상 남은 상태에서 앱을 끄고 켜면 가장 최근에 갱신된 하나만 남고 나머지는 닫힌다(이벤트 파일·작업 데이터는 그대로) | | |
+| 6-3 | 닫은 패널이 되살아나지 않음 | 팀장 패널을 닫고 1분 기다려도 같은 작업의 패널이 다시 뜨지 않는다 | | |
+| 6-4 | 입력창 타이핑 지연 | 업무 보드·업무 현황·상세의 추가 요청 입력창, 단체방·DM 입력창에 빠르게 쳐도 글자가 바로 들어가고 화면이 멈칫하지 않는다 | | |
+| 6-5 | 쓰던 글 보관 | 입력창에 글을 쓰고 다른 방·프로젝트로 갔다 오면 그대로 남아 있고, 보낸 뒤에만 비워진다 | | |
+| 6-6 | 사이드바 직무 묶음 | 팀원이 `프론트엔드` → `백엔드` 부서 아래 세부 담당 순으로 묶이고, DM 위쪽·업무 현황 카드 담당자 칸에 `부서 · 세부 담당` 이 보인다. 직무가 없는 옛 프로젝트도 깨지지 않고 `기타` 로 보인다 | | |
+
+이 환경에서 확인한 것: `./build_app.sh`(설치 옵션 없이)가 `Buni.app` 을 만든다(이번 작업 워크트리에서 실행, 완료). 확인 못 함: 위 6-1~6-6 전부 — 앱을 띄워 보지 못했고 O/X 칸은 비어 있다. 시험 `tests/test_panel_scan_repeat.py`·`test_session_dedupe.py` 는 규칙 시뮬레이션이다.
+
 ## 이 환경에서 못 한 것
+
+- 맥 쪽 O/X 칸 전체(0·1·2·3·4·5·6번): **확인 못 함 — 이 작업 환경은 사람 없이 도는 `dontAsk` 모드라 앱·브라우저를 띄우는 명령과 `buni_team.py capture`/`capture-diag` 셸 실행이 거절됐다.** 그래서 O/X 칸은 비워 두었고 O 로 쓰지 않았다.
+- 캡처 실제 시도(최신): `capture-diag` → `capture chk home before/after` 를 한 번에 돌리려 했으나 Bash 가 거절돼 PNG 가 만들어지는지, 권한 없을 때 `캡처 아님 — 이유` 가 뜨는지 **확인 못 함**. 문구는 시험(`tests/test_screen_capture.py`)으로만 확인했다.
+- 이번에 직접 돌려 통과한 것: 전체 unittest 276개(2 skip), `swift build`(Build complete). 어긋난 곳은 발견하지 못해 코드를 고치지 않았다(화면을 못 봤으므로 "어긋남 없음"이 아니라 "발견 못 함").
 
 - 위 1~4 의 모든 항목: 이 작업 환경에는 화면 세션이 없어 맥 앱·Windows 앱·브라우저를 띄워 보지 못했다. 그래서 O/X 칸은 모두 비어 있다.
 - `BUNI_UI_TEST=1 python3 -m unittest tests.test_board_ui`: 화면 없는 환경이라 실행해도 건너뜀이 되어 통과로 치지 않았다(0 항목).
 - Windows 실기: 이 환경은 macOS 다. Windows 항목은 코드(`buni_pro_ui.py`, `buni_team_ui.py`)의 문구를 읽고 기대 모습을 적었다.
 - 색 대비 수치 측정은 하지 않았다. 기준은 `docs/design-system.md` 의 값이다.
+- 5번 캡처 실기 점검: 화면 기록 권한 해제·재허용과 실제 `screencapture`/Windows 캡처는 이 환경에서 돌리지 않았다. 진단 명령과 Pillow 없음 이유는 시험(`tests/test_screen_capture.py`)으로만 확인했다.

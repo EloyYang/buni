@@ -59,7 +59,7 @@ struct SquadProjectBoard: View {
     @ObservedObject private var store = TeamStore.shared
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 2)) { _ in
+        TimelineView(.periodic(from: .now, by: 5)) { _ in
             ScrollView {
                 VStack(alignment: .leading, spacing: BuniTokens.Space.s5) {
                     header

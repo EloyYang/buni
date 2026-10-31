@@ -110,4 +110,6 @@
 - **언제?** 시작할 때 첫 시도에서만 `before`(다시 하기 때는 처음 것을 덮어쓰지 않음), 끝날 때마다(다시 하기 포함) `after`. 화면 이름은 역할 id.
 - **무엇을?** 팀원이 `.buni-team/<slug>/<역할id>/screens/<id>.before|after.png` 에 직접 찍어 둔 PNG 가 있으면 그것을 가져오고(팀원 프롬프트에 안내), 없으면 `grab_screen`(맥 `screencapture -x`, Windows Pillow `ImageGrab`)으로 전체 화면을 찍는다.
 - **못 찍으면?** 캡처 실패가 업무를 막지 않는다. `captures.json` 에 이유가 남고, 채팅에 `캡처 아님 — <이유>` 한 줄이 오르며, `job_screens` 항목은 `captured=false` · `reason` 이다. 맥 `SquadBoardViews.swift`·Windows `buni_team_ui.py` 가 같은 `캡처 아님 — 이유` 로 그린다.
+- **권한·Pillow 안내** (설정 화면 '변경 전·후 화면 캡처'에도 같은 문장): 화면·디자인 업무의 변경 전·후 화면은 자동으로 찍어요. 맥은 시스템 설정 ▸ 개인정보 보호 및 보안 ▸ 화면 기록(화면 및 시스템 오디오 녹음)에서 부니를 허용해야 하고, Windows 는 Pillow 가 있어야 해요 (pip install Pillow). 못 찍으면 '캡처 아님 — 이유'로 보여요.
+- **이유 문구** (엔진 상수 `CAPTURE_WHY_*`, 맥·Windows 화면이 그대로 보여 준다): 맥 권한 문제 → `캡처 도구가 실패했어요 (화면 기록 권한을 확인해 주세요)`, Windows Pillow 없음 → `Pillow(PIL)가 없어 화면을 찍지 못했어요`. 실패하면 이미 있던 전·후 파일은 그대로 남는다.
 - 수동 호출: `buni_team.py capture <작업id> <이름> before|after [--from-file PNG] [--region x,y,w,h]`.

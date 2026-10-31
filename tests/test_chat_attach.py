@@ -164,6 +164,15 @@ class PromptsAndPermissions(AttachBase):
         allowed, _ = bt.permission_args('readonly', 's', False)
         self.assertFalse([a for a in allowed if a.startswith('Read(')])      # 첨부가 없으면 규칙을 늘리지 않는다
 
+    def test_read_rule_keeps_spaces_and_is_one_argv_item(self):
+        # 앱 데이터 폴더는 'Application Support' 처럼 공백이 있다 — 규칙 문자열에 그대로 들어가고 argv 한 칸으로 넘어간다
+        d = '/Users/me/Library/Application Support/Buni/team/jobs/j1/attachments'
+        self.assertEqual(bt.read_rule(d), 'Read(//Users/me/Library/Application Support/Buni/team/jobs/j1/attachments/**)')
+        self.assertEqual(bt.read_rule(d + '/'), bt.read_rule(d))               # 끝 슬래시는 한 번만
+        allowed, denied = bt.permission_args('code', 's', False, (d,))
+        self.assertEqual([a for a in allowed if a.startswith('Read(//')], [bt.read_rule(d)])
+        self.assertFalse([x for x in denied if x.startswith('Read(')])        # 금지 목록에는 Read 규칙을 넣지 않는다
+
     def test_lead_chat_prompt_paths_permission_and_forwarding(self):
         png = self.mk('시안.png', b'\x89PNG')
         res = bt.chat_send(self.jid, 'lead', '이 시안 봐 주세요', attachments=[png])

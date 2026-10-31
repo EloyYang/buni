@@ -138,6 +138,9 @@ def build_filters(cards):
                # 검색 규칙: 소문자 · 단어 구분(공백·탭·줄바꿈·전각 공백) · 한영 섞임 · 악센트 · 이모지
                'ALPHA', 'alpha\t검색', '검색\nbeta', '검색\u3000alpha', 'épsilon', 'ÉPSILON', '🐰', '🐰 ETA', 'dev 결제', '결제 dev',
                'Waiting 진행', '진행 중', 'In progress', 'running', '\t', '\n  \u3000', 'z 가']
+    # 상태 이름은 한글·영어 둘 다 검색 대상 (화면 언어와 상관없다)
+    queries += ['review', 'REVIEW', '검토', '검토 대기', 'ready to review', 'in review', 'Working', '작업 중', '다시 작업', 'revising',
+                '통과', 'accepted', 'Needs attention', '확인 필요', '한도 대기', 'waiting (limit)', '거절함', 'Rejected', '질문 답변 중', 'answering']
     out = []
     for q, status, scope, sort in itertools.product(queries, ('',) + bt.BOARD_COLUMNS, bt.BOARD_SCOPES, bt.BOARD_SORTS):
         out.append({'query': q, 'status': status, 'assignee': '', 'scope': scope, 'sort': sort})
@@ -214,6 +217,21 @@ class BoardParity(unittest.TestCase):
         for q in ('ALPHA', 'alpha\t검색', '검색\u3000alpha', 'ÉPSILON', '🐰 ETA', 'In review', 'running', '\t'):
             self.assertTrue(bt.board_filter(self.cards, query=q), f'{q!r} 는 엔진에서 결과가 있어야 해요')
         self.assertEqual(bt.board_filter(self.cards, query='z 가'), [])
+
+    def test_state_name_search_korean_and_english(self):
+        """영어 'review' · 한글 '검토' 어느 쪽으로 쳐도 상태 이름이 검토인 카드가 나온다 (한·영 짝은 같은 카드)."""
+        ids = lambda q: {c['id'] for c in bt.board_filter(self.cards, query=q)}
+        self.assertTrue(ids('review') and ids('검토'))
+        pairs = sorted({(c['state'][0], c['state'][1].lower()) for c in self.cards})       # 카드가 업무 단위로 바뀌어도 있는 상태 이름 전부
+        self.assertGreaterEqual(len(pairs), 4)
+        self.assertTrue(any(en == 'in review' for _ko, en in pairs))
+        for ko, en in pairs:
+            by_state = {c['id'] for c in self.cards if c['state'][0] == ko and c['state'][1].lower() == en}
+            self.assertTrue(by_state, f'{ko}/{en} 사례 카드가 있어야 해요')
+            self.assertTrue(by_state <= ids(ko) and by_state <= ids(en), f'{ko}/{en}: 한글·영어 검색에 같은 카드가 나와야 해요')
+        for c in self.cards:                 # 어느 카드든 자기 상태 이름(한·영)으로 찾을 수 있다
+            for name in c['state']:
+                self.assertIn(c['id'], ids(name), f"{c['id']}: {name!r} 로 찾아져야 해요")
 
     @unittest.skipUnless(shutil.which('swiftc'), 'swiftc 가 없는 환경 — 맥 판정 비교는 건너뜀')
     def test_filter_matches_mac(self):

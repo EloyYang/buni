@@ -18,7 +18,8 @@ import buni_update
 import buni_pro
 import buni_pro_ui
 import buni_sessions
-from buni_theme import C, mix  # 상점·채팅 창 색은 docs/design-system.md 토큰 (맥 BuniTheme.swift 와 같다)
+from buni_theme import C, mix, palette  # 상점·채팅·설정·말풍선 색은 docs/design-system.md 토큰 (맥 BuniTheme.swift 와 같다)
+LT = palette(False)  # 말풍선·권한 창은 밝은 면 토큰
 
 # ── Pixel unit (matches macOS p = 6.5)
 P = 6.5
@@ -1007,68 +1008,68 @@ class ShortcutSettingsWindow:
         self._win = win
         win.title(t('설정', 'Settings'))
         win.resizable(False, False)
-        win.configure(bg='#1E1E24')
+        win.configure(bg=C['bg'])
         win.protocol('WM_DELETE_WINDOW', self._close)
         win.attributes('-topmost', True)
 
-        tk.Label(win, text=t('설정', 'Settings'), bg='#1E1E24', fg='white',
+        tk.Label(win, text=t('설정', 'Settings'), bg=C['bg'], fg=C['ink'],
                  font=('Malgun Gothic', 13, 'bold')).grid(
             row=0, column=0, columnspan=3, pady=(16,4), padx=20, sticky='w')
-        tk.Frame(win, bg='#3A3A44', height=1).grid(
+        tk.Frame(win, bg=C['line'], height=1).grid(
             row=1, column=0, columnspan=3, sticky='ew', padx=16, pady=(0,10))
 
         # ── 언어 선택
-        tk.Label(win, text=t('언어', 'Language'), bg='#1E1E24', fg='#CCCCCC',
+        tk.Label(win, text=t('언어', 'Language'), bg=C['bg'], fg=C['ink2'],
                  font=('Malgun Gothic', 10), width=11, anchor='w').grid(
             row=2, column=0, padx=(20,8), pady=6, sticky='w')
-        lang_box = tk.Frame(win, bg='#1E1E24')
+        lang_box = tk.Frame(win, bg=C['bg'])
         lang_box.grid(row=2, column=1, columnspan=2, padx=4, pady=6, sticky='w')
         self._lang_btns = {}
         for col, (code, name) in enumerate((('ko', '한국어'), ('en', 'English'))):
             b = tk.Button(lang_box, text=name, relief='flat',
                           font=('Malgun Gothic', 9), width=8, cursor='hand2',
-                          activeforeground='white',
+                          activeforeground=C['ink'],
                           command=lambda c=code: self._set_lang(c))
             b.grid(row=0, column=col, padx=(0 if col == 0 else 4, 0))
             self._lang_btns[code] = b
         self._refresh_lang_btns()
 
-        tk.Frame(win, bg='#3A3A44', height=1).grid(
+        tk.Frame(win, bg=C['line'], height=1).grid(
             row=3, column=0, columnspan=3, sticky='ew', padx=16, pady=(8,8))
 
         for i, (action, labels) in enumerate(self.ACTIONS):
-            tk.Label(win, text=t(*labels), bg='#1E1E24', fg='#CCCCCC',
+            tk.Label(win, text=t(*labels), bg=C['bg'], fg=C['ink2'],
                      font=('Malgun Gothic', 10), width=11, anchor='w').grid(
                 row=4+i, column=0, padx=(20,8), pady=6, sticky='w')
 
             btn = tk.Button(win, text=self._btn_text(action),
-                            bg='#2A2A34', fg='white', relief='flat',
+                            bg=C['field'], fg=C['ink'], relief='flat',
                             font=('Consolas', 9), width=16,
-                            activebackground='#3A3A50', activeforeground='white',
+                            activebackground=C['raised'], activeforeground=C['ink'],
                             cursor='hand2',
                             command=lambda a=action: self._toggle_record(a))
             btn.grid(row=4+i, column=1, padx=4, pady=6)
             self._btns[action] = btn
 
-            tk.Button(win, text='✕', bg='#1E1E24', fg='#FF6666', relief='flat',
-                      font=('Consolas', 10), activebackground='#1E1E24',
-                      activeforeground='#FF4444', cursor='hand2',
+            tk.Button(win, text='✕', bg=C['bg'], fg=C['danger'], relief='flat',
+                      font=('Consolas', 10), activebackground=C['bg'],
+                      activeforeground=C['danger'], cursor='hand2',
                       command=lambda a=action: self._clear(a)).grid(
                 row=4+i, column=2, padx=(2,16), pady=6)
 
         r = 4 + len(self.ACTIONS)
         if self._manager:
             r = self._build_extra_sections(win, r)
-        tk.Frame(win, bg='#3A3A44', height=1).grid(
+        tk.Frame(win, bg=C['line'], height=1).grid(
             row=r, column=0, columnspan=3, sticky='ew', padx=16, pady=(8,4))
         tk.Label(win, text=t('단축키는 전역으로 동작합니다.',
                       'Shortcuts work system-wide.'),
-                 bg='#1E1E24', fg='#555566',
+                 bg=C['bg'], fg=C['dim'],
                  font=('Malgun Gothic', 8)).grid(
             row=r+1, column=0, columnspan=2, padx=20, sticky='w', pady=(4,0))
-        tk.Button(win, text=t('닫기', 'Close'), bg='#3377E0', fg='white', relief='flat',
-                  font=('Malgun Gothic', 10), activebackground='#2255BB',
-                  activeforeground='white', cursor='hand2', padx=12, pady=3,
+        tk.Button(win, text=t('닫기', 'Close'), bg=C['accent'], fg=C['accent_ink'], relief='flat',
+                  font=('Malgun Gothic', 10), activebackground=mix(C['accent'], C['bg'], 0.8),
+                  activeforeground=C['accent_ink'], cursor='hand2', padx=12, pady=3,
                   command=self._close).grid(
             row=r+1, column=2, padx=16, pady=(4,16), sticky='e')
 
@@ -1082,11 +1083,11 @@ class ShortcutSettingsWindow:
     def _build_extra_sections(self, win, r: int) -> int:
         """설정 창 아래쪽 두 구역. 다음 빈 행 번호를 돌려준다."""
         import buni_awake
-        BG, DIM = '#1E1E24', '#8A8A98'
+        BG, DIM = C['bg'], C['dim']
         mgr = self._manager
 
         def sep(row):
-            tk.Frame(win, bg='#3A3A44', height=1).grid(
+            tk.Frame(win, bg=C['line'], height=1).grid(
                 row=row, column=0, columnspan=3, sticky='ew', padx=16, pady=(8, 6))
 
         # ── 부니 Pro
@@ -1098,7 +1099,7 @@ class ShortcutSettingsWindow:
 
         # ── 계정 연동 (선택)
         sep(r); r += 1
-        tk.Label(win, text=t('계정 연동 (선택)', 'Account sync (optional)'), bg=BG, fg='white',
+        tk.Label(win, text=t('계정 연동 (선택)', 'Account sync (optional)'), bg=BG, fg=C['ink'],
                  font=('Malgun Gothic', 10, 'bold')).grid(
             row=r, column=0, columnspan=3, padx=20, sticky='w'); r += 1
         self._acct = tk.Frame(win, bg=BG)
@@ -1106,7 +1107,7 @@ class ShortcutSettingsWindow:
 
         # ── 덮개 닫아도 계속 실행
         sep(r); r += 1
-        tk.Label(win, text=t('덮개 닫아도 계속 실행', 'Keep running with lid closed'), bg=BG, fg='white',
+        tk.Label(win, text=t('덮개 닫아도 계속 실행', 'Keep running with lid closed'), bg=BG, fg=C['ink'],
                  font=('Malgun Gothic', 10, 'bold')).grid(
             row=r, column=0, columnspan=3, padx=20, sticky='w'); r += 1
         awake = mgr.awake
@@ -1121,20 +1122,20 @@ class ShortcutSettingsWindow:
 
         row = tk.Frame(win, bg=BG)
         row.grid(row=r, column=0, columnspan=3, padx=20, sticky='w'); r += 1
-        tk.Button(row, text=t('세션 중에만', 'While sessions run'), bg='#2F4A3A', fg='white', relief='flat', bd=0,
+        tk.Button(row, text=t('세션 중에만', 'While sessions run'), bg=mix(C['ok'], C['bg'], 0.3), fg=C['ink'], relief='flat', bd=0,
                   font=('Malgun Gothic', 8), padx=7, pady=3, cursor='hand2',
-                  activebackground='#3F6A50', activeforeground='white',
+                  activebackground=mix(C['ok'], C['bg'], 0.45), activeforeground=C['ink'],
                   command=awake.enable_until_sessions_finish).grid(row=0, column=0, padx=(0, 6))
         for i, (minutes, ko, en) in enumerate(buni_awake.DURATIONS, start=1):
-            tk.Button(row, text=t(ko, en), bg='#2A2A34', fg='white', relief='flat', bd=0,
+            tk.Button(row, text=t(ko, en), bg=C['field'], fg=C['ink'], relief='flat', bd=0,
                       font=('Malgun Gothic', 8), padx=7, pady=3, cursor='hand2',
-                      activebackground='#3A3A50', activeforeground='white',
+                      activebackground=C['raised'], activeforeground=C['ink'],
                       command=lambda m=minutes: awake.enable(m)).grid(
                 row=0, column=i, padx=(3, 0))
         self._awake_off = tk.Button(
-            row, text=t('끄기', 'Off'), bg='#8A3A3A', fg='white', relief='flat', bd=0,
+            row, text=t('끄기', 'Off'), bg=mix(C['danger'], C['bg'], 0.5), fg=C['ink'], relief='flat', bd=0,
             font=('Malgun Gothic', 8), padx=7, pady=3, cursor='hand2',
-            activebackground='#A04848', activeforeground='white', command=awake.disable)
+            activebackground=mix(C['danger'], C['bg'], 0.65), activeforeground=C['ink'], command=awake.disable)
         self._awake_off.grid(row=0, column=len(buni_awake.DURATIONS) + 1, padx=(8, 0))
 
         # 시간대 예약 — 매일 같은 시간에 자동으로 켜고 끈다
@@ -1142,15 +1143,15 @@ class ShortcutSettingsWindow:
         sch.grid(row=r, column=0, columnspan=3, padx=20, pady=(8, 0), sticky='w'); r += 1
         self._sch_var = tk.BooleanVar(value=awake.schedule_enabled)
         tk.Checkbutton(sch, text=t('시간대 예약', 'Schedule'), variable=self._sch_var,
-                       bg=BG, fg='#CCCCCC', selectcolor='#2A2A34', activebackground=BG,
-                       activeforeground='white', font=('Malgun Gothic', 9),
+                       bg=BG, fg=C['ink2'], selectcolor=C['field'], activebackground=BG,
+                       activeforeground=C['ink'], font=('Malgun Gothic', 9),
                        command=self._apply_schedule).pack(side='left')
 
         def spin(parent, hi, init):
             var = tk.StringVar(value=f'{init:02d}')
             sp = tk.Spinbox(parent, from_=0, to=hi, width=3, textvariable=var, wrap=True,
-                            format='%02.0f', bg='#2A2A34', fg='white', relief='flat',
-                            buttonbackground='#2A2A34', insertbackground='white',
+                            format='%02.0f', bg=C['field'], fg=C['ink'], relief='flat',
+                            buttonbackground=C['field'], insertbackground=C['ink'],
                             font=('Consolas', 10), command=self._apply_schedule)
             sp.bind('<Return>', lambda e: self._apply_schedule())
             sp.bind('<FocusOut>', lambda e: self._apply_schedule())
@@ -1159,12 +1160,12 @@ class ShortcutSettingsWindow:
         eh, em = divmod(awake.schedule_end, 60)
         self._sh, w1 = spin(sch, 23, sh); self._sm, w2 = spin(sch, 59, sm)
         self._eh, w3 = spin(sch, 23, eh); self._em, w4 = spin(sch, 59, em)
-        w1.pack(side='left', padx=(10, 0)); tk.Label(sch, text=':', bg=BG, fg='#CCCCCC').pack(side='left'); w2.pack(side='left')
-        tk.Label(sch, text=' ~ ', bg=BG, fg='#CCCCCC').pack(side='left')
-        w3.pack(side='left'); tk.Label(sch, text=':', bg=BG, fg='#CCCCCC').pack(side='left'); w4.pack(side='left')
+        w1.pack(side='left', padx=(10, 0)); tk.Label(sch, text=':', bg=BG, fg=C['ink2']).pack(side='left'); w2.pack(side='left')
+        tk.Label(sch, text=' ~ ', bg=BG, fg=C['ink2']).pack(side='left')
+        w3.pack(side='left'); tk.Label(sch, text=':', bg=BG, fg=C['ink2']).pack(side='left'); w4.pack(side='left')
 
         self._awake_note = tk.Label(
-            win, bg=BG, fg='#555566', font=('Malgun Gothic', 8), justify='left', anchor='w',
+            win, bg=BG, fg=C['dim'], font=('Malgun Gothic', 8), justify='left', anchor='w',
             text=t('덮개를 닫아도 잠들지 않도록 전원 옵션의 "덮개 닫을 때" 동작을 잠시 바꿉니다.\n'
                    '끄거나 부니를 종료하면 원래대로 되돌려요.',
                    'Temporarily sets the power plan\'s "when I close the lid" action to do nothing.\n'
@@ -1193,7 +1194,7 @@ class ShortcutSettingsWindow:
         """로그인 상태·절전 방지 상태가 바뀌면 그 부분만 다시 맞춘다 (입력 중인 칸은 건드리지 않는다)."""
         if not (self._manager and self.is_open() and getattr(self, '_acct', None)):
             return
-        BG, DIM = '#1E1E24', '#8A8A98'
+        BG, DIM = C['bg'], C['dim']
         mgr, cloud = self._manager, self._manager.cloud
         pf = getattr(self, '_pro_frame', None)
         if pf is not None:
@@ -1209,17 +1210,17 @@ class ShortcutSettingsWindow:
                             'Everything still works locally.')).pack(anchor='w')
         elif cloud.is_signed_in:
             name = (cloud.user or {}).get('name') or ''
-            tk.Label(self._acct, bg=BG, fg='#4DC780', font=('Malgun Gothic', 9, 'bold'),
+            tk.Label(self._acct, bg=BG, fg=C['ok'], font=('Malgun Gothic', 9, 'bold'),
                      text=t('☁ 연동됨', '☁ Synced') + (f' — {name}' if name else '')).pack(anchor='w')
             row = tk.Frame(self._acct, bg=BG); row.pack(anchor='w', pady=(4, 0))
             # 같은 줄에 나란히
             for txt, cmd, color in ((t('지금 동기화', 'Sync now'),
-                                     lambda: mgr.gate('cloud_sync') and threading.Thread(target=cloud.sync_now, daemon=True).start(), '#2A2A34'),
-                                    (t('로그아웃', 'Sign out'), cloud.sign_out, '#2A2A34'),
-                                    (t('서버 데이터 삭제', 'Delete server data'), self._confirm_delete, '#6A3A3A')):
-                tk.Button(row, text=txt, bg=color, fg='white', relief='flat', bd=0,
+                                     lambda: mgr.gate('cloud_sync') and threading.Thread(target=cloud.sync_now, daemon=True).start(), C['field']),
+                                    (t('로그아웃', 'Sign out'), cloud.sign_out, C['field']),
+                                    (t('서버 데이터 삭제', 'Delete server data'), self._confirm_delete, mix(C['danger'], C['bg'], 0.45))):
+                tk.Button(row, text=txt, bg=color, fg=C['ink'], relief='flat', bd=0,
                           font=('Malgun Gothic', 9), padx=10, pady=3, cursor='hand2',
-                          activebackground='#3A3A50', activeforeground='white',
+                          activebackground=C['raised'], activeforeground=C['ink'],
                           command=cmd).pack(side='left', padx=(0, 6))
         else:
             tk.Label(self._acct, bg=BG, fg=DIM, font=('Malgun Gothic', 8), justify='left', anchor='w',
@@ -1232,29 +1233,29 @@ class ShortcutSettingsWindow:
                             'Stored: coins, items, outfits, a token count for your level, account ID and display name\n'
                             '(conversations, code and email are never stored)')).pack(anchor='w')
             b = tk.Button(self._acct, text=t('Google로 로그인', 'Sign in with Google'),
-                          bg='#3377E0', fg='white', relief='flat', bd=0, font=('Malgun Gothic', 9),
-                          padx=12, pady=4, cursor='hand2', activebackground='#2255BB',
-                          activeforeground='white', command=mgr.cloud_sign_in_ui,
+                          bg=C['accent'], fg=C['accent_ink'], relief='flat', bd=0, font=('Malgun Gothic', 9),
+                          padx=12, pady=4, cursor='hand2', activebackground=mix(C['accent'], C['bg'], 0.8),
+                          activeforeground=C['accent_ink'], command=mgr.cloud_sign_in_ui,
                           state='disabled' if cloud.busy else 'normal')
             b.pack(anchor='w', pady=(6, 0))
         if cloud.is_signed_in and not buni_pro.shared().can('cloud_sync'):
-            tk.Label(self._acct, bg=BG, fg='#D9B25A', font=('Malgun Gothic', 8), wraplength=330, justify='left', anchor='w',
+            tk.Label(self._acct, bg=BG, fg=C['warn'], font=('Malgun Gothic', 8), wraplength=330, justify='left', anchor='w',
                      text=t('Pro 체험이 끝나서 동기화를 잠시 멈췄어요. 데이터는 그대로 남아 있고, Pro로 돌아오면 이어서 맞춰요.',
                             'Sync is paused because your Pro trial ended. Your data is untouched and sync resumes with Pro.')
                      ).pack(anchor='w', pady=(4, 0))
         if cloud.message:
-            tk.Label(self._acct, text=cloud.message, bg=BG, fg='#D9B25A', font=('Malgun Gothic', 8),
+            tk.Label(self._acct, text=cloud.message, bg=BG, fg=C['warn'], font=('Malgun Gothic', 8),
                      wraplength=330, justify='left', anchor='w').pack(anchor='w', pady=(4, 0))
 
         a = mgr.awake
         lbl = getattr(self, '_awake_lbl', None)
         if lbl is not None:
             if a.is_active:
-                lbl.config(text=t(f'● 실행 중 — {a.status_text()}', f'● ON — {a.status_text()}'), fg='#4DC780')
+                lbl.config(text=t(f'● 실행 중 — {a.status_text()}', f'● ON — {a.status_text()}'), fg=C['ok'])
             else:
-                lbl.config(text=t('○ 꺼짐', '○ Off'), fg='#8A8A98')
+                lbl.config(text=t('○ 꺼짐', '○ Off'), fg=C['dim'])
             if a.last_error:
-                lbl.config(text='⚠️ ' + a.last_error, fg='#E6665A')
+                lbl.config(text='⚠️ ' + a.last_error, fg=C['danger'])
             self._awake_off.config(state='normal' if a.is_active else 'disabled')
             self._sch_var.set(a.schedule_enabled)
 
@@ -1272,9 +1273,9 @@ class ShortcutSettingsWindow:
         cur = get_lang()
         for code, b in getattr(self, '_lang_btns', {}).items():
             on = (code == cur)
-            b.config(bg='#3377E0' if on else '#2A2A34',
-                     fg='white' if on else '#AAAAAA',
-                     activebackground='#2255BB' if on else '#3A3A50')
+            b.config(bg=C['accent'] if on else C['field'],
+                     fg=C['accent_ink'] if on else C['ink2'],
+                     activebackground=mix(C['accent'], C['bg'], 0.8) if on else C['raised'])
 
     def _set_lang(self, code: str):
         """언어를 바꾸고 설정 창·트레이 메뉴를 새 언어로 다시 만든다.
@@ -1307,14 +1308,14 @@ class ShortcutSettingsWindow:
             self._stop_record(self._recording)
         self._recording = action
         self._btns[action].config(text=t('키 입력 대기...', 'Press a key...'),
-                                  bg='#4A3A00', fg='#FFDD00')
+                                  bg=mix(C['warn'], C['bg'], 0.25), fg=C['warn'])
         self._win.bind('<KeyPress>', self._on_key)
         self._win.focus_force()
 
     def _stop_record(self, action: str):
         self._recording = None
         self._btns[action].config(text=self._btn_text(action),
-                                   bg='#2A2A34', fg='white')
+                                   bg=C['field'], fg=C['ink'])
         try: self._win.unbind('<KeyPress>')
         except Exception: pass
 
@@ -2199,16 +2200,16 @@ class SessionWindow(CharacterDrawMixin):
         x0  = bx - bw;    x1 = bx
         y0  = by - bh/2;  y1 = by + bh/2
         # ① 테두리용 외곽 레이어 (body+꼬리 모두 border 색으로, outline='')
-        self._rounded_rect(x0-1, y0-1, x1+1, y1+1, r+1, '#cccccc', '', 'bubble')
+        self._rounded_rect(x0-1, y0-1, x1+1, y1+1, r+1, LT['line'], '', 'bubble')
         self.cv.create_polygon(x1-3, by-6, x1+10, by, x1-3, by+6,
-                                fill='#cccccc', outline='', tags='bubble')
+                                fill=LT['line'], outline='', tags='bubble')
         # ② 흰색 채움 레이어 (접합부 포함) — 바깥 border만 보임
-        self._rounded_rect(x0, y0, x1, y1, r, 'white', '', 'bubble')
+        self._rounded_rect(x0, y0, x1, y1, r, LT['panel'], '', 'bubble')
         self.cv.create_polygon(x1-2, by-5, x1+9, by, x1-2, by+5,
-                                fill='white', outline='', tags='bubble')
+                                fill=LT['panel'], outline='', tags='bubble')
         # ③ 텍스트
         self.cv.create_text(x0+pad, (y0+y1)/2, text=self.msg,
-                             anchor='w', font=font, fill='#222222', tags='bubble')
+                             anchor='w', font=font, fill=LT['ink'], tags='bubble')
 
     # ── Memo tag ──────────────────────────────────────────────
 
@@ -2257,7 +2258,7 @@ class SessionWindow(CharacterDrawMixin):
         label_y = bar_y + SH + 6
 
         # ── 텍스트 그리기 헬퍼: 1px 쉐도우 + 본문 ──────────────
-        def _txt(x, y, text, anchor, font, color, shadow='#555555'):
+        def _txt(x, y, text, anchor, font, color, shadow=C['line']):
             self.cv.create_text(x+1, y+1, text=text, anchor=anchor,
                                 font=font, fill=shadow, tags='bar')
             self.cv.create_text(x,   y,   text=text, anchor=anchor,
@@ -2266,36 +2267,36 @@ class SessionWindow(CharacterDrawMixin):
         # 레벨 텍스트
         _txt(bx, lv_y,
              text=f'Lv.{self.shop.level}',
-             anchor='w', font=('Consolas', 6, 'bold'), color='#F2CC25')
+             anchor='w', font=('Consolas', 6, 'bold'), color=C['warn'])
 
         # 트랙 (어두운 pill)
-        self._rounded_rect(bx, bar_y, bx + w, bar_y + SH, R, '#2A2A2A', '', 'bar')
+        self._rounded_rect(bx, bar_y, bx + w, bar_y + SH, R, C['field'], '', 'bar')
 
         # 채움 (컬러 pill)
         if display_pct > 0:
             fill_ratio = min(1.0, display_pct / 100)
             fill_w = max(w * fill_ratio, R * 2 + 2)   # 최소 너비 확보
-            fc = ('#4DDA59' if display_pct <= 50
-                  else '#F2CC25' if display_pct <= 75
-                  else '#F24D33')
+            fc = (C['ok'] if display_pct <= 50
+                  else C['warn'] if display_pct <= 75
+                  else C['danger'])
             self._rounded_rect(bx, bar_y, bx + fill_w, bar_y + SH, R, fc, '', 'bar')
             # 상단 하이라이트 (맥 버전 광택)
             if fill_w > R * 2 + 4:
                 self.cv.create_rectangle(
                     bx + R + 1, bar_y + 1,
                     bx + fill_w - R - 1, bar_y + 2,
-                    fill='#FFFFFF', outline='', tags='bar')
+                    fill=C['ink'], outline='', tags='bar')
 
         # 라벨: % (왼쪽), ↺ (오른쪽)
         _lf = ('Consolas', 6, 'bold')
         label_pct = (f'{round(display_pct)}%'
                      if self._server_utilization is not None else t('동기화중', 'syncing'))
         _txt(bx, label_y, text=label_pct,
-             anchor='w', font=_lf, color='#AAAAAA')
+             anchor='w', font=_lf, color=C['ink2'])
         rst = self._reset_time_str()
         if rst:
             _txt(bx + w, label_y, text=f'↺ {rst}',
-                 anchor='e', font=_lf, color='#AAAAAA')
+                 anchor='e', font=_lf, color=C['ink2'])
 
     def _reset_time_str(self) -> str:
         # 맥과 동일하게: 서버 resets_at 우선, 없으면 session_start + 5시간으로 추정
@@ -2662,8 +2663,8 @@ class SessionWindow(CharacterDrawMixin):
             self._completion_win.destroy()
 
         TRANSP_  = '#010101'
-        WHITE    = '#FFFFFF'
-        SHADOW   = '#BBBBBB'
+        WHITE    = LT['panel']
+        SHADOW   = LT['line']
         BW       = 160
         TAIL_W   = 15
         R        = 14
@@ -2732,7 +2733,7 @@ class SessionWindow(CharacterDrawMixin):
 
         cv.create_text(PAD + 4, PAD + 2, text=t('✅ 완료했어요!', '✅ All done!'),
                        anchor='nw', font=('Consolas', 10, 'bold'),
-                       fill='#000000', tags='bubble')
+                       fill=LT['ink'], tags='bubble')
 
         def _darken(hex_color):
             r = max(0, int(hex_color[1:3], 16) - 30)
@@ -2752,7 +2753,7 @@ class SessionWindow(CharacterDrawMixin):
             cv.create_rectangle(bx+br, by0, bx+bw-br, by1, fill=bg, outline=bg, tags=tags)
             cv.create_rectangle(bx, by0+br, bx+bw, by1-br, fill=bg, outline=bg, tags=tags)
             cv.create_text(bx + bw//2, btn_y + BTN_H//2, text=label, font=('Malgun Gothic', 9, 'bold'),
-                           fill='white', tags=(tag, 'bubble'))
+                           fill=LT['panel'], tags=(tag, 'bubble'))
             cv.tag_bind(tag, '<Button-1>', lambda _: on_click())
             cv.tag_bind(tag, '<Enter>', lambda _: cv.itemconfig(tag + 'bg', fill=_darken(bg), outline=_darken(bg)))
             cv.tag_bind(tag, '<Leave>', lambda _: cv.itemconfig(tag + 'bg', fill=bg, outline=bg))
@@ -2764,9 +2765,9 @@ class SessionWindow(CharacterDrawMixin):
                 self._dismiss_completed()
                 self.manager.root.after(0, lambda: self.manager.open_team(squad_job))
             _button(t('🐰 스쿼드 결과 보기', '🐰 See squad result') if finished else t('🐰 스쿼드 보기', '🐰 Open squad'),
-                    '#7350D9', btn_y, _open_squad, 'sqbtn')
+                    LT['info'], btn_y, _open_squad, 'sqbtn')
             btn_y += BTN_H + GAP
-        _button(t('확인', 'OK'), '#2DB357', btn_y, self._dismiss_completed, 'btn')
+        _button(t('확인', 'OK'), LT['ok'], btn_y, self._dismiss_completed, 'btn')
 
     # ── Ask-user popup (AskUserQuestion — 클로드 열기 버튼 제공) ──
 
@@ -2775,8 +2776,8 @@ class SessionWindow(CharacterDrawMixin):
             self._ask_user_win.destroy()
 
         TRANSP_  = '#010101'
-        WHITE    = '#FFFFFF'
-        SHADOW   = '#BBBBBB'
+        WHITE    = LT['panel']
+        SHADOW   = LT['line']
         BW       = 170
         TAIL_W   = 15
         R        = 14
@@ -2840,14 +2841,14 @@ class SessionWindow(CharacterDrawMixin):
 
         cv.create_text(PAD + 4, PAD + 2, text=t('✅ 확인이 필요해요!', '✅ Needs your input!'),
                        anchor='nw', font=('Consolas', 10, 'bold'),
-                       fill='#000000', tags='bubble')
+                       fill=LT['ink'], tags='bubble')
 
         for i, line in enumerate(q_lines):
             cv.create_text(PAD + 4, PAD + TITLE_H + i * QLINE_H, text=line,
-                           anchor='nw', font=q_font, fill='#404040', tags='bubble')
+                           anchor='nw', font=q_font, fill=LT['ink2'], tags='bubble')
 
         btn_y = PAD + TITLE_H + len(q_lines) * QLINE_H + GAP
-        bg    = '#3377E0'
+        bg    = LT['info']
         label = t('클로드 열기', 'Open Claude')
         bw    = len(label) * 9 + 20
         bx    = PAD
@@ -2861,7 +2862,7 @@ class SessionWindow(CharacterDrawMixin):
         cv.create_rectangle(bx+br, by0, bx+bw-br, by1, fill=bg, outline=bg, tags=('btn','btnbg','bubble'))
         cv.create_rectangle(bx, by0+br, bx+bw, by1-br,  fill=bg, outline=bg, tags=('btn','btnbg','bubble'))
         cv.create_text(bx + bw//2, btn_y + BTN_H//2, text=label,
-                       font=('Consolas', 9, 'bold'), fill='white', tags=('btn','bubble'))
+                       font=('Consolas', 9, 'bold'), fill=LT['panel'], tags=('btn','bubble'))
         cv.tag_bind('btn', '<Button-1>', lambda _: self._open_claude())
         cv.tag_bind('btn', '<Enter>',
                     lambda _: cv.itemconfig('btnbg', fill=_darken(bg), outline=_darken(bg)))
@@ -2912,8 +2913,8 @@ class SessionWindow(CharacterDrawMixin):
             self._limit_win.destroy()
 
         TRANSP_  = '#010101'
-        WHITE    = '#FFFFFF'
-        SHADOW   = '#BBBBBB'
+        WHITE    = LT['panel']
+        SHADOW   = LT['line']
         BW       = 190
         TAIL_W   = 15
         R        = 14
@@ -2973,15 +2974,15 @@ class SessionWindow(CharacterDrawMixin):
 
         cv.create_text(PAD + 4, PAD + 2, text=t('⏳ 한도에 도달했어요', '⏳ Usage limit reached'),
                        anchor='nw', font=('Consolas', 10, 'bold'),
-                       fill='#000000', tags='bubble')
+                       fill=LT['ink'], tags='bubble')
 
         txt_y = PAD + TITLE_H + GAP
         cv.create_text(PAD + 4, txt_y, text=self._limit_countdown_str(),
                        anchor='nw', font=('Consolas', 9, 'bold'),
-                       fill='#444444', tags=('bubble', 'limit_countdown'))
+                       fill=LT['ink2'], tags=('bubble', 'limit_countdown'))
 
         btn_y = txt_y + TXT_H + GAP
-        bg    = '#73737F'
+        bg    = LT['dim']
         label = t('숨기기', 'Hide')
         bw    = len(label) * 9 + 20
         bx    = PAD
@@ -2995,7 +2996,7 @@ class SessionWindow(CharacterDrawMixin):
         cv.create_rectangle(bx+br, by0, bx+bw-br, by1, fill=bg, outline=bg, tags=('btn','btnbg','bubble'))
         cv.create_rectangle(bx, by0+br, bx+bw, by1-br,  fill=bg, outline=bg, tags=('btn','btnbg','bubble'))
         cv.create_text(bx + bw//2, btn_y + BTN_H//2, text=label,
-                       font=('Consolas', 9, 'bold'), fill='white', tags=('btn','bubble'))
+                       font=('Consolas', 9, 'bold'), fill=LT['panel'], tags=('btn','bubble'))
         cv.tag_bind('btn', '<Button-1>', lambda _: self._dismiss_limit_notice())
         cv.tag_bind('btn', '<Enter>',
                     lambda _: cv.itemconfig('btnbg', fill=_darken(bg), outline=_darken(bg)))
@@ -3026,9 +3027,9 @@ class SessionWindow(CharacterDrawMixin):
 
         # ── 상수 ──────────────────────────────────────────────
         TRANSP   = '#010101'
-        WHITE    = '#FFFFFF'
-        SHADOW   = '#BBBBBB'
-        CMD_BG   = '#F0F0F0'
+        WHITE    = LT['panel']
+        SHADOW   = LT['line']
+        CMD_BG   = LT['field']
         BW       = 230          # 말풍선 너비 (꼬리 제외)
         TAIL_W   = 15           # 꼬리 너비
         R        = 14           # 모서리 반지름
@@ -3098,7 +3099,7 @@ class SessionWindow(CharacterDrawMixin):
         # 제목
         cv.create_text(PAD + 4, PAD + 2, text=t('🔐 실행 허용?', '🔐 Run this?'),
                        anchor='nw', font=('Consolas', 10, 'bold'),
-                       fill='#000000', tags='bubble')
+                       fill=LT['ink'], tags='bubble')
 
         # 명령 박스 배경 (둥근 사각형)
         cmd_y = PAD + TITLE_H + GAP
@@ -3114,7 +3115,7 @@ class SessionWindow(CharacterDrawMixin):
         cv.create_rectangle(cx0, cy0+cr, cx1, cy1-cr, fill=CMD_BG, outline=CMD_BG, tags='bubble')
 
         # 스크롤 가능한 텍스트 위젯
-        txt = tk.Text(win, bg=CMD_BG, fg='#333333',
+        txt = tk.Text(win, bg=CMD_BG, fg=LT['ink'],
                       font=('Consolas', 8), bd=0, highlightthickness=0,
                       wrap='word', relief='flat', cursor='arrow',
                       padx=5, pady=4)
@@ -3130,9 +3131,9 @@ class SessionWindow(CharacterDrawMixin):
 
         # 버튼
         btn_y = cmd_y + CMD_H + GAP
-        btns  = [(t('거부', 'Deny'), '#DA3733', 'deny'),
-                 (t('허용', 'Allow'), '#2DB357', 'approve'),
-                 (t('전체 허용', 'Allow all'), '#3377E0', 'approve_all')]
+        btns  = [(t('거부', 'Deny'), LT['danger'], 'deny'),
+                 (t('허용', 'Allow'), LT['ok'], 'approve'),
+                 (t('전체 허용', 'Allow all'), LT['info'], 'approve_all')]
         bx = PAD
         for label, bg, action in btns:
             bw = len(label) * 9 + 16
@@ -3148,7 +3149,7 @@ class SessionWindow(CharacterDrawMixin):
             cv.create_rectangle(bx+br, by0, bx+bw-br, by1, fill=bg, outline=bg, tags=(tag, tag_bg, 'bubble'))
             cv.create_rectangle(bx, by0+br, bx+bw, by1-br, fill=bg, outline=bg, tags=(tag, tag_bg, 'bubble'))
             cv.create_text(bx + bw//2, btn_y + BTN_H//2, text=label,
-                           font=('Consolas', 9, 'bold'), fill='white', tags=(tag, 'bubble'))
+                           font=('Consolas', 9, 'bold'), fill=LT['panel'], tags=(tag, 'bubble'))
             cv.tag_bind(tag, '<Button-1>', lambda _, a=action: self._decide(a))
             cv.tag_bind(tag, '<Enter>',
                         lambda _, tb=tag_bg, b=bg: cv.itemconfig(tb, fill=_darken(b), outline=_darken(b)))

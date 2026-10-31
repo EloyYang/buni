@@ -452,15 +452,25 @@ final class TeamStore: ObservableObject {
         for d in (try? fm.contentsOfDirectory(atPath: Self.jobsDir.path)) ?? [] {
             let dir = Self.jobsDir.appendingPathComponent(d)
             want[dir.path] = dirMask
-            let chat = dir.appendingPathComponent("chat.jsonl").path
-            if fm.fileExists(atPath: chat) { want[chat] = fileMask }
+            // 파일 자체도 본다 — 폴더 이벤트가 없는 제자리 덮어쓰기(write)도 바로 잡는다
+            for name in ["job.json", "chat.jsonl"] {
+                let file = dir.appendingPathComponent(name).path
+                if fm.fileExists(atPath: file) { want[file] = fileMask }
+            }
         }
         for (path, src) in sources where want[path] == nil { src.cancel(); sources[path] = nil }
         for (path, mask) in want where sources[path] == nil {
             let fd = open(path, O_EVTONLY)
             guard fd >= 0 else { continue }
             let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: mask, queue: .main)
-            src.setEventHandler { [weak self] in Task { @MainActor in self?.fileEvent() } }
+            src.setEventHandler { [weak self, weak src] in
+                // 임시 파일 교체(rename/delete)면 옛 파일을 붙잡고 있으니 풀고, 다시 감시해 새 파일에 건다
+                let gone = src?.data.contains(.rename) == true || src?.data.contains(.delete) == true
+                Task { @MainActor in
+                    if gone, !(mask == dirMask) { self?.sources[path]?.cancel(); self?.sources[path] = nil }
+                    self?.fileEvent()
+                }
+            }
             src.setCancelHandler { close(fd) }
             src.resume()
             sources[path] = src
@@ -839,7 +849,7 @@ final class TeamStore: ObservableObject {
 
     /// 사이드바용 — 모든 작업의 '반영 대기' 상태를 가끔 갱신한다 (확인이 필요한 작업을 표시하려고)
     func refreshAllApplyStates() {
-        for j in jobs where ["review", "done", "failed", "paused", "running", "queued"].contains(j.state) { refreshApplyState(j) }
+        for j in jobs where ["review", "paused", "running", "queued"].contains(j.state) { refreshApplyState(j) }   // 끝난·실패한 작업은 바뀔 일이 적어 다시 안 본다 (파이썬을 띄워 git 을 도는 일이라 가볍지 않다)
     }
 
     /// 확인이 필요한 상황인가 — 반영 승인 대기 · 사전요구서 변경 확인 · 수동 진행에서 시작 대기 · 한도로 멈춤

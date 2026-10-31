@@ -56,9 +56,25 @@ class Drafts(unittest.TestCase):
         self.assertIn('job-a|channel', d)                      # 다른 방 초안은 그대로
 
     def test_broken_file_is_ignored(self):
+        # 여러 시험 모듈이 BUNI_TEAM_HOME 을 각자 바꾸고 임시폴더를 지우므로, 날것으로 쓰기 전에 폴더부터 만든다
+        # (엔진 쪽 save_draft 는 _atomic_write 가 폴더를 만든다 — 아래 시험이 확인).
+        os.makedirs(bt.team_home(), exist_ok=True)
         with open(os.path.join(bt.team_home(), 'drafts.json'), 'w') as f:
             f.write('{broken')
         self.assertEqual(bt.load_drafts(), {})
+
+    def test_save_draft_creates_missing_home(self):
+        old = os.environ.get('BUNI_TEAM_HOME')
+        with tempfile.TemporaryDirectory() as t:
+            os.environ['BUNI_TEAM_HOME'] = os.path.join(t, 'nope', 'home')   # 아직 없는 폴더
+            try:
+                bt.save_draft('j|lead', '글')
+                self.assertEqual(bt.load_drafts(), {'j|lead': '글'})
+            finally:
+                if old is None:
+                    os.environ.pop('BUNI_TEAM_HOME', None)
+                else:
+                    os.environ['BUNI_TEAM_HOME'] = old
 
 
 if __name__ == '__main__':

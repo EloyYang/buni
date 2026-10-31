@@ -49,6 +49,7 @@ struct SquadItem: Identifiable, Equatable {
     var kind: String = "role"    // task(내가 지시한 업무) · role(옛 작업의 팀원 업무) · job(팀이 없는 작업) · next(아직 시작 안 한 다음에 할 일)
     var auto: String = ""        // started(자동 진행됨) · confirm(확인 필요) · limit(상한으로 멈춤)
     var summary: String = ""     // 결과 (팀원 보고 요약 · 다음 업무 목표)
+    var stateNames: String = ""  // 상태 이름 한글·영어 둘 다 (검색용 — 엔진 card 의 state[0] state[1])
     var searchText: String = ""  // 검색 대상 (제목·담당자·내용, 소문자)
     var why: String = ""         // 상태 이유 한 줄 (엔진 board_why)
     var instruction: String = "" // 원래 지시 (팀원 미션 + 산출물 · 다음 업무 목표)
@@ -141,7 +142,7 @@ enum SquadBoard {
                 c.goal = j.goal ?? ""
                 c.changedFiles = j.changedFiles ?? 0
                 if c.instruction.isEmpty { c.instruction = c.mission.isEmpty ? c.goal : c.mission }
-                c.searchText = ([c.jobTitle, j.goal ?? "", c.assignee, c.recent, c.summary, c.stateLabel] + extra).joined(separator: " ").lowercased()
+                c.searchText = ([c.jobTitle, j.goal ?? "", c.assignee, c.recent, c.summary, c.stateNames] + extra).joined(separator: " ").lowercased()
                 return c
             }
             if roles.isEmpty {
@@ -152,6 +153,7 @@ enum SquadBoard {
                                      column: col, stateLabel: name,
                                      recent: !errorLine.isEmpty ? errorLine : (j.busyMsg ?? ""),
                                      since: jobSince, progressDone: 0, progressTotal: 0, updated: jobSince, kind: "job")
+                card.stateNames = bothNames(jobNames[j.state] ?? (j.state, j.state))
                 card.why = briefLine(why(col, nil, j.state, errorLine))
                 out.append(searchable(card))
                 continue
@@ -168,6 +170,7 @@ enum SquadBoard {
                                        stateLabel: closed ? L.t("거절함", "Rejected") : held ? SquadColumn.blocked.title : SquadColumn.ready.title,
                                        recent: s.why, since: jobSince, progressDone: 0, progressTotal: 0, updated: jobSince,
                                        kind: "next", auto: closed ? "rejected" : held ? (s.auto ?? "") : "", summary: s.goal)
+                    it.stateNames = closed ? "거절함 Rejected" : held ? bothNames(("확인 필요", "Needs attention")) : bothNames(("대기", "Waiting"))
                     it.stepId = s.id
                     it.stepTitle = s.title
                     it.instruction = s.goal
@@ -235,6 +238,8 @@ enum SquadBoard {
                                      column: col, stateLabel: label, recent: recent, since: since,
                                      progressDone: accepted, progressTotal: roles.count, updated: jobSince,
                                      auto: step?.auto == "started" ? "started" : "", summary: st?.summary ?? "")
+                let jobLevel = col == .blocked || (col == .review && (status == "pending" || status == "accepted"))
+                card.stateNames = bothNames(jobLevel ? (jobNames[j.state] ?? (j.state, j.state)) : (roleNames[status] ?? roleNames["pending"]!))
                 card.stepId = step?.id
                 card.duty = r.dutyLabel
                 card.mission = r.mission ?? ""
@@ -247,6 +252,19 @@ enum SquadBoard {
         }
         return out
     }
+
+    /// 엔진 `_BOARD_JOB_NAMES` / `_BOARD_ROLE_NAMES` — 상태 이름 (한글, 영어). 화면 언어와 상관없이 검색에 둘 다 쓴다
+    static let jobNames: [String: (String, String)] = [
+        "draft": ("작성 중", "Draft"), "interviewing": ("질문 답변 중", "Answering"),
+        "review_requirements": ("요구서 승인 대기", "Awaiting approval"), "queued": ("예약됨", "Scheduled"),
+        "running": ("진행 중", "Running"), "waiting_limit": ("한도 대기", "Waiting (limit)"),
+        "paused": ("잠시 멈춤", "Paused"), "review": ("검토 대기", "Ready to review"), "done": ("검토 완료", "Done"),
+        "failed": ("실패", "Failed"), "cancelled": ("취소됨", "Cancelled")]
+    static let roleNames: [String: (String, String)] = [
+        "running": ("작업 중", "Working"), "done_unreviewed": ("검토 대기", "In review"),
+        "revise": ("다시 작업", "Revising"), "accepted": ("통과", "Accepted"), "pending": ("대기", "Waiting")]
+
+    static func bothNames(_ p: (String, String)) -> String { p.0 + " " + p.1 }
 
     /// 담당자순 비교 — 엔진 `assignee_key` 와 같다: 대소문자 무시(소문자 유니코드 값 순) 후 같으면 원래 글자 순.
     /// 지역 설정에 따라 달라지는 localizedCompare 를 쓰지 않아 맥·Windows 순서가 같다 (영문 → 한글 순, 같은 이름은 원래 순서 유지).
@@ -341,14 +359,13 @@ struct SquadBoardView: View {
                         .font(.system(size: 12)).foregroundColor(SQ.dim).multilineTextAlignment(.center)
                     Spacer()
                 } else {
-                    HStack(spacing: 0) {
-                        if listMode { listView(shown, now) } else { boardView(shown, now) }
-                        if let sel = all.first(where: { $0.id == selectedId }) {
-                            Rectangle().fill(SQ.line).frame(width: 1)
-                            SquadItemDetail(item: sel, now: now, onGoto: onGoto, onClose: { selectedId = nil }).id(sel.id)
-                                .frame(width: 280)
-                        }
-                    }
+                    if listMode { listView(shown, now) } else { boardView(shown, now) }
+                }
+            }
+            // 업무 상세 — 오른쪽 벽에 붙이지 않고 화면 가운데에 팝업으로 연다 (바깥을 누르거나 Esc 로 닫는다)
+            .overlay {
+                if let sel = all.first(where: { $0.id == selectedId }) {
+                    detailPopup(sel, now)
                 }
             }
         }
@@ -356,9 +373,28 @@ struct SquadBoardView: View {
             // 승인 대기 · 반영한 변경(되돌리기·화면 비교)은 git 으로 확인하는 일이라 가끔만 다시 본다
             while !Task.isCancelled {
                 store.refreshAllApplyStates()
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
+    }
+
+    private func detailPopup(_ sel: SquadItem, _ now: Double) -> some View {
+        GeometryReader { g in
+            ZStack {
+                Color.black.opacity(0.45)
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedId = nil }
+                SquadItemDetail(item: sel, now: now, onGoto: onGoto, onClose: { selectedId = nil }).id(sel.id)
+                    .frame(width: min(580, max(320, g.size.width - 48)), height: min(660, max(320, g.size.height - 48)))
+                    .background(RoundedRectangle(cornerRadius: BuniTokens.Radius.xl, style: .continuous).fill(BT.surface1))
+                    .overlay(RoundedRectangle(cornerRadius: BuniTokens.Radius.xl, style: .continuous).stroke(BT.borderStrong, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: BuniTokens.Radius.xl, style: .continuous))
+                    .shadow(color: .black.opacity(0.4), radius: 24, y: 8)
+                Button("") { selectedId = nil }.keyboardShortcut(.cancelAction).opacity(0).frame(width: 0, height: 0)   // Esc
+            }
+            .frame(width: g.size.width, height: g.size.height)
+        }
+        .transition(.opacity)
     }
 
     // MARK: 필터 · 정렬
@@ -382,7 +418,7 @@ struct SquadBoardView: View {
         var people: [(id: String, name: String)] = []
         for i in all where !people.contains(where: { $0.id == i.assigneeId }) { people.append((i.assigneeId, i.assignee)) }
         return HStack(spacing: 10) {
-            Text("📊 " + L.t("업무 현황", "Task board")).font(.system(size: 15, weight: .heavy))
+            Text("📊 " + L.t("전체 현황", "Overview")).font(.system(size: 15, weight: .heavy))
             Picker("", selection: $listMode) {
                 Text(L.t("보드", "Board")).tag(false)
                 Text(L.t("목록", "List")).tag(true)

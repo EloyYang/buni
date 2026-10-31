@@ -435,7 +435,7 @@ private struct TypingRow: View {
     var body: some View {
         HStack(spacing: 8) {
             SquadAvatar(icon: people.icon(who), id: who, size: 26)
-            ProgressView().controlSize(.mini)
+            BuniSpinner()
             Text(people.name(who) + L.t(" 이(가) 입력하는 중…", " is typing…")).font(.system(size: 11)).foregroundColor(SQ.dim)
         }
         .padding(.horizontal, 16).padding(.vertical, 6)
@@ -688,7 +688,7 @@ struct SquadDMView: View {
                     }
                 }
                 if act.state == "running" {
-                    HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(L.t("지금 진행 중", "Working now")).font(.system(size: 10)).foregroundColor(.green) }
+                    HStack(spacing: 6) { BuniSpinner(); Text(L.t("지금 진행 중", "Working now")).font(.system(size: 10)).foregroundColor(.green) }
                         .padding(.top, 2)
                 }
             }
@@ -750,7 +750,7 @@ struct SquadNavRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                if spinner { ProgressView().controlSize(.mini).frame(width: 14) }
+                if spinner { BuniSpinner() }
                 leading.frame(width: 20)
                 Text(title)
                     .font(.system(size: 13, weight: unread > 0 || selected ? .bold : .regular))

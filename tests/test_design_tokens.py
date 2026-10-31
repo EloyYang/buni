@@ -95,6 +95,23 @@ class DesignTokenParity(unittest.TestCase):
             self.assertNotRegex(code, r"'#[0-9A-Fa-f]{3,6}'", f'ShopWindow~ChatLobbyWindow +{no}: {line.strip()}')
             self.assertNotRegex(line, r"(fg|bg|fill|foreground)\s*=\s*'(white|black)'", line.strip())
 
+    def test_windows_settings_bubbles_permission_use_tokens(self):
+        """설정 창·상태 말풍선·사용량 바·완료/질문/한도/권한 창은 색 글자 값(#RRGGBB, 'white'…)을 쓰지 않는다 (투명 키색 #010101 만 예외)."""
+        src = _read('windows', 'buni.py')
+        parts = [
+            ('설정 창', src[src.index('class ShortcutSettingsWindow:'):src.index('def _read_session_title')]),
+            ('상태 말풍선', src[src.index('    def _draw_bubble(self):'):src.index('    def _draw_memo(self):')]),
+            ('사용량 바', src[src.index('    def _draw_bar(self):'):src.index('    def _reset_time_str(self)')]),
+            ('완료·질문·한도·권한 창', src[src.index('    def _show_completion_popup(self):'):src.index('    def _show_menu(self')]),
+        ]
+        for label, text in parts:
+            for no, line in enumerate(text.splitlines(), 1):
+                code = line.split('  #')[0] if '  #' in line else line
+                code = code.replace('#010101', '')
+                self.assertNotRegex(code, r"'#[0-9A-Fa-f]{3,6}'", f'{label} +{no}: {line.strip()}')
+                self.assertNotRegex(code, r"'(white|black)'", f'{label} +{no}: {line.strip()}')
+        self.assertIn('LT = palette(False)', src)
+
     def test_mix(self):
         self.assertEqual(buni_theme.mix('#FFFFFF', '#000000', 0.5), '#808080')
 

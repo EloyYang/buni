@@ -65,7 +65,7 @@ DEFAULT_SETTINGS = {
     'preview_cmd': '',          # 변경 전·후 화면을 PNG 로 찍는 명령 (비우면 프로젝트의 tools/preview-shots.sh 가 있을 때만)
     'max_revisions': 2,         # 검토에서 되돌리는 최대 횟수
     'auto_followup': True,      # 끝난 작업의 '다음에 할 일' 중 사업 방향이 안 바뀌는 것은 자동으로 이어서 시작
-    'auto_capture': True,       # 화면·디자인을 바꾸는 팀원 업무는 시작 전·끝난 뒤 화면을 엔진이 찍어 본다 (못 찍으면 '캡처 아님 — 이유')
+    'auto_capture': False,      # 켜면 화면·디자인 업무의 시작 전·끝난 뒤에 내 화면 전체를 엔진이 찍는다 — 맥은 '화면 및 시스템 오디오 기록' 권한을 묻고 내 화면의 다른 내용도 찍힌다. 기본은 끔(변경 전·후 화면은 권한 없이 `capture_shots` 가 앱 화면만 따로 그린다)
 }
 AUTO_FOLLOWUP_MAX = 3           # 자동으로 이어 가는 연속 단계 수 상한 (넘으면 멈추고 알린다)
 AUTO_FOLLOWUP_PER_WRAPUP = 2    # 한 번의 정리에서 동시에 자동 시작하는 후속 작업 수
@@ -1162,8 +1162,14 @@ REVIEW_PROMPT = """당신은 이 작업의 '팀장'입니다. 팀원들의 결�
 역할마다 판정하세요: "accept"(통과) 또는 "revise"(다시 — 무엇을 어떻게 고쳐야 하는지 구체적인 feedback 필수).
 사소한 아쉬움은 통과시키고, 완료 기준을 못 채웠거나 틀린 것만 되돌리세요.
 
+통과시키더라도 거기서 멈추지 마세요. 완성된 업무마다 '더 나아질 수 있는 부분'(빠진 경우·더 쉬운 방법·더 나은 구조나 문구·시험 보강 등)을 찾아
+"improvements" 에 담당자가 바로 고칠 수 있을 만큼 구체적으로(어느 파일·무엇을·어떻게) 적으세요. 정말 없으면 빈 목록입니다.
+- 통과 + improvements 가 있으면 시스템이 그 담당자에게 한 번 더 다듬게 합니다 (되돌리는 횟수 상한 안에서만).
+- 개선점을 알면서도 시키지 않을 것(범위 밖·비용 대비 효과 작음)은 "left_as_is" 에 그대로 둔 이유를 한 줄로 적으세요.
+- summary 에는 통과 여부, 찾은 개선점, 담당자에게 시킨 보완, 그대로 둔 이유를 한두 문장으로 적으세요.
+
 아래 JSON 한 덩어리만 출력하세요:
-{{"verdicts": [{{"id": "design", "verdict": "accept", "feedback": ""}}], "summary": "검토 요약 한두 문장"}}
+{{"verdicts": [{{"id": "design", "verdict": "accept", "feedback": "", "improvements": ["README 의 실행 예시를 실제 명령으로 바꾸기"], "left_as_is": ""}}], "summary": "검토 요약"}}
 """
 
 MERGE_PROMPT = """당신은 이 작업의 '팀장'입니다. 팀원들의 결과물을 합쳐 최종 결과물을 만드세요.
@@ -2967,6 +2973,37 @@ def _capture_note(job_id: str, name: str, which: str, ok: bool, error: str = '')
         _atomic_write(job_path(job_id, 'captures.json'), json.dumps(log, ensure_ascii=False, indent=2))
 
 
+# 캡처 실패 이유·안내 문구 — 맥(화면 기록 권한)·Windows(Pillow)가 같은 문장을 쓴다. 설정 화면(맥 TeamViews.swift · Windows buni_team_ui.py)과
+# docs/team-structure.md 의 안내도 같은 문장이다 (tests/test_capture_paths.py 가 비교).
+CAPTURE_WHY_PERMISSION = '캡처 도구가 실패했어요 (화면 기록 권한을 확인해 주세요)'
+CAPTURE_WHY_NO_PILLOW = 'Pillow(PIL)가 없어 화면을 찍지 못했어요'
+CAPTURE_HELP_KO = ('화면·디자인 업무의 변경 전·후 화면은 자동으로 찍어요. 맥은 시스템 설정 ▸ 개인정보 보호 및 보안 ▸ 화면 기록(화면 및 시스템 오디오 녹음)에서 부니를 허용해야 하고, '
+                   'Windows 는 Pillow 가 있어야 해요 (pip install Pillow). 못 찍으면 \'캡처 아님 — 이유\'로 보여요.')
+CAPTURE_HELP_EN = ("Before/after screens of UI and design tasks are captured automatically. On Mac, allow Buni under System Settings ▸ Privacy & Security ▸ Screen Recording "
+                   "(Screen & System Audio Recording); on Windows, Pillow must be installed (pip install Pillow). If a capture fails, it shows as 'Not a capture — reason'.")
+
+
+def capture_diag() -> dict:
+    """화면 캡처가 이 PC 에서 가능한지 한 줄로 진단한다 (읽기 전용 — 화면을 찍거나 파일을 만들지 않는다).
+    돌려주는 값: {ok, platform, why, line}. 못 찍으면 why 는 캡처 실패 때 보이는 문구와 같다. CLI: `capture-diag`."""
+    why = ''
+    if sys.platform == 'darwin':
+        if not shutil.which('screencapture'):
+            why, plat = 'screencapture 를 찾지 못했어요', 'mac'
+        else:
+            plat = 'mac'                       # 화면 기록 권한은 실제로 찍어 봐야 안다 → 문서의 실기 점검(UI-CHECKLIST)에서 확인
+    elif IS_WIN:
+        plat = 'windows'
+        try:
+            import PIL.ImageGrab  # noqa: F401
+        except ImportError:
+            why = CAPTURE_WHY_NO_PILLOW
+    else:
+        plat, why = sys.platform, '이 운영체제에서는 화면 캡처를 지원하지 않아요'
+    line = f'캡처 진단 · {plat} · ' + ('가능' if not why else f'{SCREEN_NOT_CAPTURED} — {why}')
+    return {'ok': not why, 'platform': plat, 'why': why, 'line': line}
+
+
 def grab_screen(path: str, window: str = '', region: str = '') -> str:
     """화면(또는 창·영역)을 PNG 로 path 에 저장. 성공이면 '', 실패하면 이유.
     맥: `screencapture -x` (window=창 번호 → -l, region='x,y,w,h' → -R). Windows: PIL `ImageGrab` (region 은 같은 x,y,w,h; window 는 지원하지 않음)."""
@@ -2995,7 +3032,7 @@ def grab_screen(path: str, window: str = '', region: str = '') -> str:
         except (OSError, subprocess.SubprocessError) as e:
             return f'캡처 도구를 실행하지 못했어요: {type(e).__name__}'
         if r.returncode != 0:
-            return '캡처 도구가 실패했어요 (화면 기록 권한을 확인해 주세요)' + (f': {r.stderr.strip()[:80]}' if r.stderr.strip() else '')
+            return CAPTURE_WHY_PERMISSION + (f': {r.stderr.strip()[:80]}' if r.stderr.strip() else '')
         return ''
     if IS_WIN:
         if window:
@@ -3003,7 +3040,7 @@ def grab_screen(path: str, window: str = '', region: str = '') -> str:
         try:
             from PIL import ImageGrab                              # 없으면 캡처하지 못한 것으로 기록한다
         except ImportError:
-            return 'Pillow(PIL)가 없어 화면을 찍지 못했어요'
+            return CAPTURE_WHY_NO_PILLOW
         try:
             img = ImageGrab.grab(bbox=(box[0], box[1], box[0] + box[2], box[1] + box[3]) if box else None)
             img.save(path, 'PNG')
@@ -3059,6 +3096,7 @@ def capture_screen(job_id: str, name: str, which: str, source: str = '', window:
 # 화면 이름은 역할 id. 못 찍으면 captures.json 에 이유가 남고 채팅에 '캡처 아님 — 이유' 가 올라간다 (보드·상세도 같은 문구).
 SCREEN_TASK_RE = re.compile(r'디자인|화면|레이아웃|색상|색\s|토큰|스타일|말풍선|사이드바|창\s|UI|UX|view|screen|layout|design|theme|style|프론트엔드|frontend', re.I)
 SCREEN_NOT_CAPTURED = '캡처 아님'
+SCREEN_KEPT_OLD = '이전에 찍은 화면을 그대로 둬요'
 
 
 def is_screen_task(role: dict) -> bool:
@@ -3094,6 +3132,8 @@ def auto_capture(job: dict, role: dict, wd: str, which: str) -> dict | None:
             it = next((i for i in job_screens(job['id']) if i['name'] == name), None)
             if it and not it['captured']:
                 chat_add(job['id'], role['id'], 'lead', f"{SCREEN_NOT_CAPTURED} — {it['reason'] or res.get('error') or '이유를 알 수 없어요'}", 'status')
+            elif not res.get('ok'):                                # 이전에 찍은 전·후 파일이 남아 있어도 이번 after 실패는 알린다 (파일은 그대로 둔다)
+                chat_add(job['id'], role['id'], 'lead', f"{SCREEN_NOT_CAPTURED} — {res.get('error') or '이유를 알 수 없어요'} · {SCREEN_KEPT_OLD}", 'status')
         return res
     except Exception as e:                                         # noqa: BLE001
         try:
@@ -3103,7 +3143,7 @@ def auto_capture(job: dict, role: dict, wd: str, which: str) -> dict | None:
         return None
 
 
-SCREEN_TASK_NOTE = ('\n- 이 업무는 화면·디자인을 바꾸므로 팀 시스템이 시작 전·끝난 뒤 화면을 자동으로 캡처해 업무 보드에 전·후로 보여 줍니다. '
+SCREEN_TASK_NOTE = ('\n- 이 업무는 화면·디자인을 바꾸므로 팀 시스템이 시작 전·끝난 뒤 화면을 자동으로 캡처해 프로젝트 현황에 전·후로 보여 줍니다. '
                     '직접 찍은 PNG 가 있으면 .buni-team/{slug}/{rid}/screens/{rid}.before.png · {rid}.after.png 로 두세요 (그것을 대신 씁니다). 캡처하지 못하면 보드에 \'캡처 아님 — 이유\'로 표시됩니다.')
 
 
@@ -3155,7 +3195,7 @@ def job_screens(job_id: str) -> list:
         missing = [s for s in SCREEN_SIDES if not has[s]]
         why = [log.get(n, {}).get(s, {}).get('error', '') or ('변경 전 화면이 없어요' if s == 'before' else '변경 후 화면이 없어요') for s in missing]
         items.append({'name': n, 'before': b if has['before'] else '', 'after': a if has['after'] else '', 'w': 0, 'h': 0, 'boxes': [], 'error': '',
-                      'captured': False, 'missing': missing, 'reason': ' · '.join(why)})
+                      'captured': False, 'missing': missing, 'reason': ' · '.join(dict.fromkeys(why))})     # 전·후가 같은 이유로 실패하면 한 번만
     if items or old:
         try:
             _atomic_write(cache, json.dumps({'sig': sig, 'dir': sd, 'items': items}, ensure_ascii=False, indent=2))
@@ -4137,7 +4177,7 @@ def capture_shots(job_id: str, cid: str) -> list:
     meta['shots'] = pairs
     _save_change(job_id, meta)
     if pairs:
-        chat_add(job_id, 'system', 'user', f"🖼 화면이 바뀐 곳 {len(pairs)}개를 변경 전·후로 찍어 뒀어요 — 업무 보드에서 나란히 볼 수 있고, 마음에 안 들면 되돌릴 수 있어요", 'status')
+        chat_add(job_id, 'system', 'user', f"🖼 화면이 바뀐 곳 {len(pairs)}개를 변경 전·후로 찍어 뒀어요 — 프로젝트 현황에서 나란히 볼 수 있고, 마음에 안 들면 되돌릴 수 있어요", 'status')
     return pairs
 
 
@@ -4207,7 +4247,7 @@ def auto_apply(job_id: str, quiet: bool = False) -> dict:
     save_job(cur)
     if not same and not quiet:
         chat_add(job_id, 'system', 'user', ('일부만 반영했어요: ' if r.get('partial') else '내 폴더에 반영하지 못했어요: ') + err[:300]
-                 + '\n업무 보드의 "다시 정리해서 적용"으로 다시 시도할 수 있어요.', 'status')
+                 + '\n프로젝트 현황의 "다시 정리해서 적용"으로 다시 시도할 수 있어요.', 'status')
     write_report_view(job_id)
     return r
 
@@ -4282,7 +4322,8 @@ def verify_plan(proj: str, files: list) -> list:
         return [('tools/verify', ['script', script])]
     plan = []
     if any(f.endswith('.swift') for f in files) and os.path.isfile(os.path.join(proj, 'Package.swift')) and shutil.which('swift'):
-        plan.append(('swift build', ['swift', 'build']))
+        scratch = ['--scratch-path', os.path.expanduser('~/.cache/buni-verify')] if '/CloudStorage/' in proj.replace('\\', '/') else []   # 동기화 폴더 안의 .build 는 링크가 깨진다
+        plan.append(('swift build', ['swift', 'build'] + scratch))
     py = [f for f in files if f.endswith('.py') and os.path.isfile(os.path.join(proj, f))]
     if py:
         plan.append(('파이썬 문법 검사', [sys.executable, '-m', 'py_compile'] + py))
@@ -4934,7 +4975,7 @@ def start_followup(job_id: str, step_id: str, auto: bool = False, depth: int | N
         rid = add_role(job_id, {'id': f'next_{step_id}', 'name': step['title'], 'icon': '➡️', 'kind': 'code', 'mission': mission,
                                 'deliverable': '한 일과 확인 결과를 담은 NOTES.md'}, managed=True)
     job = load_job(job_id)
-    ft = new_task(job, step['title'], step['goal'], 'followup', [rid])          # 다음 업무도 업무 보드에 한 장으로 올라간다
+    ft = new_task(job, step['title'], step['goal'], 'followup', [rid])          # 다음 업무도 프로젝트 현황에 한 장으로 올라간다
     ft['auto'] = bool(auto)
     job['auto_depth'] = (int(job.get('auto_depth') or 0) if depth is None else depth) + 1 if auto else 0   # 사용자가 누르면 단계를 처음부터 센다
     role = next(r for r in job['plan']['roles'] if r['id'] == rid)
@@ -4994,6 +5035,28 @@ def _deps_text(job: dict, role: dict) -> str:
 
 class HoldForUser(Exception):
     """수동 진행 모드 — 남은 업무가 모두 내가 ▶ 시작을 누르기를 기다린다."""
+
+
+def _review_note(v, state: dict, max_rev: int) -> dict:
+    """팀장 판정 하나를 처리 방식으로 바꾼다 — action: 'revise'(다시) / 'polish'(통과지만 개선점 반영) / 'accept'.
+    되돌리기·다듬기 모두 max_revisions 를 넘기지 않고, 개선 다듬기는 팀원마다 한 번만 한다."""
+    v = v if isinstance(v, dict) else {}
+    imps = v.get('improvements') or []
+    if isinstance(imps, str):
+        imps = [imps]
+    imps = [str(x).strip() for x in imps if str(x).strip()][:5]
+    fb = str(v.get('feedback') or '').strip()
+    left = str(v.get('left_as_is') or '').strip()
+    can = state.get('attempts', 0) <= max_rev
+    if v.get('verdict') == 'revise' and fb and can:
+        text = fb + ('\n[추가 개선점]\n' + '\n'.join(f'- {x}' for x in imps) if imps else '')
+        return {'action': 'revise', 'feedback': text, 'improvements': imps, 'left_as_is': left}
+    if imps and can and not state.get('polished') and v.get('verdict') != 'revise':
+        text = '[더 나아질 부분 — 통과는 했지만 아래를 반영해 한 번 더 다듬으세요]\n' + '\n'.join(f'- {x}' for x in imps)
+        return {'action': 'polish', 'feedback': text, 'improvements': imps, 'left_as_is': left}
+    if imps and not left:
+        left = '되돌리기 상한(max_revisions)에 닿았거나 이미 한 번 다듬었어요'
+    return {'action': 'accept', 'feedback': '', 'improvements': imps, 'left_as_is': left}
 
 
 class JobRunner:
@@ -5208,7 +5271,7 @@ class JobRunner:
         done = [r for r in job['plan']['roles'] if job['roles'].get(r['id'], {}).get('status') == 'accepted']
         names = ', '.join(f"{r['icon']} {r['name']}" for r in done)
         chat_add(self.job_id, 'lead', 'user', f"✅ 모든 업무가 끝났어요 — 완료 {len(done)}개: {names}\n"
-                 '업무 보드에서 누가 무엇을 했는지 볼 수 있어요. 더 시킬 게 있으면 여기에 말해 주세요.' + self._unmerged_hint(), 'say')
+                 '프로젝트 현황에서 누가 무엇을 했는지 볼 수 있어요. 더 시킬 게 있으면 여기에 말해 주세요.' + self._unmerged_hint(), 'say')
 
     def _release(self, message: str):
         try:
@@ -5412,27 +5475,39 @@ class JobRunner:
             if isinstance(v, dict) and v.get('id') in ids:
                 verdicts[v['id']] = v
 
+        cur = self._job()['roles']
+        notes = {rid: _review_note(verdicts.get(rid), cur[rid], max_rev) for rid in ids}
+
         def apply(j):
             j['cost_usd'] = job['cost_usd']
             for rid in ids:
-                r = j['roles'][rid]
-                v = verdicts.get(rid, {'verdict': 'accept'})
-                if v.get('verdict') == 'revise' and r['attempts'] <= max_rev and (v.get('feedback') or '').strip():
-                    r['status'], r['feedback'] = 'revise', str(v['feedback']).strip()
-                    log_event(j, f"{roles[rid]['icon']} {roles[rid]['name']} — 다시 하도록 했어요")
+                r, n = j['roles'][rid], notes[rid]
+                if n['action'] in ('revise', 'polish'):
+                    r['status'], r['feedback'] = 'revise', n['feedback']
+                    if n['action'] == 'polish':
+                        r['polished'] = True                           # 개선 다듬기는 팀원마다 한 번만
+                    log_event(j, f"{roles[rid]['icon']} {roles[rid]['name']} — " +
+                              ('개선점을 반영해 다듬도록 했어요' if n['action'] == 'polish' else '다시 하도록 했어요'))
                 else:
                     r['status'], r['feedback'] = 'accepted', ''
                     log_event(j, f"{roles[rid]['icon']} {roles[rid]['name']} — 통과")
             j['review_summary'] = str(data.get('summary') or '')
+            j['review_notes'] = {rid: {k: n[k] for k in ('action', 'improvements', 'left_as_is')} for rid, n in notes.items()}
             j['busy'], j['busy_msg'] = False, ''
         self._update(apply)
         for rid in ids:
-            v = verdicts.get(rid, {'verdict': 'accept'})
-            if v.get('verdict') == 'revise' and (v.get('feedback') or '').strip():
-                if self._job()['roles'][rid]['status'] == 'revise':
-                    chat_add(job['id'], 'lead', rid, '다시 해 주세요.\n' + str(v['feedback']).strip(), 'review')
-                    continue
-            chat_add(job['id'], 'lead', rid, '통과예요 👍', 'review')
+            n = notes[rid]
+            if n['action'] == 'revise':
+                chat_add(job['id'], 'lead', rid, '다시 해 주세요.\n' + n['feedback'], 'review')
+            elif n['action'] == 'polish':
+                chat_add(job['id'], 'lead', rid, '통과예요 👍 다만 더 나아질 부분이 있어서 한 번 더 다듬어 주세요.\n' + n['feedback'], 'review')
+            else:
+                msg = '통과예요 👍'
+                if n['improvements']:
+                    msg += '\n더 나아질 수 있는 부분(이번엔 그대로 뒀어요): ' + ' / '.join(n['improvements'])
+                if n['left_as_is']:
+                    msg += '\n그대로 둔 이유: ' + n['left_as_is']
+                chat_add(job['id'], 'lead', rid, msg, 'review')
         if str(data.get('summary') or '').strip():
             chat_add(job['id'], 'lead', 'all', '검토 요약: ' + str(data['summary']).strip(), 'say')
 
@@ -5713,6 +5788,7 @@ def main(argv=None):
     p = sub.add_parser('screens'); p.add_argument('job')
     p = sub.add_parser('capture'); p.add_argument('job'); p.add_argument('name'); p.add_argument('which', choices=SCREEN_SIDES)
     p.add_argument('--from-file', default='', help='찍는 대신 이 PNG 파일을 가져온다'); p.add_argument('--window', default='', help='맥: 창 번호(screencapture -l)'); p.add_argument('--region', default='', help='x,y,너비,높이')
+    p = sub.add_parser('capture-diag')
     p = sub.add_parser('apply-result'); p.add_argument('job')
     p = sub.add_parser('open-diff'); p.add_argument('job')
     p = sub.add_parser('apply-state'); p.add_argument('job')
@@ -5845,6 +5921,8 @@ def main(argv=None):
             _out(capture_screen(a.job, a.name, a.which, a.from_file, a.window, a.region))
         except ValueError as e:
             _out({'ok': False, 'path': '', 'error': str(e)})
+    elif a.cmd == 'capture-diag':
+        _out(capture_diag())
     elif a.cmd == 'apply-result':
         _out(apply_result(a.job))
     elif a.cmd == 'req-resolve':

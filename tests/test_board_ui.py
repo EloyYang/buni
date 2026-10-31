@@ -1,5 +1,5 @@
 """
-Windows 업무 현황 화면 훑어보기 시험 — Tk 를 띄울 수 없는 환경(화면 없음)이면 건너뛴다.
+Windows 전체 현황 화면 훑어보기 시험 — Tk 를 띄울 수 없는 환경(화면 없음)이면 건너뛴다.
 보드 ↔ 목록 전환 · 검색/상태/범위 필터 · 카드 상세 · 프로젝트 화면으로 이동이 오류 없이 그려지는지만 본다 (눈으로 보는 확인은 아님).
 """
 import faulthandler
@@ -43,6 +43,23 @@ class BoardUi(unittest.TestCase):
             for view in ('board', 'list'):
                 win._bset('view', view); _root.update()
                 win._bsel = win._cards[0]['id']; win._draw_board_results(); _root.update()
+            # 카드 상세는 오른쪽 벽이 아니라 창 가운데 팝업이다 — 한 번 열면 하나, 닫으면 사라지고, 다른 화면으로 가면 같이 닫힌다
+            win._bsel = win._cards[0]['id']; win._draw_board_results(); _root.update()
+            pop = win._dpop
+            self.assertIsNotNone(pop)
+            self.assertTrue(pop.winfo_exists())
+            win._draw_board_results(); _root.update()
+            self.assertIs(win._dpop, pop)                                 # 다시 그려도 팝업을 또 만들지 않는다
+            win.win.update_idletasks()
+            cx = pop.winfo_rootx() + pop.winfo_width() / 2
+            self.assertAlmostEqual(cx, win.win.winfo_rootx() + win.win.winfo_width() / 2, delta=80)   # 가운데
+            win._close_detail_popup(clear=True); win._draw_board_results(); _root.update()
+            self.assertIsNone(win._bsel)
+            self.assertIsNone(win._dpop)
+            win._bsel = win._cards[0]['id']; win._draw_board_results(); _root.update()
+            win._select(None); _root.update()
+            self.assertIsNone(win._dpop)                                   # 다른 화면으로 가면 같이 닫힌다
+            win._open_board(); _root.update()
             win._bset('q', '결제'); win._bset('scope', 'finished'); win._bset('status', ''); _root.update()
             win._bset('scope', 'all'); win._bset('q', '')
             card = next(c for c in win._cards if c['role_id'])

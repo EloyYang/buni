@@ -187,14 +187,14 @@ class SwiftRun(unittest.TestCase):
 
 # ── searchText: Swift `searchable` 의 필드 구성·소문자 처리를 엔진 카드 'text' 와 비교 ──
 SEARCH_SAMPLES = [
-    ['Price Page', '목표 Goal', 'Bob', 'Recent', 'Summary', '진행 중'],
+    ['Price Page', '목표 Goal', 'Bob', 'Recent', 'Summary', '검토 대기 In review'],
     ['가격 페이지 › 후속', '정리 ÉCLAIR', '결제 Dev', '', 'ß İSTANBUL', 'Waiting'],
     ['🐰 TITLE', '', '하나 ONE', '둘째\n줄', '탭\t섞임', 'Needs attention'],
 ]
 SEARCH_EXTRA = ['MISSION Text', '단계 Title']
 
 SEARCH_HARNESS = '''import Foundation
-struct C { var jobTitle = ""; var assignee = ""; var recent = ""; var summary = ""; var stateLabel = ""; var searchText = "" }
+struct C { var jobTitle = ""; var assignee = ""; var recent = ""; var summary = ""; var stateNames = ""; var searchText = "" }
 struct J { var goal: String? }
 func searchable(_ c: C, _ j: J, _ extra: [String]) -> String {
     var c = c
@@ -206,7 +206,7 @@ func searchable(_ c: C, _ j: J, _ extra: [String]) -> String {
         let obj = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))) as! [[String: Any]]
         let out = obj.map { o -> String in
             let f = o["fields"] as! [String]
-            let c = C(jobTitle: f[0], assignee: f[2], recent: f[3], summary: f[4], stateLabel: f[5])
+            let c = C(jobTitle: f[0], assignee: f[2], recent: f[3], summary: f[4], stateNames: f[5])
             return searchable(c, J(goal: f[1]), o["extra"] as! [String])
         }
         print(String(data: try! JSONSerialization.data(withJSONObject: out), encoding: .utf8)!)
@@ -222,14 +222,29 @@ class SearchText(unittest.TestCase):
         """엔진 card() 의 text 필드(제목·목표·담당자·최근·요약·미션·단계·상태 한/영) 중 맥이 쓰는 것은 같은 순서의 부분집합이다."""
         self.assertIsNotNone(self.LINE, 'Swift searchable 의 searchText 식을 찾지 못했어요')
         mac = [x.strip() for x in self.LINE.group(1).split(',')]
-        self.assertEqual(mac, ['c.jobTitle', 'j.goal ?? ""', 'c.assignee', 'c.recent', 'c.summary', 'c.stateLabel'])
+        self.assertEqual(mac, ['c.jobTitle', 'j.goal ?? ""', 'c.assignee', 'c.recent', 'c.summary', 'c.stateNames'])
         src = Path(bt.__file__).read_text(encoding='utf-8')
         eng = re.search(r"c\['text'\] = ' '\.join\(str\(x\) for x in \((.*?)\)\)\.lower\(\)", src, re.S).group(1)
         flat = ' '.join(eng.split())
         pos = [flat.index(k) for k in ("c['job_title']", "job.get('goal', '')", "c['assignee']", "c['recent']", "c['summary']")]
         self.assertEqual(pos, sorted(pos))
-        # 알려진 차이(기록): 엔진은 상태 이름을 한글·영어 둘 다 넣고, 맥은 화면 언어 하나만 넣는다 — NOTES.md 참고
+        # 상태 이름은 엔진(state[0] state[1])도 맥(stateNames = 한글 영어)도 둘 다 넣는다
         self.assertIn("c['state'][0], c['state'][1]", ' '.join(eng.split()))
+
+    def test_state_names_tables_match_engine(self):
+        """맥 SquadBoard.jobNames / roleNames 가 엔진 _BOARD_JOB_NAMES / _BOARD_ROLE_NAMES 와 같다."""
+        for swift_name, table in (('jobNames', bt._BOARD_JOB_NAMES), ('roleNames', bt._BOARD_ROLE_NAMES)):
+            body = re.search(r'static let %s: \[String: \(String, String\)\] = \[(.*?)\]\n' % swift_name, SWIFT, re.S)
+            self.assertIsNotNone(body, f'Swift {swift_name} 를 찾지 못했어요')
+            mac = {k: (a, b) for k, a, b in re.findall(r'"(\w+)": \("([^"]+)", "([^"]+)"\)', body.group(1))}
+            self.assertEqual(mac, {k: tuple(v) for k, v in table.items()}, f'{swift_name} ≠ 엔진')
+
+    def test_every_card_gets_both_state_names(self):
+        """카드를 만드는 세 곳(팀 없는 작업 · 다음에 할 일 · 팀원)이 모두 stateNames 를 채운다."""
+        self.assertEqual(len(re.findall(r'\.stateNames = ', SWIFT)), 3)
+        self.assertIn('"거절함 Rejected"', SWIFT)
+        self.assertIn('bothNames(("확인 필요", "Needs attention"))', SWIFT)
+        self.assertIn('bothNames(("대기", "Waiting"))', SWIFT)
 
     @unittest.skipUnless(shutil.which('swiftc'), 'swiftc 가 없는 환경 — 맥 소스 실행 비교는 건너뜀')
     def test_lowercase_join_matches_engine(self):

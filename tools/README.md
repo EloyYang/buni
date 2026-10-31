@@ -2,6 +2,12 @@
 
 표준 라이브러리만 쓰는 Python 3 스크립트. 판매자 본인 PC에서만 실행한다. 형식은 `docs/monetization/license-spec.md`.
 
+## 변경 전·후 화면 캡처 필요 조건
+
+- 맥: 시스템 설정 → 개인정보 보호 및 보안 → 화면 및 시스템 오디오 녹화에서 부니(또는 부니를 띄운 터미널)를 허용해야 `screencapture` 가 화면을 찍는다.
+- Windows: Pillow 가 있어야 한다 (`pip install Pillow`). 읽기 전용 진단: `python windows\buni_team.py capture-diag`.
+- 못 찍으면 보드에 `캡처 아님 — 이유` 로 보인다(맥·Windows 같은 문구). 절차: `docs/monetization/UI-CHECKLIST.md` 5번.
+
 ## 판매 시작까지 순서 (아침에 그대로 따라 하기)
 
 값을 넣는 곳은 **종류별로 한 곳씩**이다. 비워 두면 앱은 죽지 않고 모든 키를 무료로 판정하며 결제 버튼은 "준비 중"으로 보인다.

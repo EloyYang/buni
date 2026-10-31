@@ -4,6 +4,7 @@
   · 못 찍으면 채팅에 '캡처 아님 — 이유' 가 오르고 job_screens 가 captured=False + reason (맥·Windows 보드가 같은 문구)
   · 화면과 상관없는 업무·설정 꺼짐·가짜 claude 시험 중(BUNI_CAPTURE_TEST 없음)에는 찍지 않는다"""
 import os
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -22,7 +23,7 @@ class CaptureFlow(base.FakeClaudeBase):
         super().setUp()
         self._saved_env = os.environ.get('BUNI_CAPTURE_TEST')
         os.environ['BUNI_CAPTURE_TEST'] = '1'
-        bt.save_settings({'auto_followup': False})
+        bt.save_settings({'auto_followup': False, 'auto_capture': True})        # 기본은 꺼짐 — 켰을 때의 흐름을 본다
         self._grab = bt.grab_screen
         self.grabs = []
 
@@ -81,6 +82,14 @@ class CaptureFlow(base.FakeClaudeBase):
         job = self.job_with('경쟁 앱 화면 조사', kind='readonly', rid='res')
         self.run_job(job['id'])
         self.assertEqual(self.grabs, [])
+
+    def test_default_is_off_so_the_mac_never_asks_for_screen_recording(self):
+        self.assertIs(bt.DEFAULT_SETTINGS['auto_capture'], False)         # 켜져 있으면 맥이 '화면 및 시스템 오디오 기록' 권한을 묻는다
+        home = os.environ['BUNI_TEAM_HOME']
+        self.addCleanup(lambda: os.environ.__setitem__('BUNI_TEAM_HOME', home))
+        os.environ['BUNI_TEAM_HOME'] = tempfile.mkdtemp()                  # 저장된 값이 없는 새 설정
+        self.assertFalse(bt.load_settings()['auto_capture'])
+        self.assertFalse(bt.capture_enabled())
 
     def test_off_by_setting_or_without_test_flag(self):
         bt.save_settings({'auto_capture': False})

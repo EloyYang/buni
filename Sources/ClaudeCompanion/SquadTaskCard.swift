@@ -173,7 +173,7 @@ struct SquadTaskCard: View {
                     case "done":   Text(L.t("✓ 처리됨", "✓ Done")).font(.system(size: 10, weight: .semibold)).foregroundColor(BT.success)
                     case "doing":  HStack(spacing: 3) {
                         // 화면 비교용 캡처(BUNI_PREVIEW)에서는 돌아가는 아이콘 대신 고정 모양 — 같은 화면이 프레임 차이로 다르게 찍히지 않게
-                        if ProcessInfo.processInfo.environment["BUNI_PREVIEW"] != nil { Text("◌").font(.system(size: 9)).foregroundColor(BT.success) } else { ProgressView().controlSize(.mini) }
+                        if ProcessInfo.processInfo.environment["BUNI_PREVIEW"] != nil { Text("◌").font(.system(size: 9)).foregroundColor(BT.success) } else { BuniSpinner() }
                         Text(L.t("처리 중", "Working")).font(.system(size: 10, weight: .semibold)).foregroundColor(BT.success)
                     }
                     case "review": Text(L.t("🔎 검토 중", "🔎 Review")).font(.system(size: 10, weight: .semibold)).foregroundColor(BT.warning)
@@ -253,7 +253,7 @@ struct SquadTaskCard: View {
                     HStack(spacing: BuniTokens.Space.s3) {
                         Button { store.approveChanges(job) } label: {
                             if store.busyJobs.contains(job.id) {
-                                HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(L.t("적용 중…", "Applying…")) }
+                                HStack(spacing: 6) { BuniSpinner(); Text(L.t("적용 중…", "Applying…")) }
                             } else if task.approval == "conflict" {
                                 actionLabel(L.t("다시 정리해서 적용", "Retry apply"), "arrow.triangle.merge")
                             } else {

@@ -62,6 +62,20 @@ func roleInfo(_ s: String) -> (String, Color) {
     }
 }
 
+/// 일하는 중 표시 — `ProgressView()` 는 쉬지 않고 화면을 다시 그려(디스플레이 링크) 배터리를 먹는다.
+/// 0.5초마다 글자 하나만 바꾸는 이 표시는 창이 가려져 있으면 아예 그리지 않는다.
+struct BuniSpinner: View {
+    var size: CGFloat = 11
+    private static let frames = ["◐", "◓", "◑", "◒"]
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+            Text(Self.frames[Int(ctx.date.timeIntervalSinceReferenceDate / 0.5) % 4])
+                .font(.system(size: size, weight: .bold)).foregroundColor(BT.accentText)
+                .frame(width: size + 3)
+        }
+    }
+}
+
 struct Chip: View {
     let text: String
     let color: Color
@@ -247,7 +261,7 @@ struct TeamRootView: View {
         let blocked = SquadBoard.items(store.jobs).filter { $0.column == .blocked }.count
         return SquadNavRow(selected: boardOn,
                            leading: AnyView(Text("📊").font(.system(size: 12))),
-                           title: L.t("업무 현황", "Task board"),
+                           title: L.t("전체 현황", "Overview"),
                            subtitle: L.t("보드 · 목록", "Board · List"),
                            unread: blocked) { boardOn = true }
     }
@@ -265,7 +279,7 @@ struct TeamRootView: View {
                 Text(j.displayTitle).font(.system(size: 13, weight: open || j.state == "review" || tint != nil ? .bold : .medium))
                     .foregroundColor(Color.buniInk.opacity(open || tint != nil ? 1 : 0.85)).lineLimit(1)
                 Spacer(minLength: 4)
-                if working { ProgressView().controlSize(.mini) }
+                if working { BuniSpinner() }
                 if let attention { Text(attention).font(.system(size: 9, weight: .bold)).foregroundColor(BT.warning).lineLimit(1) }
                 Circle().fill(color).frame(width: 7, height: 7).help(name)
             }
@@ -326,7 +340,7 @@ struct TeamRootView: View {
             switch j.state {
             case "draft", "interviewing": return L.t("질문", "Questions")
             case "review_requirements":   return L.t("요구서", "Requirements")
-            default:                      return L.t("업무 보드", "Board")
+            default:                      return L.t("프로젝트 현황", "Project status")
             }
         }()
         let attention = store.needsAttention(j)
@@ -599,7 +613,7 @@ private struct TeamJobDetail: View {
     private var statusContent: some View {
         if job.busy == true, ["draft", "interviewing", "review_requirements"].contains(job.state) {
             VStack(alignment: .leading, spacing: 6) {
-                HStack { ProgressView().controlSize(.small); Text(job.busyMsg?.isEmpty == false ? job.busyMsg! : L.t("Claude가 작업 중…", "Claude is working…")).font(.system(size: 13)) }
+                HStack { BuniSpinner(); Text(job.busyMsg?.isEmpty == false ? job.busyMsg! : L.t("Claude가 작업 중…", "Claude is working…")).font(.system(size: 13)) }
                 Text(L.t("보통 1~2분 걸려요. 창을 닫아도 계속돼요.", "Usually takes a minute or two. It continues if you close this window."))
                     .font(.system(size: 11)).foregroundColor(.secondary)
                 TeamCancelButton(job: job).padding(.top, 6)
@@ -834,7 +848,7 @@ private struct TeamChatView: View {
                             }
                             ForEach(msgs) { m in bubble(m).id(m.id) }
                             if !typing.isEmpty {
-                                HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(name(typing) + L.t(" 이(가) 답을 쓰는 중…", " is replying…")).font(.system(size: 11)).foregroundColor(.secondary) }
+                                HStack(spacing: 6) { BuniSpinner(); Text(name(typing) + L.t(" 이(가) 답을 쓰는 중…", " is replying…")).font(.system(size: 11)).foregroundColor(.secondary) }
                                     .id("typing")
                             }
                         }
@@ -1025,7 +1039,7 @@ private struct TeamSessionPanel: View {
                     }
                 }
                 if act.state == "running" {
-                    HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(L.t("지금 진행 중", "Working now")).font(.system(size: 10)).foregroundColor(.green) }
+                    HStack(spacing: 6) { BuniSpinner(); Text(L.t("지금 진행 중", "Working now")).font(.system(size: 10)).foregroundColor(.green) }
                 }
             }
         }
@@ -1133,7 +1147,7 @@ private struct TeamResult: View {
                 .font(.system(size: 13, weight: .bold)).foregroundColor(.green)
             if job.busy == true {
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
+                    BuniSpinner()
                     Text(job.busyMsg ?? L.t("정리하는 중…", "Working…")).font(.system(size: 12))
                     Text(L.t("— 다음 작업 제안이 곧 아래 보고서에 추가돼요", "— next-step suggestions will appear in the report below"))
                         .font(.system(size: 11)).foregroundColor(.secondary)
@@ -1244,7 +1258,7 @@ private struct TeamSettingsSheet: View {
                 Text(L.t("자동 — 팀이 알아서 순서대로 진행 (기본)", "Auto — the team runs tasks in order (default)")).tag("auto")
                 Text(L.t("수동 — 업무마다 내가 ▶ 시작을 눌러야 진행", "Manual — I press ▶ Start on each task")).tag("manual")
             }.pickerStyle(.radioGroup).labelsHidden()
-            Text(L.t("작업마다 업무 보드 위쪽에서 따로 바꿀 수도 있어요.", "You can also change it per project at the top of its board."))
+            Text(L.t("작업마다 프로젝트 현황 위쪽에서 따로 바꿀 수도 있어요.", "You can also change it per project at the top of its board."))
                 .font(.system(size: 11)).foregroundColor(.secondary)
             Divider()
             Text(L.t("결과를 내 폴더에 반영하는 방식", "How results reach your folder")).font(.system(size: 12, weight: .semibold))
@@ -1284,6 +1298,11 @@ private struct TeamSettingsSheet: View {
             Toggle(L.t("다음에 할 일 자동 진행", "Auto-continue next steps"), isOn: $s.autoFollowup)
             Text(L.t("방향이 바뀌지 않는 후속 작업만 끝나면 이어서 시작해요 (연속 3단계까지). 가격·정책 변경, 게시·발송, push·릴리스는 내가 누를 때까지 기다려요.",
                      "Only follow-ups that don't change direction start on their own (up to 3 in a row). Pricing/policy changes, posting/sending, push and release wait for your click."))
+                .font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider()
+            Text(L.t("변경 전·후 화면 캡처", "Before/after screen capture")).font(.system(size: 12, weight: .semibold))
+            Text(L.t("화면·디자인 업무의 변경 전·후 화면은 자동으로 찍어요. 맥은 시스템 설정 ▸ 개인정보 보호 및 보안 ▸ 화면 기록(화면 및 시스템 오디오 녹음)에서 부니를 허용해야 하고, Windows 는 Pillow 가 있어야 해요 (pip install Pillow). 못 찍으면 '캡처 아님 — 이유'로 보여요.",
+                     "Before/after screens of UI and design tasks are captured automatically. On Mac, allow Buni under System Settings ▸ Privacy & Security ▸ Screen Recording (Screen & System Audio Recording); on Windows, Pillow must be installed (pip install Pillow). If a capture fails, it shows as 'Not a capture — reason'."))
                 .font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider()
             Text(L.t("모델", "Models")).font(.system(size: 12, weight: .semibold))

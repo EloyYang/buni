@@ -39,7 +39,18 @@
 - 브랜치 이름 `pro-payment-prep`: 팀 시스템이 `buni/job-6001` 에 커밋함(이름만 다름).
 - 웹 조사·가격 조정: 근거 없음. 디자인 시스템(추가 방향)은 착수하지 못함.
 
-## 최종 실행 결과 (2026-10-30, qa_docs — 이번에는 직접 돌림)
+## 최종 실행 결과 (2026-10-31, qa_docs — 직접 돌림)
+
+| 확인 | 결과 |
+|---|---|
+| `python3 -m unittest discover -s tests -p "test_*.py"` | 276개 실행, OK (2개 건너뜀) |
+| `python3 -m py_compile windows/*.py` | 오류 없음 |
+| `swift build` | Build complete |
+| `docs/marketing/intro.md`·`launch-posts.md` | "예약·병렬" Pro 혜택 문구 없음 (grep 확인) |
+
+직접 확인하지 못한 것: 화면(GUI) 실기, Swift 공유 라이선스 벡터 실행(아래 '못 돌린 것' 그대로).
+
+## 이전 실행 결과 (2026-10-30, qa_docs)
 
 | 확인 | 결과 |
 |---|---|
@@ -199,3 +210,52 @@
 | 추가 시험 | `tests/test_battery_guards.py` — 소스에 줄인 주기·멈춤 조건이 남아 있는지 확인(GetMessageW, 타이머 중복 방지, 가려지면 정지 등). 앱을 띄워 재는 시험이 아니다 |
 
 못 한 것: 배터리 실측(전/후 CPU·전력)은 맥·Windows 모두 하지 못했다. perf 보고서의 수치는 코드 읽기 기준 추정이다. Windows 앱은 맥에서 실행할 수 없어 단축키·클릭 투과 동작은 확인하지 못했다.
+
+## 변경 전·후 캡처와 첨부 읽기 실측 (2026-10-31, backend_server)
+
+임시 `BUNI_TEAM_HOME` 에서 직접 돌린 일회성 실측이다(저장소 밖 스크래치 스크립트).
+
+| 확인 | 결과 |
+|---|---|
+| 맥 `capture_screen`(= `buni_team.py capture` 와 같은 함수) → `screencapture -x -t png` | **PNG 를 못 만들었다.** 이 세션에서 `could not create image from display`(화면 기록 권한/디스플레이 없음)로 실패. 반환값 `{ok:false, error:'캡처 도구가 실패했어요 (화면 기록 권한을 확인해 주세요): could not create image from display'}` — 보드에 `캡처 아님 — 이유`로 표시되는 경로(`CAPTURE_WHY_PERMISSION`)가 의도대로 동작함. 권한이 있는 터미널에서 PNG 가 실제로 생기는지는 **확인 못 함 — 이 세션에 화면 기록 권한이 없음** |
+| 진짜 `claude -p --permission-mode dontAsk` + `--add-dir <첨부폴더>` + `Read(//절대경로/**)` 로 첨부 읽기 | **읽혔다.** 공백이 든 파일명(`메모 test.txt`)의 토큰 `ZEBRA-4417` 을 정확히 답했고 `denials` 가 비어 있음. 허용 목록 형식·프롬프트 경로는 고칠 필요 없음 |
+| Windows `ImageGrab` 실제 동작 | **확인 못 함 — 맥에서 Windows 를 실행할 수 없음.** 코드 재확인: `PIL` import 실패 시 `Pillow(PIL)가 없어 화면을 찍지 못했어요` 를 반환하고 같은 `캡처 아님 — 이유` 형식으로 기록(`tests/test_capture_paths.py` 가 고정) |
+| 못 한 것 | 허용 규칙을 뺀 대조 실험(규칙이 없으면 실제로 거부되는지)은 하지 않음 |
+
+시험: `tests/test_real_claude_attach.py` 추가(기본 건너뜀, `BUNI_REAL_CLAUDE=1` 로 같은 실측을 다시 돌림).
+
+## 앱 실행 후 팀장 패널 수 확인 (2026-10-31, frontend_mac)
+
+| 항목 | 결과 |
+|---|---|
+| 앱을 띄워 스쿼드 작업·지시 여러 번·팀원 작업 중 패널 수 세기 | **확인 못 함 — 이 환경은 화면을 띄우거나 앱을 실행·조작할 수 없음.** 엔진이 방금 확인한 상태도 "부니 앱 실행 중 아님" |
+| 코드 점검 | 패널을 만드는 `SessionWindow(...)` 는 `AppDelegate.addSession` 한 곳. `squad-*` 는 `hasSquadPanel()` 로 막고 `collapseSquadPanels` 가 주기적으로 하나만 남김. 팀원 세션(`BUNI_TEAM_RUN`)은 훅이 이벤트를 안 적음. 새 경로는 못 찾아 코드 수정 없음 |
+| Windows `buni.py` | `_pending_add` · `pick_new_sessions(_squad_removed_at)` · `collapse_squad_panels` — 같은 규칙으로 읽음 (실행 못 함) |
+| 시험 | `tests/test_panel_scan_repeat.py`(반복 스캔 시뮬레이션)·`test_session_dedupe.py`·`test_single_buni.py` 통과. 규칙 수준이며 실제 앱 아님 |
+| 빌드·전체 시험 | `swift build` 통과, 전체 unittest 276개 통과(2 skip) |
+| 남은 일 | 설치본이 소스보다 오래됨(stale-build) — 재설치 후 스쿼드 작업 하나를 돌려 패널 수를 눈으로 확인 필요 |
+
+## 변경 전·후 캡처 실기 확인 절차 (사용자가 직접 — 2026-10-31, next_n2____)
+
+`buni_team.py capture` 가 PNG 를 만드는지, 못 만들면 `캡처 아님 — 이유` 가 보이는지 사용자가 권한 있는 터미널에서 확인하는 순서다. 코드는 바꾸지 않았다. 아래 명령은 저장소 루트에서 실행하고, 시험용 폴더(`BUNI_TEAM_HOME`)를 써서 실제 부니 데이터는 건드리지 않는다.
+
+### 맥
+1. 화면 기록 권한: 시스템 설정 ▸ 개인정보 보호 및 보안 ▸ 화면 기록(화면 및 시스템 오디오 녹음)에서 **명령을 실행할 터미널 앱**(Terminal·iTerm 등)과 부니를 켠다. 바꾼 뒤 그 앱을 완전히 종료했다 다시 연다.
+2. 진단(화면을 찍지 않음): `BUNI_TEAM_HOME=/tmp/buni-capcheck python3 windows/buni_team.py capture-diag` → `캡처 진단 · mac · 가능` 이 보여야 한다. (권한은 실제로 찍어 봐야 알 수 있어 이 진단은 `screencapture` 가 있는지만 본다.)
+3. 실제 캡처: `BUNI_TEAM_HOME=/tmp/buni-capcheck python3 windows/buni_team.py capture capcheck 확인 before`
+   - 성공: `{"ok": true, "path": ".../jobs/capcheck/screens/확인.before.png", ...}` 이고 그 파일을 미리보기로 열면 **현재 화면 전체**가 보인다(바탕화면만 보이면 권한이 빠진 것 — 맥은 권한 없이도 바탕화면만 담긴 PNG 를 낼 수 있어 엔진은 이를 성공으로 본다).
+4. 실패 문구 확인(권한을 일부러 끄거나 `PATH` 에서 `screencapture` 를 뺀 상태): 같은 명령이 `{"ok": false, ..., "error": "캡처 도구가 실패했어요 (화면 기록 권한을 확인해 주세요): …"}` 를 내고 `/tmp/buni-capcheck/jobs/capcheck/captures.json` 에 같은 이유가 남는다. `python3 windows/buni_team.py screens capcheck` 로 보면 `캡처 아님` 으로 표시된다. 이미 있던 `screens/*.png` 는 그대로고 `.tmp` 파일이 남지 않아야 한다.
+
+### Windows
+1. Pillow 포함 여부: `python -c "import PIL.ImageGrab; print('Pillow OK')"` — 오류가 나면 `pip install Pillow`. 설치형(exe)은 그 안에 Pillow 가 들어 있는지 아래 2번의 진단으로 확인한다.
+2. 진단: `set BUNI_TEAM_HOME=%TEMP%\buni-capcheck` 후 `python windows\buni_team.py capture-diag` → `캡처 진단 · windows · 가능`. Pillow 가 없으면 `캡처 진단 · windows · 캡처 아님 — Pillow(PIL)가 없어 화면을 찍지 못했어요`.
+3. 실제 캡처: `python windows\buni_team.py capture capcheck 확인 before` → `ok: true` 와 `%TEMP%\buni-capcheck\jobs\capcheck\screens\확인.before.png` 가 생기고, 열면 현재 화면이 보인다.
+4. 실패 문구 확인: Pillow 가 없는 파이썬(또는 가상환경)에서 같은 명령 → `error` 가 `Pillow(PIL)가 없어 화면을 찍지 못했어요`, `screens capcheck` 는 `캡처 아님` 으로 표시. 위 맥의 이유와 형식(`캡처 아님 — 이유`)이 같고 이유 문장만 원인에 맞게 다르다.
+
+### 이 환경에서 확인한 것 / 못 한 것
+| 구분 | 내용 |
+|---|---|
+| 확인함(코드 읽기·가짜 명령 시험) | 위 명령의 인자(`capture <작업> <이름> before\|after`, `capture-diag`, `screens`)와 실패 문구(`CAPTURE_WHY_PERMISSION`, `CAPTURE_WHY_NO_PILLOW`), 실패해도 기존 파일 유지·`.tmp` 정리 — `tests/test_capture_paths.py` 가 가짜 `screencapture`·가짜 `PIL` 로 고정 |
+| 확인 못 함 | 권한 있는 터미널에서 진짜 `screencapture` 가 PNG 를 만드는지(이 세션은 화면 기록 권한 없음 — 앞 절의 실측에서 `could not create image from display` 로 실패). 이번 문서를 쓰며 위 명령을 다시 돌리려 했으나 이 세션의 셸 권한이 거절해 실행하지 못했다 |
+| 확인 못 함 | Windows 의 진짜 `ImageGrab`·Pillow 포함 여부(맥에서 Windows 실행 불가) |
+| 확인 못 함 | 설정 화면의 캡처 안내 문구가 실제 화면에서 어떻게 보이는지(앱을 띄우지 못함 — 캡처 아님) |

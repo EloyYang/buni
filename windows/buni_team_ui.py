@@ -15,6 +15,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 
 import buni_team
+import buni_watch
 
 from buni_theme import C, mix  # 색은 docs/design-system.md 토큰 (맥 BuniTheme.swift 와 같다)
 
@@ -415,7 +416,10 @@ class TeamWindow:
         self._att_pending = {}        # 보내기 전 첨부 파일 경로들 (draft_key 별, 메모리만 — 보내면 비운다)
         self._draft_job = None
         self._last_key = 0.0          # 마지막으로 글자를 친 시각 — 입력 중에는 _tick 이 디스크를 읽지 않는다
-        self.win.bind_all('<Key>', self._note_key, add='+')
+        # 파일 수정 시각이 바뀔 때만 다시 읽는다 (안전망 주기마다 한 번은 읽는다) — 상시 1.5초 전체 갱신 없음
+        self._watch = buni_watch.ChangeWatch(lambda: buni_watch.scan_jobs(
+            buni_team.jobs_dir(), os.path.join(buni_team.team_home(), 'settings.json')))
+        self._room_watch = None
         self._want_focus = False
         self._room = None
         self._room_token = 0
@@ -427,7 +431,7 @@ class TeamWindow:
         self._show_archived = False   # 사이드바에서 보관된 팀원도 보기
         self._act_widget = None
         self._vars = {}
-        self._board = False           # 업무 현황 화면을 보는 중
+        self._board = False           # 전체 현황 화면을 보는 중
         self._board_built = False
         self._bsel = None             # 현황에서 연 카드
         self._busy_jobs = set()       # 승인·되돌리기를 하는 중인 작업 (버튼에 '적용 중…')
@@ -439,6 +443,7 @@ class TeamWindow:
         win.geometry('1080x700')
         win.minsize(860, 560)
         win.protocol('WM_DELETE_WINDOW', self.close)
+        win.bind_all('<Key>', self._note_key, add='+')
         self._build_frame()
         jobs = buni_team.list_jobs()
         pending = [j for j in jobs if j['status'] == 'review']
@@ -501,6 +506,7 @@ class TeamWindow:
 
     def show(self, job_id=None):
         if job_id:
+            self._close_detail_popup(clear=True)
             self._board = False
             self.sel = job_id
             self._open_role = None
@@ -566,10 +572,12 @@ class TeamWindow:
             if self._is_hidden():                  # 최소화·숨김이면 디스크를 읽지 않고 가끔만 확인
                 self.win.after(self.HIDDEN_TICK_MS, self._tick)
                 return
-            if time.time() - self._last_key < self.TYPING_IDLE_S:   # 글자를 치는 중에는 목록·보드 판정(디스크 읽기)을 미룬다
+            typing = time.time() - self._last_key < self.TYPING_IDLE_S
+            if typing:                             # 글자를 치는 중에는 갱신을 미룬다 — 끝나면 쌓인 변화를 한 번에 반영
                 self.win.after(self.TYPING_TICK_MS, self._tick)
                 return
-            self.refresh()
+            if self._watch.poll(time.time(), typing=False, hidden=False):   # 파일이 바뀌었거나 안전망 주기일 때만
+                self.refresh()
         except Exception:
             pass
         self.win.after(1500, self._tick)
@@ -693,7 +701,7 @@ class TeamWindow:
             w.destroy()
         t = self.t
         attention = sum(1 for c in self._cards if c['column'] == 'blocked')
-        self._nav_row(self.list_frame, '📊 ' + t('업무 현황', 'Task board'), self._open_board, self._board,
+        self._nav_row(self.list_frame, '📊 ' + t('전체 현황', 'Overview'), self._open_board, self._board,
                       sub=t('보드 · 목록', 'Board · List'), unread=attention, indent=10, bold=True)
         self._section(self.list_frame, t('프로젝트', 'Projects'))
         if not jobs:
@@ -728,7 +736,7 @@ class TeamWindow:
         cur = self._cur_pane(job)
         st = job['status']
         title = (t('질문', 'Questions') if st in ('draft', 'interviewing') else t('요구서', 'Requirements') if st == 'review_requirements'
-                 else t('업무 보드', 'Board'))
+                 else t('프로젝트 현황', 'Project status'))
         attn = self._attn.get(job['id'])
         working = st == 'running' and not buni_team.load_settings().get('paused')
         self._nav_row(lf, ('📋 ' if st in ('draft', 'interviewing', 'review_requirements') else '🗂 ') + title, lambda: self.set_pane(job['id'], 'overview'),
@@ -780,6 +788,7 @@ class TeamWindow:
         return out
 
     def _select(self, job_id):
+        self._close_detail_popup(clear=True)
         self._board = False
         self.sel = job_id
         self._open_role = None
@@ -1440,6 +1449,7 @@ class TeamWindow:
         return 'overview'
 
     def set_pane(self, job_id, pane):
+        self._close_detail_popup(clear=True)
         self._board = False
         self._pane[job_id] = pane
         self.refresh(force=True)
@@ -1566,6 +1576,8 @@ class TeamWindow:
         txt.tag_configure('tag_review', foreground=INFO, font=(FONT, 8, 'bold'))
         self._room_token += 1
         self._room = {'txt': txt, 'job': job, 'pane': pane, 'sig': None, 'token': self._room_token}
+        self._room_watch = buni_watch.ChangeWatch(lambda: buni_watch.scan_jobs(
+            '', extra=[buni_team.job_path(job['id'], n) for n in ('chat.jsonl', 'chat_typing.json')]))
         self._fill_room()
 
         names = [('lead', t('팀장', 'Lead'))] + [(r['id'], r['name']) for r in job['plan']['roles']]
@@ -1721,7 +1733,8 @@ class TeamWindow:
             if not w['txt'].winfo_exists():
                 return
             hidden = self._is_hidden()               # 최소화·숨김이면 다시 채우지 않고 가끔만 확인
-            if not hidden:
+            rw = self._room_watch
+            if rw is None or rw.poll(time.time(), hidden=hidden):   # chat.jsonl 이 바뀌었거나 안전망 주기일 때만 다시 채운다
                 self._fill_room()
             self.win.after(self.HIDDEN_TICK_MS if hidden else 1500, lambda: self._room_poll(token))
         except tk.TclError:
@@ -2009,11 +2022,13 @@ class TeamWindow:
 
     # ── 업무 현황: 상태별 칼럼 보드 · 목록 · 검색/필터 · 상세 (판정은 buni_team.board_* — 맥과 같다) ──
     def _open_board(self):
+        self._close_detail_popup()
         self._board, self._bsel = True, None
         self.refresh(force=True)
 
     def _board_goto(self, job_id, pane):
         """상세에서 프로젝트 화면(담당자 DM · 결과 · 스쿼드 채팅)으로 — 같은 프로젝트 안의 화면이다."""
+        self._close_detail_popup(clear=True)
         self._board = False
         self.sel = job_id
         self._pane[job_id] = pane
@@ -2041,7 +2056,7 @@ class TeamWindow:
     def _build_board_frame(self):
         t, bf = self.t, self._bf
         top = tk.Frame(self.right, bg=PANEL); top.pack(fill='x', padx=16, pady=(12, 4))
-        self._label(top, '📊 ' + t('업무 현황', 'Task board'), size=13, bold=True).pack(side='left')
+        self._label(top, '📊 ' + t('전체 현황', 'Overview'), size=13, bold=True).pack(side='left')
         for view, ko, en in (('list', '목록', 'List'), ('board', '보드', 'Board')):
             on = bf['view'] == view
             b = self._btn(top, t(ko, en), lambda v=view: self._bset('view', v), ACCENT if on else FIELD)
@@ -2076,10 +2091,10 @@ class TeamWindow:
             menu.add_command(label=text, command=lambda v=val: self._bset(key, v))
         mb.config(text=f"{t(ko, en)}: {names.get(bf[key], t('모두', 'All'))} ▾")
 
-    def _scroll_area(self, parent):
-        canvas = tk.Canvas(parent, bg=PANEL, highlightthickness=0)
+    def _scroll_area(self, parent, bg=PANEL):
+        canvas = tk.Canvas(parent, bg=bg, highlightthickness=0)
         sb = tk.Scrollbar(parent, orient='vertical', command=canvas.yview)
-        inner = tk.Frame(canvas, bg=PANEL)
+        inner = tk.Frame(canvas, bg=bg)
         inner.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
         wid = canvas.create_window((0, 0), window=inner, anchor='nw')
         canvas.bind('<Configure>', lambda e: canvas.itemconfigure(wid, width=e.width))
@@ -2123,8 +2138,9 @@ class TeamWindow:
         ids = {c['id']: c for c in cards}
         body = tk.Frame(self._bres, bg=PANEL); body.pack(fill='both', expand=True)
         if self._bsel in ids:
-            side = tk.Frame(body, bg=FIELD, width=290); side.pack(side='right', fill='y', padx=(0, 12), pady=(0, 12)); side.pack_propagate(False)
-            self._draw_board_detail(side, ids[self._bsel])
+            self._show_detail_popup(ids[self._bsel])
+        else:
+            self._close_detail_popup()
         main = tk.Frame(body, bg=PANEL); main.pack(side='left', fill='both', expand=True, padx=(16, 8))
         if not cards:
             self._label(main, t('아직 보여 줄 작업이 없어요.\n왼쪽 ✎ 버튼으로 새 작업을 시작해 보세요.', 'Nothing to show yet.\nStart a job with the ✎ button.'), DIM, 10).pack(pady=40)
@@ -2132,6 +2148,36 @@ class TeamWindow:
             self._draw_board_list(main, shown)
         else:
             self._draw_board_columns(main, shown)
+
+    DETAIL_W, DETAIL_H = 560, 640
+
+    def _close_detail_popup(self, clear=False):
+        pop = getattr(self, '_dpop', None)
+        self._dpop = None
+        if clear:
+            self._bsel = None
+        if pop is not None:
+            try:
+                pop.destroy()
+            except tk.TclError:
+                pass
+
+    def _show_detail_popup(self, c):
+        """업무 상세 — 오른쪽 벽에 붙이지 않고 창 가운데에 팝업으로 연다 (Esc·✕·바깥 창 클릭 없이 ✕ 로 닫는다)."""
+        pop = getattr(self, '_dpop', None)
+        if pop is None or not pop.winfo_exists():
+            pop = self._dpop = tk.Toplevel(self.win)
+            pop.title(self.t('업무 상세', 'Task details')); pop.configure(bg=FIELD); pop.transient(self.win)
+            pop.protocol('WM_DELETE_WINDOW', lambda: (self._close_detail_popup(clear=True), self._draw_board_results()))
+            pop.bind('<Escape>', lambda e: (self._close_detail_popup(clear=True), self._draw_board_results()))
+            self.win.update_idletasks()
+            w, h = self.DETAIL_W, min(self.DETAIL_H, max(360, self.win.winfo_height() - 40))
+            x = self.win.winfo_rootx() + max(0, (self.win.winfo_width() - w) // 2)
+            y = self.win.winfo_rooty() + max(0, (self.win.winfo_height() - h) // 2)
+            pop.geometry(f'{w}x{h}+{x}+{y}')
+        for w in pop.winfo_children():
+            w.destroy()
+        self._draw_board_detail(pop, c)
 
     def _click_card(self, widget, card_id):
         def go(e=None):
@@ -2232,11 +2278,13 @@ class TeamWindow:
         d = buni_team.board_detail(c)
         job = buni_team.load_job(c['job_id']) or {'id': c['job_id']}
         room = self._has_room(job) if job.get('status') else False
-        head = tk.Frame(side, bg=FIELD); head.pack(fill='x', padx=10, pady=(10, 4))
-        close = tk.Label(head, text='✕', bg=FIELD, fg=DIM, cursor='hand2'); close.pack(side='right')
-        close.bind('<Button-1>', lambda e: (setattr(self, '_bsel', None), self._draw_board_results()))
-        tk.Label(head, text=c['job_title'], bg=FIELD, fg=FG, font=(FONT, 10, 'bold'), wraplength=220, justify='left', anchor='w').pack(side='left', fill='x')
-        info = tk.Frame(side, bg=FIELD); info.pack(fill='x', padx=10)
+        head = tk.Frame(side, bg=FIELD); head.pack(fill='x', padx=14, pady=(12, 4))
+        close = tk.Label(head, text='✕', bg=FIELD, fg=DIM, cursor='hand2', font=(FONT, 11)); close.pack(side='right')
+        close.bind('<Button-1>', lambda e: (self._close_detail_popup(clear=True), self._draw_board_results()))
+        tk.Label(head, text=c['job_title'], bg=FIELD, fg=FG, font=(FONT, 11, 'bold'), wraplength=470, justify='left', anchor='w').pack(side='left', fill='x')
+        acts = tk.Frame(side, bg=FIELD); acts.pack(fill='x', padx=14, pady=12, side='bottom')          # 스크롤해도 이동 버튼은 늘 보인다
+        holder = tk.Frame(side, bg=FIELD); holder.pack(fill='both', expand=True, padx=14)
+        info = self._scroll_area(holder, FIELD)
         self._label(info, f"{c['icon']} {c['assignee']}  ·  ● {t(*c['state'])}", INK2, 9).pack(anchor='w')
         if c.get('duty'):
             self._label(info, c['duty'], DIM, 8).pack(anchor='w')
@@ -2251,7 +2299,7 @@ class TeamWindow:
                 return
             self._label(info, title, DIM, 8, True).pack(anchor='w', pady=(8, 1))
             for ln in lines:
-                tk.Label(info, text=ln, bg=FIELD, fg=INK2, font=(FONT, 8), wraplength=250, justify='left', anchor='w').pack(anchor='w')
+                tk.Label(info, text=ln, bg=FIELD, fg=INK2, font=(FONT, 9), wraplength=480, justify='left', anchor='w').pack(anchor='w')
         block(t('상태 이유', 'Why this status'), [d['why']] if d['why'] else [])
         block(t('원래 지시', 'Original instruction'), [_short_text(d['instruction'], 300)] if d['instruction'] else [])
         block(t('바뀐 파일', 'Changed files'), [t(f"{d['changed_files']}개", f"{d['changed_files']}") if d['changed_files'] else t('기록 없음', 'None recorded')])
@@ -2266,7 +2314,6 @@ class TeamWindow:
         block(t('결정 이력', 'Decision history'), hist)
         if d['can_decide']:
             self._draw_step_decision(info, c, d['step_id'])
-        acts = tk.Frame(side, bg=FIELD); acts.pack(fill='x', padx=10, pady=10, side='bottom')
         def act(text, cmd):
             self._btn(acts, text, cmd, RAISED).pack(fill='x', pady=2)
         if c['role_id'] and room:
@@ -2753,6 +2800,9 @@ class TeamWindow:
         check(left, v_auto, t('방향이 안 바뀌는 후속 작업은 이어서 시작', 'Continue follow-ups that keep the direction'))
         self._label(left, t('연속 3단계까지. 가격·정책 변경, 게시·발송, push·릴리스는 내가 누를 때까지 기다려요.',
                             'Up to 3 in a row. Pricing/policy, posting, push and release wait for you.'), DIM, 8, wraplength=300).pack(anchor='w')
+        # 변경 전·후 화면 캡처 안내 (맥 TeamViews.swift 와 같은 문구)
+        head(left, t('변경 전·후 화면 캡처', 'Before/after screen capture'))
+        self._label(left, t(buni_team.CAPTURE_HELP_KO, buni_team.CAPTURE_HELP_EN), DIM, 8, wraplength=300).pack(anchor='w')
 
         # ── 오른쪽
         head(right, t('결과를 내 폴더에 반영하는 방식', 'How results reach your folder'), True)
