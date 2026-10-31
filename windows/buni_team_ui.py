@@ -12,13 +12,17 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 
 import buni_team
 
-BG, PANEL, FIELD, LINE = '#1E1E24', '#26262E', '#2A2A34', '#3A3A44'
-RAIL = '#17171D'
-FG, DIM, ACCENT, GREEN, GOLD, RED = 'white', '#8A8A98', '#3377E0', '#4DC780', '#D9B25A', '#E06060'
+from buni_theme import C, mix  # 색은 docs/design-system.md 토큰 (맥 BuniTheme.swift 와 같다)
+
+BG, PANEL, FIELD, LINE = C['bg'], C['panel'], C['field'], C['line']
+RAIL, RAISED = C['rail'], C['raised']
+FG, DIM, ACCENT, GREEN, GOLD, RED = C['ink'], C['dim'], C['accent'], C['ok'], C['warn'], C['danger']
+INK2, INFO, ACCENT_INK = C['ink2'], C['info'], C['accent_ink']
+WARN_BG = mix(GOLD, BG, 0.14)       # 확인이 필요한 카드 바탕 (맥: warn.opacity)
 FONT = 'Malgun Gothic'
 
 
@@ -59,6 +63,181 @@ def open_path(path: str):
 
 
 # ══════════════════════════════════════════════════════════════
+# 채팅 첨부 — 입력창 옆 📎 · 보내기 전 칩(× 로 빼기) · 말풍선의 파일 이름/이미지 썸네일 · 누르면 크게 보기
+# 보내기 전 목록은 메모리에만 두어(입력 중 디스크·다시 그리기 없음) draft 저장과 입력 속도에 영향이 없다.
+# ══════════════════════════════════════════════════════════════
+
+_THUMBS: dict = {}            # (경로, 수정시각, 한 변 최대 px) → PhotoImage — 말풍선을 다시 그려도 한 번만 만든다
+
+
+def load_photo(path: str, max_px: int):
+    """이미지 파일을 한 변 max_px 이하의 PhotoImage 로. Pillow 가 있으면 jpg·webp 도, 없으면 tk 가 읽는 png·gif 만. 못 읽으면 None."""
+    try:
+        key = (path, os.path.getmtime(path), max_px)
+    except OSError:
+        return None
+    if key in _THUMBS:
+        return _THUMBS[key]
+    photo = None
+    try:
+        from PIL import Image, ImageTk                             # 선택 의존성 — 없어도 앱은 그대로 돈다
+        im = Image.open(path)
+        im.thumbnail((max_px, max_px))
+        photo = ImageTk.PhotoImage(im)
+    except Exception:
+        try:
+            if os.path.splitext(path)[1].lower() in ('.png', '.gif'):
+                photo = tk.PhotoImage(file=path)
+                f = max(1, -(-max(photo.width(), photo.height()) // max_px))
+                if f > 1:
+                    photo = photo.subsample(f, f)
+        except Exception:
+            photo = None
+    if len(_THUMBS) > 200:
+        _THUMBS.clear()
+    _THUMBS[key] = photo
+    return photo
+
+
+def _size_text(n: int) -> str:
+    return f'{n / 1048576:.1f}MB' if n >= 1048576 else f'{max(1, round(n / 1024))}KB'
+
+
+class AttachTray:
+    """보내기 전 첨부 목록(칩 줄) + 📎 파일 선택 + 이미지·파일 붙여넣기 + 끌어다 놓기(tkinterdnd2 가 있을 때).
+    store 는 화면을 다시 그려도 남도록 호출한 쪽이 들고 있는 리스트(원본 파일 경로들)다."""
+
+    def __init__(self, parent, store: list, t, bg=None):
+        self.store, self.t, self.bg = store, t, bg or PANEL
+        self.frame = tk.Frame(parent, bg=self.bg)
+        self.err = tk.Label(self.frame, text='', bg=self.bg, fg=RED, font=(FONT, 8), anchor='w', justify='left', wraplength=520)
+        self._err_job = None
+        self.render()
+
+    def button(self, parent, bg=None):
+        return tk.Button(parent, text='📎', command=self.pick, bg=bg or self.bg, fg=DIM, relief='flat', bd=0, cursor='hand2',
+                         font=(FONT, 11), padx=6, pady=1, activebackground=bg or self.bg, activeforeground=FG)
+
+    def show_error(self, msg: str):
+        self.err.config(text='⚠️ ' + msg)
+        self.err.pack(fill='x')
+        try:
+            if self._err_job:
+                self.frame.after_cancel(self._err_job)
+            self._err_job = self.frame.after(8000, lambda: self.err.pack_forget())
+        except tk.TclError:
+            pass
+
+    def add(self, paths):
+        """점검을 통과한 것만 칩으로 올린다 — 안 되는 파일은 이유를 보여 준다 (개수·크기·종류·비밀값 이름 경고)."""
+        for p in paths:
+            p = str(p)
+            if p in self.store:
+                continue
+            if len(self.store) >= buni_team.ATTACH_MAX_FILES:
+                self.show_error(buni_team.ATTACH_TOO_MANY)
+                break
+            try:
+                _kind, _size, warn = buni_team.attach_check(p)
+            except ValueError as e:
+                self.show_error(str(e))
+                continue
+            if warn:
+                self.show_error(warn)
+            self.store.append(p)
+        self.render()
+
+    def remove(self, p):
+        if p in self.store:
+            self.store.remove(p)
+        self.render()
+
+    def take(self) -> list:
+        files, self.store[:] = list(self.store), []
+        self.render()
+        return files
+
+    def pick(self):
+        paths = filedialog.askopenfilenames(title=self.t('첨부할 파일 선택', 'Choose files to attach'))
+        if paths:
+            self.add(paths)
+
+    def paste(self, _e=None):
+        """클립보드에 이미지·복사한 파일이 있으면 첨부로 올리고 'break'. 글이면 None 을 돌려 평소처럼 붙여넣는다."""
+        try:
+            from PIL import ImageGrab                              # 없으면 이미지 붙여넣기는 지원하지 않는다
+            data = ImageGrab.grabclipboard()
+        except Exception:
+            return None
+        if data is None:
+            return None
+        if isinstance(data, list):
+            self.add([p for p in data if os.path.isfile(p)])
+            return 'break'
+        try:
+            import tempfile
+            path = os.path.join(tempfile.gettempdir(), time.strftime('붙여넣은-이미지-%H%M%S.png'))
+            data.save(path, 'PNG')
+        except Exception:
+            return None
+        self.add([path])
+        return 'break'
+
+    def enable_drop(self, widget):
+        """tkinterdnd2 가 설치돼 있고 창이 그걸로 만들어졌을 때만 끌어다 놓기가 켜진다 (표준 Tk 에는 없다)."""
+        try:
+            widget.drop_target_register('DND_Files')
+            widget.dnd_bind('<<Drop>>', lambda e: self.add(widget.tk.splitlist(e.data)))
+        except Exception:
+            pass
+
+    def render(self):
+        try:
+            for w in self.frame.winfo_children():
+                if w is not self.err:
+                    w.destroy()
+            self.frame.pack(fill='x')                              # 비어 있으면 높이가 0 이라 보이지 않는다 (오류 문구는 그 안에 뜬다)
+            if not self.store:
+                return
+            row = tk.Frame(self.frame, bg=self.bg); row.pack(fill='x', anchor='w')
+            for p in self.store:
+                name = os.path.basename(p)
+                warn = bool(buni_team.ATTACH_SECRET_RE.search(name))
+                chip = tk.Frame(row, bg=FIELD, highlightthickness=1, highlightbackground=GOLD if warn else LINE)
+                chip.pack(side='left', padx=(0, 4), pady=2)
+                icon = '🖼' if os.path.splitext(name)[1].lower() in buni_team.ATTACH_IMAGE_EXT else '📎'
+                short = name if len(name) <= 24 else name[:23] + '…'
+                tk.Label(chip, text=('⚠️ ' if warn else '') + f'{icon} {short}', bg=FIELD, fg=GOLD if warn else FG, font=(FONT, 8)).pack(side='left', padx=(6, 2))
+                x = tk.Label(chip, text='×', bg=FIELD, fg=DIM, font=(FONT, 10, 'bold'), cursor='hand2')
+                x.pack(side='left', padx=(0, 5))
+                x.bind('<Button-1>', lambda e, q=p: self.remove(q))
+        except tk.TclError:
+            pass
+
+
+def show_image_large(win, path: str, title: str = ''):
+    """이미지를 눌렀을 때 크게 본다 — 화면 크기에 맞춰 줄이고, 아무 데나 누르면 닫힌다. 못 읽는 형식이면 기본 프로그램으로 연다."""
+    try:
+        w, h = win.winfo_screenwidth(), win.winfo_screenheight()
+        photo = load_photo(path, int(min(w, h) * 0.8))
+        if photo is None:
+            open_path(path)
+            return
+        top = tk.Toplevel(win)
+        top.title(title or os.path.basename(path))
+        top.configure(bg=BG)
+        lab = tk.Label(top, image=photo, bg=BG, cursor='hand2')
+        lab.image = photo
+        lab.pack(padx=8, pady=8)
+        tk.Label(top, text=os.path.basename(path) + '  ·  ' + '눌러서 닫기', bg=BG, fg=DIM, font=(FONT, 8)).pack(pady=(0, 6))
+        for wdg in (top, lab):
+            wdg.bind('<Button-1>', lambda e: top.destroy())
+        top.bind('<Escape>', lambda e: top.destroy())
+    except Exception:
+        open_path(path)
+
+
+# ══════════════════════════════════════════════════════════════
 # 마크다운 보기 (tk.Text 에 서식을 입혀 그린다)
 # ══════════════════════════════════════════════════════════════
 
@@ -70,8 +249,9 @@ def _disp_width(s: str) -> int:
     return sum(2 if unicodedata.east_asian_width(c) in 'WF' else 1 for c in s)
 
 
-def render_markdown(txt, md: str, colors: dict, on_action=None, on_feedback=None):
-    """마크다운 문서를 tk.Text 에 서식대로 넣는다 — 제목·목록·체크리스트·표·코드·인용·굵게/기울임/링크."""
+def render_markdown(txt, md: str, colors: dict, on_action=None, on_feedback=None, drafts=None, attach=None):
+    """마크다운 문서를 tk.Text 에 서식대로 넣는다 — 제목·목록·체크리스트·표·코드·인용·굵게/기울임/링크.
+    attach(부모, 항목id) → AttachTray 를 주면 피드백 입력창에 📎 첨부가 붙고, on_feedback(항목id, 글, 파일들)로 넘긴다."""
     fg, dim, accent, panel = colors['fg'], colors['dim'], colors['accent'], colors['code_bg']
     base = colors['font']
     txt.tag_configure('h1', font=(base, 15, 'bold'), spacing1=10, spacing3=4)
@@ -114,7 +294,7 @@ def render_markdown(txt, md: str, colors: dict, on_action=None, on_feedback=None
     i, para = 0, []
 
     _ACTION = re.compile(r'\[([^\]]+)\]\(buni://([a-z]+)/([^)\s]+)\)')
-    _ACOLOR = {'run': '#D98A2B', 'followup': '#7350D9', 'apply': '#D98A2B', 'diff': '#6A6A78', 'view': '#6A6A78', 'ok': '#2F9E55', 'feedback': '#4B73CC'}
+    _ACOLOR = {'run': '#D98A2B', 'followup': '#7350D9', 'apply': '#D98A2B', 'diff': DIM, 'view': DIM, 'ok': '#2F9E55', 'feedback': '#4B73CC'}
 
     def flush():
         if not para:
@@ -124,18 +304,28 @@ def render_markdown(txt, md: str, colors: dict, on_action=None, on_feedback=None
         if len(links) == 1 and links[0].group(2) == 'feedbackbox' and not _ACTION.sub('', joined).strip():   # 채팅 입력창
             import tkinter as _tk
             item_id = links[0].group(3)
-            box = _tk.Frame(txt, bg=panel, highlightthickness=1, highlightbackground='#3A3A4A')
-            tk_var = _tk.StringVar()
-            ent = _tk.Entry(box, textvariable=tk_var, bg=panel, fg=fg, insertbackground=fg, relief='flat', font=(base, 10), width=52)
+            box = _tk.Frame(txt, bg=panel, highlightthickness=1, highlightbackground=LINE)
+            tray = attach(box, item_id) if attach else None             # 칩 줄은 입력 줄 위에
+            row = _tk.Frame(box, bg=panel); row.pack(fill='x')
+            tk_var = _tk.StringVar(value=drafts[0](item_id) if drafts else '')
+            if drafts:
+                tk_var.trace_add('write', lambda *_, v=tk_var, iid=item_id: drafts[1](iid, v.get()))
+            ent = _tk.Entry(row, textvariable=tk_var, bg=panel, fg=fg, insertbackground=fg, relief='flat', font=(base, 10), width=52)
             ent.pack(side='left', padx=(8, 4), pady=6, ipady=2)
 
-            def send(_e=None, v=tk_var, iid=item_id):
+            def send(_e=None, v=tk_var, iid=item_id, tr=tray):
                 text = v.get().strip()
-                if text and on_feedback:
+                if text and on_feedback:                                   # 피드백은 글이 있어야 한다 (첨부는 거기에 덧붙인다)
                     v.set('')
-                    on_feedback(iid, text)
+                    if tr:
+                        on_feedback(iid, text, tr.take())
+                    else:
+                        on_feedback(iid, text)
             ent.bind('<Return>', send)
-            _tk.Button(box, text='보내기', command=send, bg=accent, fg='white', relief='flat', bd=0, cursor='hand2',
+            if tray:
+                tray.button(row, panel).pack(side='left')
+                ent.bind('<<Paste>>', lambda e, tr=tray: tr.paste())
+            _tk.Button(row, text='보내기', command=send, bg=accent, fg='white', relief='flat', bd=0, cursor='hand2',
                        font=(base, 9, 'bold'), padx=10, pady=3).pack(side='left', padx=(0, 6))
             txt.window_create('end', window=box, padx=2, pady=4)
             txt.insert('end', '\n')
@@ -220,6 +410,12 @@ class TeamWindow:
         self._seen = {}               # (작업, 화면) → 마지막으로 본 시각 (안 읽음 표시용)
         self._opened = {}             # 작업을 처음 연 시각 (그 전 대화는 안 읽음으로 치지 않는다)
         self._drafts = {}             # 쓰던 글 (다시 그려도 남긴다)
+        self._saved = buni_team.load_drafts()   # 앱 데이터 폴더에 남긴 쓰던 글 (껐다 켜도 남는다)
+        self._draft_dirty = {}        # 아직 디스크에 안 쓴 글 (_flush_drafts 가 모아서 쓴다)
+        self._att_pending = {}        # 보내기 전 첨부 파일 경로들 (draft_key 별, 메모리만 — 보내면 비운다)
+        self._draft_job = None
+        self._last_key = 0.0          # 마지막으로 글자를 친 시각 — 입력 중에는 _tick 이 디스크를 읽지 않는다
+        self.win.bind_all('<Key>', self._note_key, add='+')
         self._want_focus = False
         self._room = None
         self._room_token = 0
@@ -228,11 +424,13 @@ class TeamWindow:
         self._attn_next = 0
         self._attn_busy = False
         self._open_role = None        # 펼쳐 둔 팀원(세션)
+        self._show_archived = False   # 사이드바에서 보관된 팀원도 보기
         self._act_widget = None
         self._vars = {}
         self._board = False           # 업무 현황 화면을 보는 중
         self._board_built = False
         self._bsel = None             # 현황에서 연 카드
+        self._busy_jobs = set()       # 승인·되돌리기를 하는 중인 작업 (버튼에 '적용 중…')
         self._cards = []
         self._bf = {'view': 'board', 'q': '', 'status': '', 'assignee': '', 'scope': 'all', 'sort': 'recent'}
         win = self.win = tk.Toplevel(manager.root)
@@ -255,23 +453,41 @@ class TeamWindow:
         left = tk.Frame(body, bg=RAIL, width=272); left.pack(side='left', fill='y'); left.pack_propagate(False)
         head = tk.Frame(left, bg=RAIL); head.pack(fill='x', padx=14, pady=(12, 10))
         tk.Label(head, text=t('🐰 부니 스쿼드', '🐰 Buni Squad'), bg=RAIL, fg=FG, font=(FONT, 13, 'bold')).pack(side='left')
-        new = tk.Label(head, text='✎', bg='#34343F', fg=FG, font=(FONT, 11), width=3, cursor='hand2')
+        new = tk.Label(head, text='✎', bg=RAISED, fg=FG, font=(FONT, 11), width=3, cursor='hand2')
         new.pack(side='right'); new.bind('<Button-1>', lambda e: self._new())
         sch = tk.Label(head, text='⚙', bg=RAIL, fg=DIM, font=(FONT, 11), cursor='hand2')
         sch.pack(side='right', padx=(6, 2)); sch.bind('<Button-1>', lambda e: self._open_settings())
         self._gp_lbl = tk.Label(head, text='⏸', bg=RAIL, fg=DIM, font=(FONT, 12), cursor='hand2')
         self._gp_lbl.pack(side='right', padx=4); self._gp_lbl.bind('<Button-1>', lambda e: self._toggle_global_pause())
-        tk.Frame(left, bg='#2A2A34', height=1).pack(fill='x')
-        self.sched_lbl = tk.Label(left, bg=RAIL, fg='#6A6A78', font=(FONT, 8), anchor='w', justify='left', wraplength=240)
+        tk.Frame(left, bg=LINE, height=1).pack(fill='x')
+        self.sched_lbl = tk.Label(left, bg=RAIL, fg=DIM, font=(FONT, 8), anchor='w', justify='left', wraplength=240)
         self.sched_lbl.pack(side='bottom', fill='x', padx=14, pady=8)
-        tk.Frame(left, bg='#2A2A34', height=1).pack(side='bottom', fill='x')
+        tk.Frame(left, bg=LINE, height=1).pack(side='bottom', fill='x')
         self.list_frame = tk.Frame(left, bg=RAIL); self.list_frame.pack(fill='both', expand=True, pady=(4, 0))
-        tk.Frame(body, bg='#2A2A34', width=1).pack(side='left', fill='y')
+        tk.Frame(body, bg=LINE, width=1).pack(side='left', fill='y')
         self.right = tk.Frame(body, bg=PANEL); self.right.pack(side='left', fill='both', expand=True)
 
     def _btn(self, parent, text, cmd, color=PANEL, **kw):
-        return tk.Button(parent, text=text, command=cmd, bg=color, fg=FG, relief='flat', bd=0, cursor='hand2',
-                         font=(FONT, 9, 'bold'), padx=12, pady=5, activebackground=color, activeforeground=FG, **kw)
+        fg = ACCENT_INK if color == ACCENT else FG      # 주 버튼은 accent 면 + accent_ink 글자
+        return tk.Button(parent, text=text, command=cmd, bg=color, fg=fg, relief='flat', bd=0, cursor='hand2',
+                         font=(FONT, 9, 'bold'), padx=12, pady=5, activebackground=color, activeforeground=fg, **kw)
+
+    def _action_btn(self, parent, text, cmd, kind='secondary', **kw):
+        """업무 카드 버튼 — 맥 CardActionStyle 과 같은 4종류 (한 카드에 주 버튼은 하나):
+        primary 당근 면(승인·시작) · danger 옅은 붉은 면 + 붉은 글자(거절) · secondary surface.2 + 테두리(화면 비교·되돌리기) · quiet 면 없음(대화·추가 요청·변경 내용).
+        높이·안쪽 간격은 4pt 격자(좌우 12, 위아래 4)."""
+        panel = kw.pop('panel', PANEL)
+        look = {'primary': (ACCENT, ACCENT_INK, ACCENT, ACCENT),
+                'danger': (mix(RED, panel, 0.14), RED, mix(RED, panel, 0.38), mix(RED, panel, 0.26)),
+                'secondary': (FIELD, FG, LINE, RAISED),
+                'quiet': (panel, INK2, panel, FIELD)}[kind]
+        bg, fg, edge, hover = look
+        b = tk.Button(parent, text=text, command=cmd, bg=bg, fg=fg, relief='flat', bd=0, cursor='hand2', font=(FONT, 9, 'bold'),
+                      padx=12, pady=4, highlightthickness=1, highlightbackground=edge, highlightcolor=edge,
+                      activebackground=hover, activeforeground=fg, disabledforeground=DIM, **kw)
+        b.bind('<Enter>', lambda e: b['state'] != 'disabled' and b.configure(bg=hover))
+        b.bind('<Leave>', lambda e: b.configure(bg=bg))
+        return b
 
     def _label(self, parent, text, fg=FG, size=9, bold=False, **kw):
         return tk.Label(parent, text=text, bg=parent['bg'], fg=fg, font=(FONT, size, 'bold' if bold else 'normal'),
@@ -292,6 +508,7 @@ class TeamWindow:
         self.win.deiconify(); self.win.lift(); self.win.focus_force()
 
     def close(self):
+        self._flush_drafts()
         try:
             self.win.destroy()
         except Exception:
@@ -346,10 +563,29 @@ class TeamWindow:
             err, self._note_error = getattr(self, '_note_error', None), None
             if err:
                 messagebox.showinfo(self.t('부니 스쿼드', 'Buni Squad'), err, parent=self.win)
+            if self._is_hidden():                  # 최소화·숨김이면 디스크를 읽지 않고 가끔만 확인
+                self.win.after(self.HIDDEN_TICK_MS, self._tick)
+                return
+            if time.time() - self._last_key < self.TYPING_IDLE_S:   # 글자를 치는 중에는 목록·보드 판정(디스크 읽기)을 미룬다
+                self.win.after(self.TYPING_TICK_MS, self._tick)
+                return
             self.refresh()
         except Exception:
             pass
         self.win.after(1500, self._tick)
+
+    HIDDEN_TICK_MS = 5000
+    TYPING_IDLE_S = 1.2           # 마지막 키 입력 뒤 이만큼 지나야 화면을 다시 읽는다
+    TYPING_TICK_MS = 600
+
+    def _note_key(self, _e=None):
+        self._last_key = time.time()
+
+    def _is_hidden(self) -> bool:
+        try:
+            return self.win.state() != 'normal'
+        except Exception:
+            return False
 
     def _signature(self, jobs):
         sel = next((j for j in jobs if j['id'] == self.sel), None)
@@ -426,16 +662,16 @@ class TeamWindow:
 
     def _nav_row(self, parent, text, cmd, selected=False, sub='', sub_color=DIM, unread=0, indent=18, bold=False, tint=None):
         """사이드바 한 줄. tint 가 있으면(진행 중 = 초록, 확인 필요 = 주황) 행 전체를 그 색으로 물들여 눈에 띄게 한다."""
-        base = ACCENT if selected else (tint or RAIL)
+        base = RAISED if selected else (tint or RAIL)
         row = tk.Frame(parent, bg=base, cursor='hand2', highlightthickness=1 if tint and not selected else 0,
                        highlightbackground=tint or RAIL); row.pack(fill='x', padx=8, pady=1)
         strong = selected or unread or bold or bool(tint)
-        tk.Label(row, text=text, bg=base, fg=FG if strong else '#C4C4CE',
+        tk.Label(row, text=text, bg=base, fg=FG if strong else INK2,
                  font=(FONT, 9, 'bold' if strong else 'normal'), anchor='w').pack(side='left', padx=(indent, 4), pady=4)
         if unread:
-            tk.Label(row, text=str(min(unread, 99)), bg='#E04858', fg=FG, font=(FONT, 8, 'bold'), padx=5).pack(side='right', padx=6)
+            tk.Label(row, text=str(min(unread, 99)), bg=RED, fg='#FFFFFF', font=(FONT, 8, 'bold'), padx=5).pack(side='right', padx=6)
         if sub:
-            tk.Label(row, text=sub, bg=base, fg=FG if selected else sub_color, font=(FONT, 8, 'bold' if tint else 'normal')).pack(side='right', padx=6)
+            tk.Label(row, text=sub, bg=base, fg=INK2 if selected else sub_color, font=(FONT, 8, 'bold' if tint else 'normal')).pack(side='right', padx=6)
         for w in (row,) + tuple(row.winfo_children()):
             w.bind('<Button-1>', lambda e: cmd())
         if not selected:
@@ -443,14 +679,14 @@ class TeamWindow:
 
             def paint(color, r=row):
                 for w in (r,) + tuple(r.winfo_children()):
-                    if w.cget('bg') != '#E04858':
+                    if w.cget('bg') != RED:
                         w.config(bg=color)
             row.bind('<Enter>', lambda e: paint(hover))
             row.bind('<Leave>', lambda e: paint(base))
         return row
 
     def _section(self, parent, text):
-        tk.Label(parent, text=text.upper(), bg=RAIL, fg='#6A6A78', font=(FONT, 8, 'bold'), anchor='w').pack(fill='x', padx=16, pady=(12, 2))
+        tk.Label(parent, text=text.upper(), bg=RAIL, fg=DIM, font=(FONT, 8, 'bold'), anchor='w').pack(fill='x', padx=16, pady=(12, 2))
 
     def _draw_list(self, jobs):
         for w in self.list_frame.winfo_children():
@@ -473,7 +709,7 @@ class TeamWindow:
             bg_ = tint or RAIL
             row = tk.Frame(self.list_frame, bg=bg_, cursor='hand2', highlightthickness=1 if tint else 0, highlightbackground='#8A6A2A' if attn else '#3F7A55')
             row.pack(fill='x', padx=8, pady=1)
-            tk.Label(row, text=('▾ ' if open_ else '▸ ') + title, bg=bg_, fg=FG if (open_ or tint) else '#C4C4CE',
+            tk.Label(row, text=('▾ ' if open_ else '▸ ') + title, bg=bg_, fg=FG if (open_ or tint) else INK2,
                      font=(FONT, 9, 'bold'), anchor='w').pack(side='left', padx=(8, 4), pady=5)
             tk.Label(row, text='●', bg=bg_, fg=color, font=(FONT, 8)).pack(side='right', padx=8)
             if attn:
@@ -482,6 +718,8 @@ class TeamWindow:
                 tk.Label(row, text='⏳', bg=bg_, fg=GREEN, font=(FONT, 8)).pack(side='right')
             for w in (row,) + tuple(row.winfo_children()):
                 w.bind('<Button-1>', lambda e, i=j['id']: self._select(i))
+                w.bind('<Button-3>', lambda e, jj=j: self._project_menu(e, jj))
+                w.bind('<Control-Button-1>', lambda e, jj=j: self._project_menu(e, jj))
             if open_:
                 self._draw_children(j, ko, en)
 
@@ -511,14 +749,35 @@ class TeamWindow:
                       'merging': t('합치는 중', 'Merging'), 'wrapup': t('정리 중', 'Wrapping up')}.get(job.get('phase'), '')
         self._nav_row(lf, '🐰  ' + t('팀장', 'Team lead'), lambda: self.set_pane(job['id'], 'lead'), cur == 'lead',
                       sub=lead_phase, sub_color=GREEN, unread=self._unread(job, 'lead', msgs))
-        for r in job['plan']['roles']:
-            rs = job['roles'].get(r['id'], {})
-            rko, ren, color = ROLE_STATUS.get(rs.get('status', 'pending'), ('대기', 'Waiting', DIM))
-            pane = 'dm:' + r['id']
-            rst = rs.get('status')
-            self._nav_row(lf, f"{r['icon']}  {r['name']}", lambda p=pane: self.set_pane(job['id'], p), cur == pane,
-                          sub=('⏳ ' if rst == 'running' else '● ') + t(rko, ren), sub_color=color, unread=self._unread(job, pane, msgs),
-                          tint='#1F3A2A' if rst == 'running' else ('#3A3320' if rst == 'done_unreviewed' else None))
+        # 팀원은 부서(프론트엔드 → 백엔드 → 기타) → 세부 담당 순으로 묶는다 (맥 TeamDuties.grouped 와 같다). 직무 없는 옛 팀원은 '기타'에 원래 순서로.
+        for grp in self._shown_members(job):
+            self._section(lf, grp['dept_name'] if grp['dept'] else t('기타', 'Other'))
+            for m in grp['members']:
+                rs = job['roles'].get(m['id'], {})
+                rko, ren, color = ROLE_STATUS.get(rs.get('status', 'pending'), ('대기', 'Waiting', DIM))
+                pane = 'dm:' + m['id']
+                rst = rs.get('status')
+                self._nav_row(lf, f"{m['icon']}  {m['name']}", lambda p=pane: self.set_pane(job['id'], p), cur == pane,
+                              sub=t('보관됨', 'archived') if m['archived'] else ('⏳ ' if rst == 'running' else '● ') + t(rko, ren),
+                              sub_color=DIM if m['archived'] else color,
+                              unread=self._unread(job, pane, msgs),
+                              tint='#1F3A2A' if rst == 'running' else ('#3A3320' if rst == 'done_unreviewed' else None))
+        n_arch = sum(1 for g in buni_team.team_structure(job, include_archived=True) for m in g['members'] if m['archived'])
+        if n_arch:
+            tog = tk.Label(lf, text=t('보관된 팀원 숨기기', 'Hide archived teammates') if self._show_archived
+                           else t(f'보관된 팀원 보기 ({n_arch})', f'Show archived teammates ({n_arch})'),
+                           bg=RAIL, fg=DIM, font=(FONT, 8), cursor='hand2', anchor='w')
+            tog.pack(fill='x', padx=16, pady=(4, 0))
+            tog.bind('<Button-1>', lambda e: (setattr(self, '_show_archived', not self._show_archived), self.refresh(force=True)))
+
+    def _shown_members(self, job):
+        """사이드바에 보일 팀원 묶음 — [{'dept','dept_name','members'}]. 부서 안에서는 직무 카탈로그 순서(같으면 원래 순서)."""
+        order = [d['id'] for d in buni_team.DUTIES]
+        out = []
+        for g in buni_team.team_structure(job, include_archived=self._show_archived):
+            ms = sorted(enumerate(g['members']), key=lambda im: (order.index(im[1]['duty']) if im[1]['duty'] in order else len(order), im[0]))
+            out.append({**g, 'members': [m for _, m in ms]})
+        return out
 
     def _select(self, job_id):
         self._board = False
@@ -595,7 +854,7 @@ class TeamWindow:
         else:
             tk.Label(bar, text=job['title'], bg=PANEL, fg=FG, font=(FONT, 12, 'bold')).pack(side='left', padx=16)
             tk.Label(bar, text='● ' + t(ko, en), bg=PANEL, fg=color, font=(FONT, 9, 'bold')).pack(side='left')
-        tk.Frame(f, bg='#34343F', height=1).pack(fill='x')
+        tk.Frame(f, bg=RAISED, height=1).pack(fill='x')
 
     def _draw_job(self, job):
         t, f = self.t, self.right
@@ -810,7 +1069,7 @@ class TeamWindow:
         box = tk.Frame(pad, bg='#3A3020', highlightthickness=1, highlightbackground='#8A6A2A'); box.pack(fill='x', pady=(0, 8))
         tk.Label(box, text=head, bg='#3A3020', fg=GOLD, font=(FONT, 9, 'bold'), anchor='w').pack(fill='x', padx=10, pady=(8, 2))
         for r in ast.get('reasons') or []:
-            tk.Label(box, text='• ' + r, bg='#3A3020', fg='#D8CBA0', font=(FONT, 8), anchor='w', justify='left', wraplength=700).pack(fill='x', padx=10)
+            tk.Label(box, text='• ' + r, bg=WARN_BG, fg='#D8CBA0', font=(FONT, 8), anchor='w', justify='left', wraplength=700).pack(fill='x', padx=10)
         if ast.get('note'):
             tk.Label(box, text=ast['note'], bg='#3A3020', fg=DIM, font=(FONT, 8), anchor='w', justify='left', wraplength=700).pack(fill='x', padx=10)
         shown = '\n'.join(ast['files'][:8]) + (t(f"\n… 외 {n - 8}개", f"\n… +{n - 8} more") if n > 8 else '')
@@ -823,12 +1082,13 @@ class TeamWindow:
         if ast['mode'] == 'manual':
             tk.Label(row, text=f"git merge {ast['branch']}", bg='#3A3020', fg=DIM, font=('Consolas', 8)).pack(side='left', padx=8)
 
-    def _task_card(self, col, job, task, key):
-        """내가 지시한 업무 하나 — 우선순위, 담당 팀원별 처리 상태, 진행률, 반영 내역."""
+    def _task_card(self, col, job, task, key, show_project=False, wrap=190):
+        """내가 지시한 업무 하나 — 우선순위, 담당 팀원별 처리 상태, 진행률, 승인·거절·되돌리기·변경 전후 화면. 업무 보드와 업무 현황이 같이 쓴다."""
         t = self.t
+        needs = task.get('approval') in ('needs', 'conflict') and not task.get('applied') and not task.get('rejected')
         icon, ko, en, pcolor = self.PRIO.get(task.get('priority', 'normal'), self.PRIO['normal'])
         card = tk.Frame(col, bg=PANEL, highlightthickness=1,
-                        highlightbackground='#3F7A55' if key == 'doing' else ('#7A3F3F' if task.get('priority') == 'urgent' and key != 'done' else '#33333D'))
+                        highlightbackground='#C79A2E' if needs else '#3F7A55' if key == 'doing' else ('#7A3F3F' if task.get('priority') == 'urgent' and key != 'done' else '#33333D'))
         card.pack(fill='x', padx=8, pady=4)
         head = tk.Frame(card, bg=PANEL); head.pack(fill='x', padx=8, pady=(8, 2))
         mb = tk.Menubutton(head, text=f'{icon} {t(ko, en)} ▾', bg=PANEL, fg=pcolor, relief='flat', font=(FONT, 8, 'bold'), padx=2,
@@ -838,9 +1098,13 @@ class TeamWindow:
             menu.add_command(label=('✓ ' if pk == task.get('priority', 'normal') else '') + f'{pi} {t(pko, pen)}',
                              command=lambda k=pk: (self._run_bg(lambda: buni_team.set_task_priority(job['id'], task['id'], k)), self.win.after(500, lambda: self.refresh(force=True))))
         mb.pack(side='left')
+        if needs:
+            tk.Label(head, text=t('내 승인 필요', 'Needs my OK'), bg=PANEL, fg=GOLD, font=(FONT, 8, 'bold')).pack(side='left', padx=6)
         if task.get('created'):
             tk.Label(head, text=time.strftime('%m/%d %H:%M', time.localtime(task['created'])), bg=PANEL, fg=DIM, font=(FONT, 8)).pack(side='right')
-        tk.Label(card, text=task.get('title', ''), bg=PANEL, fg=FG, font=(FONT, 9, 'bold'), wraplength=190, justify='left', anchor='w').pack(fill='x', padx=8)
+        if show_project:                                            # 프로젝트 › 업무 — 어느 프로젝트의 어떤 업무인지
+            tk.Label(card, text=(job.get('title') or job['id']) + '  ›', bg=PANEL, fg=DIM, font=(FONT, 8), wraplength=wrap, justify='left', anchor='w').pack(fill='x', padx=8)
+        tk.Label(card, text=task.get('title', ''), bg=PANEL, fg=FG, font=(FONT, 9, 'bold'), wraplength=wrap, justify='left', anchor='w').pack(fill='x', padx=8)
         parts = sorted((task.get('parts') or {}).items(), key=lambda kv: kv[1])
         roles = {r['id']: r for r in job['plan']['roles']}
         pst = task.get('part_status') or {}
@@ -863,28 +1127,161 @@ class TeamWindow:
             if rid:
                 lines = buni_team.load_activity(job['id'], rid).get('lines', [])
                 tk.Label(card, text='⏳ ' + (lines[-1]['text'] if lines else t('시작하는 중…', 'Starting…')), bg=PANEL, fg='#B0B0BC', font=(FONT, 8),
-                         wraplength=190, justify='left', anchor='w').pack(fill='x', padx=8, pady=(3, 0))
+                         wraplength=wrap, justify='left', anchor='w').pack(fill='x', padx=8, pady=(3, 0))
         elif key in ('review', 'done'):
             rid = next((r for r in pst if pst[r] in ('done', 'review')), None)
             summ = (job.get('roles') or {}).get(rid, {}).get('summary') if rid else ''
             if summ:
                 s_, _more = self._summary(summ, 110)
-                tk.Label(card, text=s_, bg=PANEL, fg='#B0B0BC', font=(FONT, 8), wraplength=190, justify='left', anchor='w').pack(fill='x', padx=8, pady=(3, 0))
-            if key == 'done':
+                tk.Label(card, text=s_, bg=PANEL, fg='#B0B0BC', font=(FONT, 8), wraplength=wrap, justify='left', anchor='w').pack(fill='x', padx=8, pady=(3, 0))
+            if key == 'done' or needs:
                 if task.get('done_at'):
                     tk.Label(card, text='✓ ' + time.strftime('%m/%d %H:%M', time.localtime(task['done_at'])) + t(' 완료', ' done'), bg=PANEL, fg=GREEN, font=(FONT, 8), anchor='w').pack(fill='x', padx=8)
-                if task.get('applied'):
-                    tk.Label(card, text='📥 ' + t(f"내 폴더에 반영됨 {len(task.get('files') or [])}개 파일", f"Applied {len(task.get('files') or [])} files"), bg=PANEL, fg='#6AA9FF',
-                             font=(FONT, 8), anchor='w').pack(fill='x', padx=8)
-                elif task.get('apply_note'):
-                    tk.Label(card, text='✋ ' + t('반영 승인 대기 — ', 'Waiting for approval — ') + task['apply_note'][:120], bg=PANEL, fg=GOLD, font=(FONT, 8),
-                             wraplength=190, justify='left', anchor='w').pack(fill='x', padx=8)
+            self._task_review(card, job, task, needs, wrap)
         acts = tk.Frame(card, bg=PANEL); acts.pack(fill='x', padx=8, pady=(6, 8))
         hold = next((r for r, _ in parts if (job.get('roles') or {}).get(r, {}).get('hold')), None)
         if hold:
-            self._btn(acts, t('▶ 시작', '▶ Start'), lambda rid=hold: self._run_bg(lambda: buni_team.start_role(job['id'], rid)), ACCENT).pack(side='left', padx=(0, 4))
+            self._action_btn(acts, t('▶ 시작', '▶ Start'), lambda rid=hold: self._run_bg(lambda: buni_team.start_role(job['id'], rid)), 'primary').pack(side='left', padx=(0, 4))
         if parts:
-            self._btn(acts, t('대화', 'Chat'), lambda rid=parts[0][0]: self.set_pane(job['id'], 'dm:' + rid), FIELD).pack(side='left')
+            self._action_btn(acts, t('대화', 'Chat'), lambda rid=parts[0][0]: self.set_pane(job['id'], 'dm:' + rid), 'quiet').pack(side='left', padx=(0, 4))
+        self._action_btn(acts, t('추가 요청', 'Ask for more'), lambda: self._ask_more(job, task), 'quiet').pack(side='left')
+
+    def _task_review(self, card, job, task, needs, wrap):
+        """승인 대기(✅ 승인 · 🚫 거절 · 📄 변경 내용) · 반영됨(🖼 변경 전·후 화면 · ↩ 되돌리기) · 되돌림(↪ 다시 적용)."""
+        t = self.t
+        ast = buni_team.apply_state(job['id'])
+        change = next((c for c in ast.get('changes') or [] if c['id'] == task.get('change_id')), None)
+        busy = job['id'] in self._busy_jobs
+        if needs:
+            box = tk.Frame(card, bg=WARN_BG); box.pack(fill='x', padx=8, pady=(6, 0))
+            tk.Label(box, text=t('내 폴더와 겹쳐서 다 넣지 못했어요', "Couldn't fully apply — overlaps your folder") if task.get('approval') == 'conflict'
+                     else t('중요한 변경이라 내 승인을 기다려요', 'Important change — waiting for your OK'),
+                     bg=WARN_BG, fg=GOLD, font=(FONT, 8, 'bold'), anchor='w', wraplength=wrap - 12, justify='left').pack(fill='x', padx=6, pady=(5, 0))
+            for r in ast.get('reasons') or []:
+                tk.Label(box, text='• ' + r, bg=WARN_BG, fg='#D8CBA0', font=(FONT, 8), anchor='w', wraplength=wrap - 12, justify='left').pack(fill='x', padx=6)
+            if task.get('apply_note') and not ast.get('reasons'):
+                tk.Label(box, text=task['apply_note'][:200], bg=WARN_BG, fg=DIM, font=(FONT, 8), anchor='w', wraplength=wrap - 12, justify='left').pack(fill='x', padx=6)
+            if ast.get('count'):
+                tk.Label(box, text=t(f"바뀐 파일 {ast['count']}개 — 승인하면 바로 적용돼요", f"{ast['count']} files — approve to apply now"), bg=WARN_BG, fg=DIM, font=(FONT, 8),
+                         anchor='w', wraplength=wrap - 12, justify='left').pack(fill='x', padx=6)
+            row = tk.Frame(box, bg=WARN_BG); row.pack(fill='x', padx=6, pady=(8, 2))
+            label = t('적용 중…', 'Applying…') if busy else (t('다시 정리해서 적용', 'Retry apply') if task.get('approval') == 'conflict' else t('✓ 승인하고 적용', '✓ Approve & apply'))
+            ap = self._action_btn(row, label, lambda: self._approve(job), 'primary', panel=WARN_BG)
+            ap.pack(side='left', fill='x', expand=True)
+            rj = self._action_btn(row, t('✕ 거절', '✕ Reject'), lambda: self._reject(job), 'danger', panel=WARN_BG)
+            rj.pack(side='left', padx=(8, 0))
+            if busy:
+                ap.configure(state='disabled'); rj.configure(state='disabled')
+            self._action_btn(box, t('변경 내용 보기', 'View changes'), lambda: self._run_bg(lambda: self._open_diff_result(job)), 'quiet', panel=WARN_BG).pack(anchor='w', padx=6, pady=(2, 6))
+        elif task.get('rejected'):
+            tk.Label(card, text=t('🚫 거절했어요 — 내 폴더에 넣지 않았어요', '🚫 Rejected — not applied'), bg=PANEL, fg=DIM, font=(FONT, 8), anchor='w').pack(fill='x', padx=8)
+        elif task.get('rolled_back'):
+            tk.Label(card, text='↩ ' + t('되돌렸어요 · ', 'Rolled back · ') + time.strftime('%m/%d %H:%M', time.localtime(task['rolled_back'])), bg=PANEL, fg=DIM, font=(FONT, 8), anchor='w').pack(fill='x', padx=8)
+            if change:
+                self._action_btn(card, t('다시 적용', 'Re-apply'), lambda: self._swap(job, change, True), 'secondary').pack(anchor='w', padx=8, pady=(6, 0))
+        elif task.get('applied'):
+            n = len((change or {}).get('files') or task.get('files') or [])
+            tk.Label(card, text='📥 ' + t(f'내 폴더에 반영됨 {n}개 파일 · ', f'Applied {n} files · ') + time.strftime('%m/%d %H:%M', time.localtime(task['applied'])),
+                     bg=PANEL, fg='#6AA9FF', font=(FONT, 8), anchor='w').pack(fill='x', padx=8)
+            if change:
+                row = tk.Frame(card, bg=PANEL); row.pack(fill='x', padx=8, pady=(6, 0))
+                has = bool(change.get('shots'))
+                if has:
+                    self._action_btn(row, t('변경 전·후 화면', 'Before / After'), lambda: self._show_shots(job, change, task), 'secondary').pack(side='left', fill='x', expand=True)
+                self._action_btn(row, t('되돌리기', 'Roll back'), lambda: self._swap(job, change, False), 'quiet' if has else 'secondary').pack(
+                    side='left', padx=(8, 0) if has else 0, fill='x', expand=not has)
+        elif task.get('apply_note'):
+            tk.Label(card, text='✋ ' + task['apply_note'][:160], bg=PANEL, fg=GOLD, font=(FONT, 8), wraplength=wrap, justify='left', anchor='w').pack(fill='x', padx=8)
+
+    def _confirm(self, msg):
+        return messagebox.askyesno(self.t('부니 스쿼드', 'Buni Squad'), msg, parent=self.win)
+
+    def _approve(self, job):
+        self._busy_jobs.add(job['id'])
+        self.refresh(force=True)
+
+        def run():
+            try:
+                r = buni_team.apply_result(job['id'])
+            except Exception as e:
+                r = {'ok': False, 'error': str(e)}
+            self._busy_jobs.discard(job['id'])
+            if not r.get('ok'):
+                self._note_error = r.get('error') or self.t('반영하지 못했어요', "Couldn't apply it")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _reject(self, job):
+        if not self._confirm(self.t('이 변경을 거절할까요? 내 폴더에 넣지 않고 팀의 작업에서도 걷어 내요.', 'Reject this change? It will not be applied.')):
+            return
+        threading.Thread(target=lambda: buni_team.reject_changes(job['id']), daemon=True).start()
+        self.win.after(800, lambda: self.refresh(force=True))
+
+    def _swap(self, job, change, again):
+        self._busy_jobs.add(job['id'])
+
+        def run():
+            try:
+                r = (buni_team.reapply_change if again else buni_team.rollback_change)(job['id'], change['id'])
+            except Exception as e:
+                r = {'ok': False, 'error': str(e)}
+            self._busy_jobs.discard(job['id'])
+            if not r.get('ok'):
+                self._note_error = r.get('error') or self.t('하지 못했어요', "Couldn't do it")
+            elif r.get('skipped'):
+                self._note_error = self.t('내가 그 뒤에 또 고친 파일은 건드리지 않았어요: ', 'Left alone (edited after the change): ') + ', '.join(r['skipped'][:4])
+        threading.Thread(target=run, daemon=True).start()
+        self.win.after(800, lambda: self.refresh(force=True))
+
+    def _ask_more(self, job, task):
+        """업무 카드의 '추가 요청' — 그 업무를 이어서 개선하도록 팀장에게 맥락과 함께 보낸다."""
+        t = self.t
+        win = tk.Toplevel(self.win); win.title(t('이 업무에 추가로 요청하기', 'Ask for more on this task')); win.configure(bg=PANEL)
+        win.transient(self.win)
+        tk.Label(win, text=task.get('title', ''), bg=PANEL, fg=DIM, font=(FONT, 8), wraplength=360, justify='left').pack(anchor='w', padx=14, pady=(12, 4))
+        box = tk.Text(win, bg=FIELD, fg=FG, insertbackground=FG, relief='flat', font=(FONT, 9), wrap='word', width=48, height=6)
+        box.pack(padx=14); box.focus_set()
+        tk.Label(win, text=t('팀장이 알아듣고 이 업무를 이어서 개선해요', 'The lead will pick this up and keep improving'), bg=PANEL, fg=DIM, font=(FONT, 8)).pack(anchor='w', padx=14, pady=(4, 0))
+
+        def send():
+            text = box.get('1.0', 'end').strip()
+            if not text:
+                return
+            threading.Thread(target=lambda: buni_team.task_more(job['id'], task['id'], text), daemon=True).start()
+            win.destroy()
+            self.win.after(800, lambda: self.refresh(force=True))
+        row = tk.Frame(win, bg=PANEL); row.pack(anchor='e', padx=14, pady=10)
+        self._action_btn(row, t('취소', 'Cancel'), win.destroy, 'quiet').pack(side='left', padx=(0, 8))
+        self._action_btn(row, t('보내기', 'Send'), send, 'primary').pack(side='left')
+
+    def _show_shots(self, job, change, task):
+        """변경 전·후 화면을 나란히 — 변경 전이 더 낫다면 여기서 바로 되돌린다."""
+        t = self.t
+        win = tk.Toplevel(self.win); win.title(t('변경 전·후 화면', 'Before / After')); win.configure(bg=PANEL)
+        tk.Label(win, text=(job.get('title') or '') + '  ›  ' + (task.get('title') or change.get('title', '')), bg=PANEL, fg=FG, font=(FONT, 10, 'bold'),
+                 wraplength=760, justify='left').pack(anchor='w', padx=14, pady=(12, 6))
+        body = self._scroll_area(win)
+        self._shot_imgs = []
+        for sh in change.get('shots') or []:
+            tk.Label(body, text=sh['name'].replace('.png', ''), bg=PANEL, fg='#C4C4CE', font=(FONT, 9, 'bold')).pack(anchor='w', padx=14, pady=(8, 2))
+            row = tk.Frame(body, bg=PANEL); row.pack(anchor='w', padx=14)
+            for lab, path, color in ((t('변경 전', 'Before'), sh['before'], DIM), (t('변경 후', 'After'), sh['after'], GREEN)):
+                cell = tk.Frame(row, bg=PANEL); cell.pack(side='left', padx=(0, 10))
+                tk.Label(cell, text=lab, bg=PANEL, fg=color, font=(FONT, 8, 'bold')).pack(anchor='w')
+                try:
+                    img = tk.PhotoImage(file=path)
+                    k = max(1, -(-img.width() // 380))
+                    img = img.subsample(k, k) if k > 1 else img
+                    self._shot_imgs.append(img)
+                    tk.Label(cell, image=img, bg=PANEL).pack()
+                except Exception:
+                    tk.Label(cell, text=t('이 쪽에는 없는 화면이에요', 'Not in this version'), bg=FIELD, fg=DIM, font=(FONT, 8), width=34, height=6).pack()
+        tk.Label(body, text=t('바뀐 파일', 'Changed files').upper(), bg=PANEL, fg=DIM, font=(FONT, 8, 'bold')).pack(anchor='w', padx=14, pady=(12, 2))
+        tk.Label(body, text='\n'.join(change.get('files') or []), bg=PANEL, fg='#B0B0BC', font=('Consolas', 8), justify='left').pack(anchor='w', padx=14, pady=(0, 10))
+        bar = tk.Frame(win, bg=PANEL); bar.pack(fill='x', padx=14, pady=8)
+        again = bool(change.get('rolled_back'))
+        self._action_btn(bar, t('변경 후로 다시 적용', 'Re-apply') if again else t('변경 전으로 되돌리기', 'Roll back to before'),
+                         lambda: (self._swap(job, change, again), win.destroy()), 'primary').pack(side='left')
+        self._action_btn(bar, t('닫기', 'Close'), win.destroy, 'quiet').pack(side='left', padx=(8, 0))
 
     def _add_request_box(self, pad, job, button, hint='', collect=None):
         """요청을 새로 적어 팀장에게 보낸다. collect() 는 (지금까지의 답, 고친 요구서)를 돌려준다."""
@@ -1101,18 +1498,18 @@ class TeamWindow:
         """사전요구서의 기존 내용과 다른 요청 — 내가 정해야 요구서를 고치고 보류했던 지시를 보낸다."""
         t = self.t
         for p in [x for x in job.get('req_proposals', []) if x.get('status') == 'pending']:
-            card = tk.Frame(parent, bg='#3A3020', highlightthickness=1, highlightbackground='#8A6A2A')
+            card = tk.Frame(parent, bg=WARN_BG, highlightthickness=1, highlightbackground=mix(GOLD, BG, 0.5))
             card.pack(fill='x', padx=14, pady=(8, 0))
             tk.Label(card, text=t('✋ 사전요구서와 달라요 — 수정할까요?', '✋ This differs from the requirements — change them?'),
-                     bg='#3A3020', fg=GOLD, font=(FONT, 9, 'bold')).pack(anchor='w', padx=10, pady=(8, 2))
+                     bg=WARN_BG, fg=GOLD, font=(FONT, 9, 'bold')).pack(anchor='w', padx=10, pady=(8, 2))
             if p.get('was'):
-                tk.Label(card, text=t('기존  ', 'Was  ') + p['was'], bg='#3A3020', fg='#A09070', font=(FONT, 9, 'overstrike'),
+                tk.Label(card, text=t('기존  ', 'Was  ') + p['was'], bg=WARN_BG, fg=DIM, font=(FONT, 9, 'overstrike'),
                          wraplength=640, justify='left', anchor='w').pack(anchor='w', padx=10)
-            tk.Label(card, text=t('바뀜  ', 'Now  ') + p.get('now', ''), bg='#3A3020', fg=FG, font=(FONT, 9, 'bold'),
+            tk.Label(card, text=t('바뀜  ', 'Now  ') + p.get('now', ''), bg=WARN_BG, fg=FG, font=(FONT, 9, 'bold'),
                      wraplength=640, justify='left', anchor='w').pack(anchor='w', padx=10)
             if p.get('why'):
-                tk.Label(card, text=p['why'], bg='#3A3020', fg=DIM, font=(FONT, 8), wraplength=640, justify='left').pack(anchor='w', padx=10)
-            row = tk.Frame(card, bg='#3A3020'); row.pack(anchor='w', padx=10, pady=8)
+                tk.Label(card, text=p['why'], bg=WARN_BG, fg=DIM, font=(FONT, 8), wraplength=640, justify='left').pack(anchor='w', padx=10)
+            row = tk.Frame(card, bg=WARN_BG); row.pack(anchor='w', padx=10, pady=8)
             self._btn(row, t('✅ 요구서를 수정하고 진행', '✅ Change it and go ahead'),
                       lambda pid=p['id']: self._resolve_proposal(job, pid, True), ACCENT).pack(side='left')
             self._btn(row, t('기존 유지', 'Keep the original'),
@@ -1139,7 +1536,7 @@ class TeamWindow:
         txt = tk.Text(box, bg=PANEL, fg=FG, relief='flat', font=(FONT, 10), wrap='word', padx=8, pady=6, highlightthickness=0)
         sb = tk.Scrollbar(box, command=txt.yview); txt.configure(yscrollcommand=sb.set)
         sb.pack(side='right', fill='y'); txt.pack(side='left', fill='both', expand=True)
-        render_markdown(txt, job.get('requirements') or '', {'fg': FG, 'dim': DIM, 'accent': '#6AA9FF', 'code_bg': FIELD, 'font': FONT})
+        render_markdown(txt, job.get('requirements') or '', {'fg': FG, 'dim': DIM, 'accent': INFO, 'code_bg': FIELD, 'font': FONT})
         txt.config(state='disabled')
 
     def _draw_room(self, f, job, pane):
@@ -1163,10 +1560,10 @@ class TeamWindow:
         txt.tag_configure('code', font=('Consolas', 9), background=FIELD)
         txt.tag_configure('day', justify='center', foreground=DIM, font=(FONT, 8, 'bold'), spacing1=14, spacing3=4)
         txt.tag_configure('sys', justify='center', foreground=DIM, font=(FONT, 8), spacing1=3)
-        txt.tag_configure('link', foreground='#6AA9FF', font=(FONT, 9, 'bold'), lmargin1=22, lmargin2=22)
+        txt.tag_configure('link', foreground=INFO, font=(FONT, 9, 'bold'), lmargin1=22, lmargin2=22)
         txt.tag_configure('tag_instruction', foreground=GOLD, font=(FONT, 8, 'bold'))
         txt.tag_configure('tag_report', foreground=GREEN, font=(FONT, 8, 'bold'))
-        txt.tag_configure('tag_review', foreground='#6AA9FF', font=(FONT, 8, 'bold'))
+        txt.tag_configure('tag_review', foreground=INFO, font=(FONT, 8, 'bold'))
         self._room_token += 1
         self._room = {'txt': txt, 'job': job, 'pane': pane, 'sig': None, 'token': self._room_token}
         self._fill_room()
@@ -1176,14 +1573,14 @@ class TeamWindow:
             ph = t('#스쿼드 에 메시지 보내기 — 팀장이 듣고 필요한 팀원에게 나눠 지시해요', 'Message #squad — the lead splits work among teammates')
             hint = t('Enter 보내기 · Shift+Enter 줄바꿈 · @이름 으로 한 팀원에게만 지시', 'Enter to send · Shift+Enter new line · @name to instruct one teammate')
 
-            def on_send(text):
-                self._send_channel(job, text, names)
+            def on_send(text, files):
+                self._send_channel(job, text, names, files)
         elif pane == 'lead':
             ph = t('팀장에게 메시지 보내기', 'Message the lead')
             hint = t('팀장이 이해해서 답하고, 필요한 팀원에게 나눠 지시해요 (약 1분)', 'The lead replies and delegates as needed (about a minute)')
 
-            def on_send(text):
-                self._run_bg(lambda: buni_team.chat_send(job['id'], 'lead', text))
+            def on_send(text, files):
+                self._run_bg(lambda: buni_team.chat_send(job['id'], 'lead', text, attachments=files))
         else:
             nm = self._chat_name(job, who)
             status = job['roles'].get(who, {}).get('status', 'pending')
@@ -1192,8 +1589,8 @@ class TeamWindow:
                     else t('이 팀원이 시작할 때 반영해요.', 'Applied when this teammate starts.') if status in ('pending', 'revise')
                     else t('이미 끝난 팀원이면 다시 열어 반영해요. 이 팀원의 산출물을 쓰는 팀원도 다시 확인해요.', 'If already done, it is reopened. Teammates relying on it re-check too.'))
 
-            def on_send(text):
-                self._run_bg(lambda: buni_team.send_role_note(job['id'], who, text))
+            def on_send(text, files):
+                self._run_bg(lambda: buni_team.send_role_note(job['id'], who, text, attachments=files))
         self._composer(wrap, job, pane, ph, hint, on_send, disabled=job['status'] == 'cancelled')
         token = self._room_token
         self.win.after(1500, lambda: self._room_poll(token))
@@ -1206,42 +1603,72 @@ class TeamWindow:
                 self._note_error = str(e)                 # 화면 갱신(_tick)에서 보여 준다 — Tk 는 다른 스레드에서 만지지 않는다
         threading.Thread(target=run, daemon=True).start()
 
-    def _send_channel(self, job, text, names):
-        """단체방에서 보내기 — '@이름 …' 이면 그 팀원에게만, 아니면 팀장이 듣고 나눠 지시한다."""
+    def _send_channel(self, job, text, names, files=()):
+        """단체방에서 보내기 — '@이름 …' 이면 그 팀원에게만(첨부도 그 팀원에게만), 아니면 팀장이 듣고 나눠 지시한다."""
+        files = list(files or [])
         if text.startswith('@'):
             body = text[1:]
             for rid, nm in names:
                 if body.startswith(nm):
                     rest = body[len(nm):].strip()
-                    if rest:
+                    if rest or files:
                         if rid == 'lead':
-                            self._run_bg(lambda: buni_team.chat_send(job['id'], 'lead', rest))
+                            self._run_bg(lambda: buni_team.chat_send(job['id'], 'lead', rest, attachments=files))
                         else:
-                            self._run_bg(lambda: buni_team.send_role_note(job['id'], rid, rest))
+                            self._run_bg(lambda: buni_team.send_role_note(job['id'], rid, rest, attachments=files))
                         return
-        self._run_bg(lambda: buni_team.chat_send(job['id'], 'lead', text))
+        self._run_bg(lambda: buni_team.chat_send(job['id'], 'lead', text, attachments=files))
+
+    def _save_draft(self, key, text):
+        self._saved[key] = text
+        if not text.strip():
+            self._saved.pop(key, None)
+        # 키마다 파일을 읽고 쓰면 입력이 끊긴다 — 메모리에만 두고 잠깐 멈추면(0.6초) 한 번에 디스크에 쓴다
+        self._draft_dirty[key] = text
+        try:
+            if self._draft_job is not None:
+                self.win.after_cancel(self._draft_job)
+            self._draft_job = self.win.after(600, self._flush_drafts)
+        except Exception:
+            self._flush_drafts()
+
+    def _flush_drafts(self):
+        self._draft_job = None
+        patch, self._draft_dirty = self._draft_dirty, {}
+        if not patch:
+            return
+        try:
+            buni_team.save_drafts(patch)
+        except OSError:
+            pass
 
     def _composer(self, parent, job, pane, placeholder, hint, on_send, disabled=False):
         """슬랙식 입력창 — 여러 줄, Enter 보내기 · Shift+Enter 줄바꿈. 다시 그려도 쓰던 글은 남긴다."""
         key = (job['id'], pane)
         bar = tk.Frame(parent, bg=PANEL); bar.pack(fill='x', side='bottom', padx=14, pady=(4, 10))
         tk.Frame(parent, bg=LINE, height=1).pack(fill='x', side='bottom')
-        border = tk.Frame(bar, bg=FIELD, highlightthickness=1, highlightbackground='#4A4A58', highlightcolor=ACCENT)
+        pending = self._att_pending.setdefault('|'.join(key), [])      # 보내기 전 첨부 — 화면을 다시 그려도 남는다
+        tray = AttachTray(bar, pending, self.t)
+        border = tk.Frame(bar, bg=FIELD, highlightthickness=1, highlightbackground=LINE, highlightcolor=ACCENT)
         border.pack(fill='x')
         ent = tk.Text(border, height=1, wrap='word', bg=FIELD, fg=FG, insertbackground=FG, relief='flat',
                       font=(FONT, 10), padx=8, pady=7, undo=True, highlightthickness=0)
         ent._is_composer = True
         self._composer_widget = (key, ent)
         ent.pack(side='left', fill='x', expand=True)
-        ph = tk.Label(border, text=placeholder, bg=FIELD, fg='#6A6A78', font=(FONT, 10), anchor='w')
+        ph = tk.Label(border, text=placeholder, bg=FIELD, fg=DIM, font=(FONT, 10), anchor='w')
         ph.place(x=10, y=7)
-        send_btn = tk.Button(border, text='➤', bg=ACCENT, fg=FG, relief='flat', bd=0, cursor='hand2', font=(FONT, 10, 'bold'),
-                             padx=10, pady=2, activebackground=ACCENT, activeforeground=FG)
+        send_btn = tk.Button(border, text='➤', bg=ACCENT, fg=ACCENT_INK, relief='flat', bd=0, cursor='hand2', font=(FONT, 10, 'bold'),
+                             padx=10, pady=2, activebackground=ACCENT, activeforeground=ACCENT_INK)
         send_btn.pack(side='right', padx=6, pady=5)
-        tk.Label(bar, text=hint, bg=PANEL, fg='#6A6A78', font=(FONT, 8), anchor='w', wraplength=560, justify='left').pack(anchor='w', pady=(3, 0))
+        tray.button(border, FIELD).pack(side='right', pady=5)
+        hint += self.t(f' · 📎 파일·이미지 첨부 (최대 {buni_team.ATTACH_MAX_FILES}개, 파일당 {buni_team.ATTACH_MAX_BYTES // 1048576}MB)',
+                       f' · 📎 attach files/images (up to {buni_team.ATTACH_MAX_FILES}, {buni_team.ATTACH_MAX_BYTES // 1048576}MB each)')
+        tk.Label(bar, text=hint, bg=PANEL, fg=DIM, font=(FONT, 8), anchor='w', wraplength=560, justify='left').pack(anchor='w', pady=(3, 0))
 
         def sync(_e=None):
             self._drafts[key] = ent.get('1.0', 'end-1c')
+            self._save_draft('|'.join(key), self._drafts[key])
             if self._drafts[key]:
                 ph.place_forget()
             else:
@@ -1256,11 +1683,11 @@ class TeamWindow:
             if disabled:
                 return 'break'
             text = ent.get('1.0', 'end-1c').strip()
-            if not text:
+            if not text and not pending:
                 return 'break'
             ent.delete('1.0', 'end')
             sync()
-            on_send(text)
+            on_send(text, tray.take())
             return 'break'
 
         def newline(_e=None):
@@ -1269,9 +1696,16 @@ class TeamWindow:
         ent.bind('<Return>', send)
         ent.bind('<Shift-Return>', newline)
         ent.bind('<KeyRelease>', sync)
+        def paste(e):
+            if tray.paste() == 'break':                       # 클립보드의 이미지·파일은 첨부로, 글이면 평소처럼 붙여넣는다
+                return 'break'
+            ent.after(1, sync)
+        ent.bind('<<Paste>>', paste)
+        tray.enable_drop(ent)
+        ent.bind('<<Cut>>', lambda e: ent.after(1, sync))
         send_btn.config(command=send)
         ph.bind('<Button-1>', lambda e: ent.focus_set())
-        draft = self._drafts.get(key, '')
+        draft = self._drafts.get(key) or self._saved.get('|'.join(key), '')
         if draft:
             ent.insert('1.0', draft)
         sync()
@@ -1286,8 +1720,10 @@ class TeamWindow:
         try:
             if not w['txt'].winfo_exists():
                 return
-            self._fill_room()
-            self.win.after(1500, lambda: self._room_poll(token))
+            hidden = self._is_hidden()               # 최소화·숨김이면 다시 채우지 않고 가끔만 확인
+            if not hidden:
+                self._fill_room()
+            self.win.after(self.HIDDEN_TICK_MS if hidden else 1500, lambda: self._room_poll(token))
         except tk.TclError:
             pass
 
@@ -1351,11 +1787,34 @@ class TeamWindow:
                 self._md_lite(txt, m['text'])
             else:
                 txt.insert('end', m['text'] + '\n', 'body')
+            if m.get('attachments'):
+                self._insert_attachments(txt, job, m, i)
             prev = m
         if typing:
             txt.insert('end', '\n' + self._chat_name(job, typing) + t(' 이(가) 입력하는 중…', ' is typing…') + '\n', 'sys')
         txt.config(state='disabled'); txt.see('end')
         self._refresh_sidebar_badges()
+
+    def _insert_attachments(self, txt, job, m, i):
+        """말풍선 아래에 첨부를 보여 준다 — 이미지는 썸네일(누르면 크게), 파일은 이름·크기(누르면 열기). 첨부 폴더 밖 경로는 무시한다."""
+        for j, a in enumerate(m['attachments'][:buni_team.ATTACH_MAX_FILES]):
+            full = buni_team.attachment_path(job['id'], a.get('path'))
+            name = str(a.get('name') or os.path.basename(full) or '?')
+            tag = f'att{i}_{j}'
+            is_img = a.get('kind') == 'image' and full
+            if not full:
+                txt.insert('end', f'📎 {name} ' + self.t('(파일을 찾을 수 없어요)', '(file not found)') + '\n', 'dim')
+                continue
+            photo = load_photo(full, 120) if is_img else None
+            if photo is not None:
+                txt.insert('end', '    ')
+                txt.image_create('end', image=photo, padx=2, pady=2)
+                txt.tag_add(tag, 'end-2c')
+                txt.insert('end', '\n')
+            txt.insert('end', f"{'🖼' if is_img else '📎'} {name}  ·  {_size_text(int(a.get('size') or 0))}\n", ('link', tag))
+            txt.tag_bind(tag, '<Button-1>', lambda e, p=full, im=is_img, n=name: show_image_large(self.win, p, n) if im else open_path(p))
+            txt.tag_bind(tag, '<Enter>', lambda e: txt.config(cursor='hand2'))
+            txt.tag_bind(tag, '<Leave>', lambda e: txt.config(cursor='arrow'))
 
     @staticmethod
     def _md_lite(txt, text):
@@ -1399,14 +1858,17 @@ class TeamWindow:
         rs = job['roles'].get(who, {})
         role = next((r for r in job['plan']['roles'] if r['id'] == who), {})
         ko, en, color = ROLE_STATUS.get(rs.get('status', 'pending'), ('대기', 'Waiting', DIM))
-        card = tk.Frame(parent, bg='#2B2B35'); card.pack(fill='x')
-        top = tk.Frame(card, bg='#2B2B35'); top.pack(fill='x', padx=14, pady=(8, 2))
+        card = tk.Frame(parent, bg=FIELD); card.pack(fill='x')
+        top = tk.Frame(card, bg=FIELD); top.pack(fill='x', padx=14, pady=(8, 2))
         label = t(ko, en) + (f"  ({rs.get('attempts')}회)" if rs.get('attempts', 0) > 1 else '')
-        tk.Label(top, text='● ' + label, bg='#2B2B35', fg=color, font=(FONT, 9, 'bold')).pack(side='left')
+        dl = buni_team.duty_label(buni_team.role_duty(role)) if role else ''
+        if dl:                                                   # 맥 DM 위쪽 칩과 같은 '부서 · 세부 담당'
+            tk.Label(top, text=dl, bg=FIELD, fg=DIM, font=(FONT, 8, 'bold'), padx=6).pack(side='left')
+        tk.Label(top, text='● ' + label, bg=FIELD, fg=color, font=(FONT, 9, 'bold')).pack(side='left')
         if rs.get('note_pending'):
-            tk.Label(top, text=t('  📨 반영 대기', '  📨 queued'), bg='#2B2B35', fg=GOLD, font=(FONT, 8)).pack(side='left')
+            tk.Label(top, text=t('  📨 반영 대기', '  📨 queued'), bg=FIELD, fg=GOLD, font=(FONT, 8)).pack(side='left')
         if role.get('depends_on'):
-            tk.Label(top, text='  ← ' + ', '.join(role['depends_on']), bg='#2B2B35', fg=DIM, font=(FONT, 8)).pack(side='left')
+            tk.Label(top, text='  ← ' + ', '.join(role['depends_on']), bg=FIELD, fg=DIM, font=(FONT, 8)).pack(side='left')
         sessions = [s for s in buni_team.load_sessions(job['id']) if s.get('key') == who]
         if sessions:
             self._btn(top, t('💻 Claude에서 열기', '💻 Open in Claude'),
@@ -1415,11 +1877,11 @@ class TeamWindow:
         mb = self._model_menu(top, role.get('model', ''), t(f'기본 ({default_name})', f'Default ({default_name})'),
                               lambda m: self._run_bg(lambda: buni_team.set_role_model(job['id'], who, m)))
         mb.pack(side='right', padx=(0, 8))
-        tk.Label(top, text=t('모델', 'Model'), bg='#2B2B35', fg=DIM, font=(FONT, 8)).pack(side='right')
+        tk.Label(top, text=t('모델', 'Model'), bg=FIELD, fg=DIM, font=(FONT, 8)).pack(side='right')
         if role.get('mission'):
-            self._label(card, role['mission'] if len(role['mission']) < 200 else role['mission'][:198] + '…', '#B0B0BC', 8,
+            self._label(card, role['mission'] if len(role['mission']) < 200 else role['mission'][:198] + '…', INK2, 8,
                         wraplength=640).pack(anchor='w', padx=14)
-        atxt = tk.Text(card, bg='#22222A', fg=FG, relief='flat', font=('Consolas', 8), wrap='word', height=5, highlightthickness=0)
+        atxt = tk.Text(card, bg=RAIL, fg=FG, relief='flat', font=('Consolas', 8), wrap='word', height=5, highlightthickness=0)
         atxt.pack(fill='x', padx=14, pady=(4, 8))
         self._act_widget = (atxt, job['id'], who)
         self._fill_activity()
@@ -1484,7 +1946,9 @@ class TeamWindow:
         for n in rs.get('notes') or []:
             self._label(panel, '📨 ' + str(n.get('text', '')), DIM, 8, wraplength=540).pack(anchor='w', pady=(4, 0))
         row = tk.Frame(panel, bg=FIELD); row.pack(fill='x', pady=(8, 0))
-        var = tk.StringVar()
+        dkey = buni_team.draft_key(job['id'], 'note:' + str(key))
+        var = tk.StringVar(value=self._saved.get(dkey, ''))
+        var.trace_add('write', lambda *_: self._save_draft(dkey, var.get()))
         ent = tk.Entry(row, textvariable=var, bg=PANEL, fg=FG, insertbackground=FG, relief='flat', font=(FONT, 9))
         ent.pack(side='left', fill='x', expand=True, ipady=3)
         self._btn(row, t('📨 보내기', '📨 Send'), lambda: self._send_note(job, key, var), ACCENT).pack(side='left', padx=(6, 0))
@@ -1504,6 +1968,9 @@ class TeamWindow:
         try:
             if not txt.winfo_exists():
                 self._act_widget = None
+                return
+            if self._is_hidden():                    # 최소화·숨김이면 읽지 않고 가끔만 확인
+                self.win.after(self.HIDDEN_TICK_MS, self._fill_activity)
                 return
             act = buni_team.load_activity(jid, key)
             lines = act.get('lines', [])[-12:]
@@ -1624,7 +2091,7 @@ class TeamWindow:
         return inner
 
     def _board_color(self, col):
-        return {'ready': '#6A9EF2', 'running': GREEN, 'review': '#EE9E40', 'done': '#9A9EB2', 'blocked': '#E65A66'}[col]
+        return {'ready': INFO, 'running': GREEN, 'review': GOLD, 'done': DIM, 'blocked': RED}[col]
 
     def _draw_board_results(self):
         t, bf = self.t, self._bf
@@ -1648,7 +2115,7 @@ class TeamWindow:
                                         ('done', 'done', '완료', 'Done', self._board_color('done')),
                                         ('blocked', 'blocked', '확인 필요', 'Needs attention', self._board_color('blocked'))):
             on = bf['status'] == col and col != ''
-            tile = tk.Frame(row, bg='#34343F' if on else FIELD, cursor='hand2', padx=12, pady=6); tile.pack(side='left', padx=(0, 8))
+            tile = tk.Frame(row, bg=RAISED if on else FIELD, cursor='hand2', padx=12, pady=6); tile.pack(side='left', padx=(0, 8))
             tk.Label(tile, text=str(s[key]), bg=tile['bg'], fg=color, font=(FONT, 15, 'bold')).pack(anchor='w')
             tk.Label(tile, text=t(ko, en), bg=tile['bg'], fg=DIM, font=(FONT, 8)).pack(anchor='w')
             for w in (tile,) + tuple(tile.winfo_children()):
@@ -1682,7 +2149,7 @@ class TeamWindow:
     def _auto_chip(self, parent, c, bg):
         if c.get('auto') not in buni_team.BOARD_AUTO_NAMES:
             return None
-        color = {'started': GREEN, 'confirm': GOLD, 'limit': '#E65A66'}[c['auto']]
+        color = {'started': GREEN, 'confirm': GOLD, 'limit': RED}[c['auto']]
         return tk.Label(parent, text='⟳ ' + self.t(*buni_team.BOARD_AUTO_NAMES[c['auto']]), bg=bg, fg=color, font=(FONT, 8, 'bold'))
 
     @staticmethod
@@ -1700,26 +2167,39 @@ class TeamWindow:
             items = [c for c in shown if c['column'] == col]
             head = tk.Frame(box, bg=RAIL); head.pack(fill='x', pady=(0, 6))
             tk.Label(head, text='●', bg=RAIL, fg=self._board_color(col), font=(FONT, 8)).pack(side='left')
-            tk.Label(head, text=' ' + t(*buni_team.BOARD_COLUMN_NAMES[col]), bg=RAIL, fg='#D8D8E2', font=(FONT, 9, 'bold')).pack(side='left')
+            tk.Label(head, text=' ' + t(*buni_team.BOARD_COLUMN_NAMES[col]), bg=RAIL, fg=FG, font=(FONT, 9, 'bold')).pack(side='left')
             tk.Label(head, text=str(len(items)), bg=RAIL, fg=DIM, font=(FONT, 8, 'bold')).pack(side='left', padx=4)
             for c in items:
-                bg = '#3A3A48' if c['id'] == self._bsel else FIELD
+                if c['kind'] == 'task':                              # 내가 지시한 업무는 업무 보드와 같은 카드로 — "프로젝트 › 업무"
+                    jb = buni_team.load_job(c['job_id'])
+                    tk_ = next((x for x in (jb or {}).get('tasks', []) if x['id'] == c['task_id']), None)
+                    if jb and tk_:
+                        wrap = 170
+                        self._task_card(box, jb, tk_, {'ready': 'todo', 'running': 'doing', 'blocked': 'todo'}.get(col, col), show_project=True, wrap=wrap)
+                        continue
+                bg = RAISED if c['id'] == self._bsel else FIELD
                 card = tk.Frame(box, bg=bg, padx=8, pady=6, highlightthickness=1, highlightbackground=LINE); card.pack(fill='x', pady=3)
-                tk.Label(card, text=c['job_title'], bg=bg, fg=FG, font=(FONT, 9, 'bold'), wraplength=140, justify='left', anchor='w').pack(fill='x')
+                tk.Label(card, text=c['short_title'], bg=bg, fg=FG, font=(FONT, 9, 'bold'), wraplength=140, justify='left', anchor='w').pack(fill='x')
                 who = tk.Frame(card, bg=bg); who.pack(fill='x', pady=(3, 0))
-                tk.Label(who, text=f"{c['icon']} {c['assignee']}", bg=bg, fg='#C4C4CE', font=(FONT, 8), anchor='w').pack(side='left')
+                tk.Label(who, text=f"{c['icon']} {c['assignee']}", bg=bg, fg=INK2, font=(FONT, 8), anchor='w').pack(side='left')
                 tk.Label(who, text='● ' + t(*c['state']), bg=bg, fg=self._board_color(c['column']), font=(FONT, 8, 'bold')).pack(side='right')
+                if c.get('duty'):
+                    tk.Label(card, text=c['duty'], bg=bg, fg=DIM, font=(FONT, 7), anchor='w').pack(fill='x')
                 chip = self._auto_chip(card, c, bg)
                 if chip:
                     chip.pack(anchor='w', pady=(2, 0))
-                if c['recent']:
+                if c['brief']:
+                    tk.Label(card, text=c['brief'], bg=bg, fg=INK2, font=(FONT, 8), wraplength=140, justify='left', anchor='w').pack(fill='x', pady=(3, 0))
+                if c['why']:
+                    tk.Label(card, text='· ' + c['why'], bg=bg, fg=DIM, font=(FONT, 8), wraplength=140, justify='left', anchor='w').pack(fill='x', pady=(2, 0))
+                if c['recent'] and c['recent'] != c['why']:
                     tk.Label(card, text=_short_text(c['recent'], 70), bg=bg, fg=DIM, font=(FONT, 8), wraplength=140, justify='left', anchor='w').pack(fill='x', pady=(3, 0))
                 foot = tk.Frame(card, bg=bg); foot.pack(fill='x', pady=(4, 0))
                 tk.Label(foot, text=self._bar(c), bg=bg, fg=self._board_color(c['column']), font=(FONT, 8)).pack(side='left')
                 tk.Label(foot, text='⏱ ' + buni_team.board_elapsed(c['since'], now, en), bg=bg, fg=DIM, font=(FONT, 8)).pack(side='right')
                 self._click_card(card, c['id'])
             if not items:
-                tk.Label(box, text=t('비어 있어요', 'Empty'), bg=RAIL, fg='#5A5A68', font=(FONT, 8)).pack(pady=14)
+                tk.Label(box, text=t('비어 있어요', 'Empty'), bg=RAIL, fg=DIM, font=(FONT, 8)).pack(pady=14)
 
     def _draw_board_list(self, parent, shown):
         t = self.t
@@ -1729,15 +2209,15 @@ class TeamWindow:
         head = tk.Frame(inner, bg=PANEL); head.pack(fill='x', pady=(0, 4))
         for (ko, e), w in zip((('상태', 'Status'), ('프로젝트', 'Project'), ('담당자', 'Assignee'), ('진행률', 'Progress'),
                                ('최근 활동', 'Recent'), ('경과', 'Elapsed')), widths):
-            tk.Label(head, text=t(ko, e).upper(), bg=PANEL, fg='#6A6A78', font=(FONT, 8, 'bold'), width=w, anchor='w').pack(side='left')
+            tk.Label(head, text=t(ko, e).upper(), bg=PANEL, fg=DIM, font=(FONT, 8, 'bold'), width=w, anchor='w').pack(side='left')
         for c in shown:
-            bg = '#3A3A48' if c['id'] == self._bsel else PANEL
+            bg = RAISED if c['id'] == self._bsel else PANEL
             row = tk.Frame(inner, bg=bg, pady=4); row.pack(fill='x')
             tk.Label(row, text='● ' + t(*c['state']), bg=bg, fg=self._board_color(c['column']), font=(FONT, 8, 'bold'), width=widths[0], anchor='w').pack(side='left')
-            tk.Label(row, text=_short_text(c['job_title'], 30), bg=bg, fg=FG, font=(FONT, 9, 'bold'), width=widths[1], anchor='w').pack(side='left')
-            tk.Label(row, text=f"{c['icon']} {c['assignee']}", bg=bg, fg='#C4C4CE', font=(FONT, 8), width=widths[2], anchor='w').pack(side='left')
+            tk.Label(row, text=c['short_title'], bg=bg, fg=FG, font=(FONT, 9, 'bold'), width=widths[1], anchor='w').pack(side='left')
+            tk.Label(row, text=f"{c['icon']} {c['assignee']}", bg=bg, fg=INK2, font=(FONT, 8), width=widths[2], anchor='w').pack(side='left')
             tk.Label(row, text=self._bar(c) or '—', bg=bg, fg=self._board_color(c['column']), font=(FONT, 8), width=widths[3], anchor='w').pack(side='left')
-            tk.Label(row, text=_short_text(c['recent'], 40) or '—', bg=bg, fg=DIM, font=(FONT, 8), width=widths[4], anchor='w').pack(side='left')
+            tk.Label(row, text=_short_text(c['brief'] or c['recent'], 40) or '—', bg=bg, fg=DIM, font=(FONT, 8), width=widths[4], anchor='w').pack(side='left')
             tk.Label(row, text=buni_team.board_elapsed(c['since'], now, en), bg=bg, fg=DIM, font=(FONT, 8), width=widths[5], anchor='w').pack(side='left')
             chip = self._auto_chip(row, c, bg)
             if chip:
@@ -1757,7 +2237,9 @@ class TeamWindow:
         close.bind('<Button-1>', lambda e: (setattr(self, '_bsel', None), self._draw_board_results()))
         tk.Label(head, text=c['job_title'], bg=FIELD, fg=FG, font=(FONT, 10, 'bold'), wraplength=220, justify='left', anchor='w').pack(side='left', fill='x')
         info = tk.Frame(side, bg=FIELD); info.pack(fill='x', padx=10)
-        self._label(info, f"{c['icon']} {c['assignee']}  ·  ● {t(*c['state'])}", '#C4C4CE', 9).pack(anchor='w')
+        self._label(info, f"{c['icon']} {c['assignee']}  ·  ● {t(*c['state'])}", INK2, 9).pack(anchor='w')
+        if c.get('duty'):
+            self._label(info, c['duty'], DIM, 8).pack(anchor='w')
         chip = self._auto_chip(info, c, FIELD)
         if chip:
             chip.pack(anchor='w')
@@ -1767,15 +2249,26 @@ class TeamWindow:
         def block(title, lines):
             if not lines:
                 return
-            self._label(info, title, '#6A6A78', 8, True).pack(anchor='w', pady=(8, 1))
+            self._label(info, title, DIM, 8, True).pack(anchor='w', pady=(8, 1))
             for ln in lines:
-                tk.Label(info, text=ln, bg=FIELD, fg='#C4C4CE', font=(FONT, 8), wraplength=250, justify='left', anchor='w').pack(anchor='w')
+                tk.Label(info, text=ln, bg=FIELD, fg=INK2, font=(FONT, 8), wraplength=250, justify='left', anchor='w').pack(anchor='w')
+        block(t('상태 이유', 'Why this status'), [d['why']] if d['why'] else [])
+        block(t('원래 지시', 'Original instruction'), [_short_text(d['instruction'], 300)] if d['instruction'] else [])
+        block(t('바뀐 파일', 'Changed files'), [t(f"{d['changed_files']}개", f"{d['changed_files']}") if d['changed_files'] else t('기록 없음', 'None recorded')])
+        block(t('전체 제목', 'Full title'), [d['title']])
+        block(t('설명', 'Description'), [x for x in (d['mission'], d['goal']) if x])
         block(t('최근 활동', 'Recent activity'), [_short_text(x, 90) for x in d['activity'][-4:]] or ([_short_text(c['recent'], 90)] if c['recent'] else []))
-        block(t('결과', 'Result'), [_short_text(d['summary'], 260)] if d['summary'] else [])
+        block(t('결과 요약', 'Result summary'), [_short_text(d['summary'], 260)] if d['summary'] else [t('아직 보고가 없어요', 'No report yet')])
+        self._draw_screens(info, d['screens'])
         block(t('관련 채팅', 'Related chat'), [f"{self._chat_name(job, m.get('from'))}: {_short_text(m.get('text', ''), 70)}" for m in d['chat'][-4:]])
+        hist = [f"{buni_team.STEP_DECISION_NAMES[h['decision']][0 if t('', 'x') == '' else 1]} · {time.strftime('%m/%d %H:%M', time.localtime(h.get('ts', 0)))}"
+                + (f" — {_short_text(h['text'], 60)}" if h.get('text') else '') for h in d['decisions'][-5:] if h.get('decision') in buni_team.STEP_DECISIONS]
+        block(t('결정 이력', 'Decision history'), hist)
+        if d['can_decide']:
+            self._draw_step_decision(info, c, d['step_id'])
         acts = tk.Frame(side, bg=FIELD); acts.pack(fill='x', padx=10, pady=10, side='bottom')
         def act(text, cmd):
-            self._btn(acts, text, cmd, '#34343F').pack(fill='x', pady=2)
+            self._btn(acts, text, cmd, RAISED).pack(fill='x', pady=2)
         if c['role_id'] and room:
             act('💬 ' + t(f"{c['assignee']} 대화 열기", f"Open {c['assignee']}'s chat"), lambda: self._board_goto(c['job_id'], 'dm:' + c['role_id']))
         elif room:
@@ -1787,10 +2280,169 @@ class TeamWindow:
             sid = d['sessions'][-1].get('id')
             act('💻 ' + t('Claude에서 열기', 'Open in Claude'), lambda: self._open_session(job, sid))
 
+    # ── 변경 전·후 화면 — 썸네일(눌러서 크게 보기) + 바뀐 영역 테두리 (영역은 엔진 job_screens 가 계산, 맥과 같은 값) ──
+
+    def _shot_photo(self, path, fit_w, fit_h, up=1):
+        """PNG → (PhotoImage, 배율). 줄일 때는 정수로 나눠(subsample) 크기를 맞추고, 작으면 up 배까지 키운다. 못 읽으면 None."""
+        try:
+            img = tk.PhotoImage(file=path)
+        except tk.TclError:
+            return None, 1
+        w, h = img.width(), img.height()
+        if w > fit_w or h > fit_h:
+            k = max(-(-w // fit_w), -(-h // fit_h))
+            return img.subsample(k), 1 / k
+        z = max(1, min(up, fit_w // max(w, 1), fit_h // max(h, 1)))
+        return (img.zoom(z) if z > 1 else img), z
+
+    def _shot_canvas(self, parent, path, boxes, fit_w, fit_h, up=1, bg=FIELD):
+        """이미지를 올린 캔버스. boxes 가 있으면 바뀐 영역마다 ACCENT 테두리(태그 'box')를 그린다 — 켜고 끄기는 itemconfigure."""
+        img, s = self._shot_photo(path, fit_w, fit_h, up)
+        if img is None:
+            return None
+        cv = tk.Canvas(parent, width=img.width(), height=img.height(), bg=bg, highlightthickness=1, highlightbackground=LINE)
+        cv.create_image(0, 0, image=img, anchor='nw')
+        cv.image = img                                             # 참조를 잡아 두지 않으면 사라진다
+        for x, y, w, h in boxes:
+            cv.create_rectangle(x * s, y * s, (x + w) * s, (y + h) * s, outline=ACCENT, width=2, tags='box')
+        cv.configure(cursor='hand2')
+        return cv
+
+    def _draw_screens(self, parent, shots):
+        """상세의 '변경 전·후 화면' — 이름마다 전/후 썸네일 한 쌍. 테두리 켜기/끄기, 눌러서 크게 보기."""
+        t = self.t
+        if not shots:
+            return
+        if not hasattr(self, '_shot_border'):
+            self._shot_border = True
+        self._label(parent, t('변경 전·후 화면', 'Before / after screens'), DIM, 8, True).pack(anchor='w', pady=(8, 1))
+        canvases = []
+
+        def apply_border():
+            for cv in canvases:
+                cv.itemconfigure('box', state='normal' if self._shot_border else 'hidden')
+            toggle.configure(text=t('테두리 끄기', 'Hide outlines') if self._shot_border else t('테두리 켜기', 'Show outlines'))
+
+        def flip():
+            self._shot_border = not self._shot_border
+            apply_border()
+        toggle = self._btn(parent, '', flip, RAISED)
+        toggle.pack(anchor='w', pady=2)
+        for i, s in enumerate(shots):
+            self._label(parent, s['name'], INK2, 8).pack(anchor='w', pady=(4, 0))
+            row = tk.Frame(parent, bg=FIELD); row.pack(anchor='w')
+            for which, ko, en in (('before', '변경 전', 'Before'), ('after', '변경 후', 'After')):
+                cell = tk.Frame(row, bg=FIELD); cell.pack(side='left', padx=(0, 6))
+                if not s.get(which):                               # 이 쪽은 캡처하지 못했다
+                    self._label(cell, t('캡처 아님', 'Not a capture'), GOLD, 8, True).pack(padx=8, pady=14)
+                    self._label(cell, t(ko, en), DIM, 7).pack()
+                    continue
+                cv = self._shot_canvas(cell, s[which], s['boxes'], 112, 90)
+                if cv is None:
+                    self._label(cell, t('이미지를 열지 못했어요', "Couldn't open the image"), DIM, 8).pack()
+                else:
+                    cv.pack(); canvases.append(cv)
+                    cv.bind('<Button-1>', lambda e, i=i, w=which: self._open_shot_zoom(shots, i, w))
+                self._label(cell, t(ko, en) + ' · ' + t('눌러서 크게 보기', 'click to enlarge'), DIM, 7).pack()
+            if s.get('captured') is False:
+                self._label(parent, '⚠ ' + t('캡처 아님', 'Not a capture') + (' — ' + s['reason'] if s.get('reason') else ''), GOLD, 8, wraplength=250).pack(anchor='w')
+            elif s.get('error'):
+                self._label(parent, '⚠ ' + s['error'], GOLD, 8, wraplength=250).pack(anchor='w')
+            elif not s['boxes']:
+                self._label(parent, t('바뀐 부분이 없어요', 'No visible change'), DIM, 8).pack(anchor='w')
+            else:
+                self._label(parent, t(f"바뀐 영역 {len(s['boxes'])}곳", f"{len(s['boxes'])} changed area(s)"), DIM, 8).pack(anchor='w')
+        apply_border()
+
+    def _open_shot_zoom(self, shots, index, which='after'):
+        """큰 화면 — 전/후를 오가며(←→·버튼) 보고, Esc·바깥 클릭·닫기로 닫는다. 테두리 토글은 상세와 같은 값."""
+        t = self.t
+        top = tk.Toplevel(self.win)
+        top.configure(bg=BG)
+        top.transient(self.win)
+        st = {'i': index, 'which': which}
+        bar = tk.Frame(top, bg=BG); bar.pack(fill='x', padx=12, pady=(10, 4))
+        body = tk.Frame(top, bg=BG); body.pack(padx=12, pady=(0, 12))
+        top.update_idletasks()
+        fit_w = max(320, int(top.winfo_screenwidth() * 0.8)); fit_h = max(240, int(top.winfo_screenheight() * 0.7))
+        btns = {}
+
+        def draw():
+            for w in body.winfo_children():
+                w.destroy()
+            s = shots[st['i']]
+            cv = self._shot_canvas(body, s[st['which']], s['boxes'], fit_w, fit_h, up=4, bg=BG) if s.get(st['which']) else None
+            if not s.get(st['which']):
+                self._label(body, t('캡처 아님', 'Not a capture'), GOLD, 10, True).pack(padx=40, pady=40)
+            elif cv is None:
+                self._label(body, t('이미지를 열지 못했어요', "Couldn't open the image"), DIM, 10).pack(padx=40, pady=40)
+            else:
+                cv.pack()
+                cv.configure(cursor='arrow')
+                cv.itemconfigure('box', state='normal' if self._shot_border else 'hidden')
+            if s.get('captured') is False and s.get('reason'):
+                self._label(body, '⚠ ' + s['reason'], GOLD, 9).pack(pady=(6, 0))
+            elif s.get('error'):
+                self._label(body, '⚠ ' + s['error'], GOLD, 9).pack(pady=(6, 0))
+            top.title(f"{s['name']} · " + (t('변경 전', 'Before') if st['which'] == 'before' else t('변경 후', 'After')))
+            for k, b in btns.items():
+                b.configure(bg=ACCENT if k == st['which'] else RAISED, fg=ACCENT_INK if k == st['which'] else FG)
+            border.configure(text=t('테두리 끄기', 'Hide outlines') if self._shot_border else t('테두리 켜기', 'Show outlines'))
+
+        def pick(which):
+            st['which'] = which; draw()
+
+        def swap(_=None):
+            pick('before' if st['which'] == 'after' else 'after')
+
+        def flip():
+            self._shot_border = not self._shot_border; draw()
+
+        def step(n):
+            st['i'] = (st['i'] + n) % len(shots); draw()
+        for key, ko, en in (('before', '변경 전', 'Before'), ('after', '변경 후', 'After')):
+            btns[key] = self._btn(bar, t(ko, en), lambda k=key: pick(k), RAISED)
+            btns[key].pack(side='left', padx=(0, 4))
+        border = self._btn(bar, '', flip, RAISED); border.pack(side='left', padx=8)
+        if len(shots) > 1:
+            self._btn(bar, '‹', lambda: step(-1), RAISED).pack(side='left', padx=2)
+            self._btn(bar, '›', lambda: step(1), RAISED).pack(side='left', padx=2)
+        self._btn(bar, t('닫기', 'Close') + ' (Esc)', top.destroy, RAISED).pack(side='right')
+        top.bind('<Escape>', lambda e: top.destroy())
+        top.bind('<Left>', swap); top.bind('<Right>', swap)
+        top.bind('<Button-1>', lambda e: top.destroy() if e.widget in (top, body) else None)   # 바깥(빈 배경) 클릭
+        draw()
+        top.focus_force()
+
+    def _draw_step_decision(self, parent, c, step_id):
+        """보류 중인 '다음에 할 일' 카드 상세 — [승인] [거절] [의견 남기기]. 처리한 뒤에도 언제든 다시 누를 수 있다 (맥과 같은 문구)."""
+        t = self.t
+        jid = c['job_id']
+        self._label(parent, t('결정', 'Decision'), DIM, 8, True).pack(anchor='w', pady=(8, 1))
+        dkey = buni_team.draft_key(jid, 'step:' + str(step_id))
+        var = tk.StringVar(value=self._saved.get(dkey, ''))
+        var.trace_add('write', lambda *_: self._save_draft(dkey, var.get()))
+        ent = tk.Entry(parent, textvariable=var, bg=PANEL, fg=FG, insertbackground=FG, relief='flat', font=(FONT, 9))
+        ent.pack(fill='x', ipady=3)
+        self._label(parent, t('의견 · 이유 (의견 남기기에는 꼭 필요해요)', 'Comment or reason (required to leave a comment)'), DIM, 8, wraplength=250).pack(anchor='w')
+
+        def decide(decision):
+            text = var.get().strip()
+            if decision == 'comment' and not text:
+                self._note_error = t('의견 내용을 입력해 주세요', 'Please write your comment')
+                return
+            var.set('')                                   # 보낸 뒤에만 비운다 (초안도 함께 지워진다)
+            self._run_bg(lambda: buni_team.step_decision(jid, step_id, decision, text))
+        row = tk.Frame(parent, bg=FIELD); row.pack(fill='x', pady=(4, 0))
+        self._btn(row, t('✅ 승인', '✅ Approve'), lambda: decide('approve'), ACCENT).pack(side='left')
+        self._btn(row, t('🚫 거절', '🚫 Reject'), lambda: decide('reject'), RAISED).pack(side='left', padx=4)
+        self._btn(row, t('💬 의견 남기기', '💬 Leave a comment'), lambda: decide('comment'), RAISED).pack(side='left')
+
     def _send_note(self, job, key, var):
         text = var.get().strip()
         if not text:
             return
+        var.set('')                                       # 보낸 뒤에만 비운다 (초안도 함께 지워진다)
 
         def run():
             try:
@@ -1817,6 +2469,77 @@ class TeamWindow:
         if messagebox.askyesno(self.t('부니 스쿼드', 'Buni Squad'), self.t('이 프로젝트를 취소할까요? 지금까지 만든 결과와 git 브랜치는 그대로 남아요.', 'Cancel this project? What has been made and the git branch stay.'), parent=self.win):
             self.manager.team_sched.cancel(job['id'])
             self.refresh(force=True)
+
+    # ── 사이드바 우클릭: 이름 수정 · 프로젝트 설정 · 삭제 (맥 contextMenu 와 같게) ──
+    def _project_menu(self, event, job):
+        t = self.t
+        menu = tk.Menu(self.win, tearoff=0)
+        menu.add_command(label=t('이름 수정', 'Rename'), command=lambda: self._rename_project(job))
+        menu.add_command(label=t('프로젝트 설정', 'Project settings'), command=lambda: self._project_settings(job))
+        menu.add_separator()
+        menu.add_command(label=t('삭제', 'Delete'), command=lambda: self._delete_project(job))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return 'break'
+
+    def _rename_project(self, job):
+        t = self.t
+        name = simpledialog.askstring(t('프로젝트 이름 수정', 'Rename project'), t('프로젝트 이름 수정', 'Rename project'),
+                                      initialvalue=job['title'], parent=self.win)
+        if name is None:
+            return
+        try:
+            buni_team.rename_job(job['id'], name)
+        except ValueError as e:
+            messagebox.showerror(t('부니 스쿼드', 'Buni Squad'), t('이름을 비워 둘 수 없어요', "The name can't be empty") if not name.strip() else str(e), parent=self.win)
+            return
+        self.refresh(force=True)
+
+    def _delete_project(self, job):
+        t = self.t
+        if job['status'] == 'running' or job.get('busy'):                  # 진행 중이면 거부 — 먼저 취소해야 한다
+            messagebox.showinfo(t('부니 스쿼드', 'Buni Squad'), t('진행 중인 프로젝트예요\n먼저 취소한 뒤 삭제해 주세요.', 'This project is running\nCancel it first, then delete.'), parent=self.win)
+            return
+        if messagebox.askyesno(t('부니 스쿼드', 'Buni Squad'),
+                               t(f"'{job['title']}' 프로젝트를 삭제할까요?\n이 작업 기록을 지워요. (git 브랜치와 결과 파일은 남아요)",
+                                 f"Delete project '{job['title']}'?\nDeletes this job record. (the git branch and result files remain)"), icon='warning', parent=self.win):
+            try:
+                buni_team.delete_project(job['id'])
+            except ValueError as e:
+                messagebox.showinfo(t('부니 스쿼드', 'Buni Squad'), str(e), parent=self.win)
+                return
+            if self.sel == job['id']:
+                self.sel = None
+            self.refresh(force=True)
+
+    def _project_settings(self, job):
+        """프로젝트 단위 모델 — 비우면 전역 설정을 따른다 (팀원별 → 프로젝트 → 전역)."""
+        t = self.t
+        d = tk.Toplevel(self.win)
+        d.title(t('프로젝트 설정', 'Project settings')); d.configure(bg=BG); d.resizable(False, False); d.transient(self.win)
+        body = tk.Frame(d, bg=BG, padx=20, pady=16); body.pack()
+        self._label(body, t('프로젝트 설정', 'Project settings'), FG, 11, True).grid(row=0, column=0, columnspan=2, sticky='w')
+        self._label(body, job['title'], DIM, 9, wraplength=300).grid(row=1, column=0, columnspan=2, sticky='w', pady=(0, 6))
+        self._label(body, t('모델', 'Models'), FG, 9, True).grid(row=2, column=0, columnspan=2, sticky='w', pady=(4, 2))
+        v = {'model': job.get('model', ''), 'lead_model': job.get('lead_model', '')}
+        dl = t('전역 설정과 같게', 'Same as global')
+        self._label(body, t('팀원 기본', 'Teammates')).grid(row=3, column=0, sticky='w', pady=3)
+        self._model_menu(body, v['model'], dl, lambda m: v.__setitem__('model', m)).grid(row=3, column=1, sticky='w')
+        self._label(body, t('팀장', 'Team lead')).grid(row=4, column=0, sticky='w', pady=3)
+        self._model_menu(body, v['lead_model'], dl, lambda m: v.__setitem__('lead_model', m)).grid(row=4, column=1, sticky='w')
+        self._label(body, t('비워 두면 스쿼드 설정의 모델을 따라요. 팀원마다 고른 모델이 있으면 그게 먼저예요. 다음 실행부터 적용돼요.',
+                            'Empty follows the Squad settings. A model picked for a teammate wins. Applies from the next run.'),
+                    DIM, 8, wraplength=300).grid(row=5, column=0, columnspan=2, sticky='w', pady=(2, 10))
+
+        def save():
+            buni_team.set_project_settings(job['id'], v['model'], v['lead_model'])
+            d.destroy()
+            self.refresh(force=True)
+        self._btn(body, t('저장', 'Save'), save, ACCENT).grid(row=6, column=0, columnspan=2, sticky='e')
+        d.update_idletasks()
+        d.geometry(f'+{self.win.winfo_x() + 120}+{self.win.winfo_y() + 90}')
 
     def _delete(self, job):
         if messagebox.askyesno(self.t('부니 스쿼드', 'Buni Squad'), self.t('이 작업 기록을 지울까요? (git 브랜치와 결과 파일은 남아요)', 'Delete this job record? (the git branch and result files remain)'), parent=self.win):
@@ -1878,15 +2601,18 @@ class TeamWindow:
                 threading.Thread(target=buni_team.review_feedback, args=(job['id'], target, 'ok'), daemon=True).start()
         txt = tk.Text(inner, bg=FIELD, fg=FG, relief='flat', font=(FONT, 9), wrap='word', padx=12, pady=8, cursor='arrow')
         txt.pack(fill='x')
-        def feedback(item_id, text):
+        def feedback(item_id, text, files=()):
             def run():
                 try:
-                    buni_team.review_feedback(job['id'], item_id, 'fix', text)
+                    buni_team.review_feedback(job['id'], item_id, 'fix', text, attachments=list(files))
                 except ValueError as e:
                     self._note_error = str(e)
             threading.Thread(target=run, daemon=True).start()
-        render_markdown(txt, md, {'fg': FG, 'dim': DIM, 'accent': '#6AA9FF', 'code_bg': PANEL, 'font': FONT},
-                        on_action=act, on_feedback=feedback)
+        render_markdown(txt, md, {'fg': FG, 'dim': DIM, 'accent': INFO, 'code_bg': PANEL, 'font': FONT},
+                        on_action=act, on_feedback=feedback,
+                        attach=lambda parent, iid: AttachTray(parent, self._att_pending.setdefault(buni_team.draft_key(job['id'], 'fb:' + iid), []), t, PANEL),
+                        drafts=(lambda iid: self._saved.get(buni_team.draft_key(job['id'], 'fb:' + iid), ''),
+                                lambda iid, v: self._save_draft(buni_team.draft_key(job['id'], 'fb:' + iid), v)))
         txt.update_idletasks()
         try:
             # 버튼·입력창이 들어 있는 줄은 글줄보다 높아서 그만큼 여유를 둔다

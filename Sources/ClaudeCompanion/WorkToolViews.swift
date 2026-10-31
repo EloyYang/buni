@@ -42,8 +42,9 @@ struct WorkToolView: View {
 // MARK: - 책에 글쓰기 (깃펜)
 
 private struct BookWritingView: View {
+    @Environment(\.buniPaused) private var paused
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.1)) { ctx in
+        TimelineView(.animation(minimumInterval: 0.1, paused: paused)) { ctx in
             let t     = ctx.date.timeIntervalSinceReferenceDate * 1.5
             let done  = Int(t) % 5                                   // 다 쓴 줄 수 (0~4)
             let nib   = CGFloat(t - floor(t))                        // 지금 쓰는 줄의 진행도
@@ -128,6 +129,7 @@ private struct KnittingToolView: View {
 
     // 팔 애니메이션(0.28초 easeInOut)과 같은 곡선으로 맞춘다
     private let armAnim = Animation.easeInOut(duration: 0.28)
+    @Environment(\.buniPaused) private var paused
 
     // 주황 털실 — 줄무늬는 진한 주황과 연한 주황으로, 주황색 몸 위에서도 구분된다
     private let deep  = Color(red: 0.88, green: 0.40, blue: 0.06)
@@ -143,7 +145,7 @@ private struct KnittingToolView: View {
     private var rightTip: CGPoint { CGPoint(x: -0.55 * P, y: 0.35 * P) }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.1)) { ctx in
+        TimelineView(.animation(minimumInterval: 0.1, paused: paused)) { ctx in
             let t    = ctx.date.timeIntervalSinceReferenceDate
             let rows = 2 + Int(t * 1.5) % 4                    // 작품이 한 줄씩 길어진다
             let roll = sin(t * 3.0) * 4                        // 실을 당길 때마다 실뭉치가 살짝 구른다
@@ -249,10 +251,11 @@ private struct KnittingToolView: View {
 // MARK: - 휴대용 게임기
 
 private struct GamepadView: View {
+    @Environment(\.buniPaused) private var paused
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.1)) { ctx in
+        TimelineView(.animation(minimumInterval: 0.1, paused: paused)) { ctx in
             let t      = ctx.date.timeIntervalSinceReferenceDate
-            let hop    = CGFloat(max(0, sin(t * 6)))              // 캐릭터가 통통 뛴다
+            let hop   = CGFloat(max(0, sin(t * 6)))              // 캐릭터가 통통 뛴다
             let scroll = CGFloat((t * 1.2).truncatingRemainder(dividingBy: 1))
             let press  = Int(t * 5) % 2 == 0
 

@@ -56,7 +56,7 @@ enum ProUpgradeWindow {
         win.setContentSize(NSSize(width: 440, height: 640))
         win.contentMinSize = NSSize(width: 400, height: 460)
         win.title = L.t("부니 Pro", "Buni Pro")
-        win.backgroundColor = NSColor(BT.bgCanvas)
+        win.backgroundColor = BuniTheme.nsColor(BuniTheme.c.bg)
         win.titlebarAppearsTransparent = true
         win.isReleasedWhenClosed = false
         win.center()
@@ -75,7 +75,7 @@ struct ProUpgradeView: View {
     @State private var message: String?
     @State private var messageIsError = false
 
-    private let accent = Color(red: 0.98, green: 0.72, blue: 0.30)
+    private let accent = Color.buniAccent
 
     var body: some View {
         ScrollView {
@@ -87,27 +87,27 @@ struct ProUpgradeView: View {
                         .foregroundColor(accent)
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(accent.opacity(0.12)))
+                        .background(RoundedRectangle(cornerRadius: BuniTheme.rMd).fill(accent.opacity(0.12)))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 featureList
-                Divider().background(Color.white.opacity(0.2))
+                Divider().background(Color.buniLine)
                 plans
-                Divider().background(Color.white.opacity(0.2))
+                Divider().background(Color.buniLine)
                 licenseField
-                Divider().background(Color.white.opacity(0.2))
+                Divider().background(Color.buniLine)
                 packList
                 Text(L.t("무료 기능(세션 패널·상태 표시·채팅·기본 캐릭터)은 Pro가 없어도 그대로 쓸 수 있어요. 앱은 사용 정보를 수집하지 않아요.",
                          "Free features (session panels, status, chat, base characters) keep working without Pro. The app collects no usage data."))
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.buniDim)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(20)
+            .padding(BuniTheme.xl)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(minWidth: 400, minHeight: 460)
-        .background(BT.bgCanvas)
+        .background(Color.buniBg)
     }
 
     private var header: some View {
@@ -117,7 +117,7 @@ struct ProUpgradeView: View {
                 .foregroundColor(.white)
             Text(pro.status().summary)
                 .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.65))
+                .foregroundColor(.buniDim)
         }
     }
 
@@ -126,7 +126,7 @@ struct ProUpgradeView: View {
             ForEach(ProFeature.allCases, id: \.self) { f in
                 HStack(spacing: 8) {
                     Text(pro.can(f) ? "✅" : "🔒").font(.system(size: 11))
-                    Text(f.title).font(.system(size: 12)).foregroundColor(.white.opacity(0.9))
+                    Text(f.title).font(.system(size: 12)).foregroundColor(.buniInk)
                 }
             }
         }
@@ -137,7 +137,7 @@ struct ProUpgradeView: View {
     private var plans: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L.t("플랜", "Plans"))
-                .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.85))
+                .font(.system(size: 12, weight: .semibold)).foregroundColor(.buniInk)
             planRow("monthly",  L.t("월간", "Monthly"),  L.t("매달", "per month"))
             planRow("yearly",   L.t("연간", "Yearly"),   L.t("1년 · 약 33% 저렴", "per year · ~33% less"))
             planRow("lifetime", L.t("평생", "Lifetime"), L.t("한 번 결제", "one-time"))
@@ -150,11 +150,11 @@ struct ProUpgradeView: View {
         return HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(name)  \(price)").font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
-                Text(note).font(.system(size: 10)).foregroundColor(.white.opacity(0.5))
+                Text(note).font(.system(size: 10)).foregroundColor(.buniDim)
             }
             Spacer()
             Button(btn.label) { if let u = btn.url { NSWorkspace.shared.open(u) } }
-                .buttonStyle(PillButtonStyle(color: btn.enabled ? .accentColor : .gray))
+                .buttonStyle(BuniButtonStyle(primary: btn.enabled))
                 .disabled(!btn.enabled)
         }
     }
@@ -164,18 +164,18 @@ struct ProUpgradeView: View {
     private var licenseField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L.t("라이선스 키", "License key"))
-                .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.85))
+                .font(.system(size: 12, weight: .semibold)).foregroundColor(.buniInk)
             HStack(spacing: 8) {
                 TextField("BUNI-…", text: $keyText)
                     .textFieldStyle(.roundedBorder)
                 Button(L.t("등록", "Activate")) { activate() }
-                    .buttonStyle(PillButtonStyle(color: .accentColor))
+                    .buttonStyle(BuniButtonStyle(primary: true))
                     .disabled(keyText.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             if let message {
                 Text(message)
                     .font(.system(size: 10))
-                    .foregroundColor(messageIsError ? BT.danger : BT.success)
+                    .foregroundColor(messageIsError ? Color.buniDanger : Color.buniOk)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -198,12 +198,12 @@ struct ProUpgradeView: View {
     private var packList: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L.t("꾸미기 팩", "Cosmetic packs"))
-                .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.85))
+                .font(.system(size: 12, weight: .semibold)).foregroundColor(.buniInk)
             ForEach(ProManager.packs) { pack in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(pack.name).font(.system(size: 12)).foregroundColor(.white)
-                        Text(packNote(pack)).font(.system(size: 10)).foregroundColor(.white.opacity(0.5))
+                        Text(packNote(pack)).font(.system(size: 10)).foregroundColor(.buniDim)
                     }
                     Spacer()
                     if !pack.proOnly {
@@ -211,7 +211,7 @@ struct ProUpgradeView: View {
                         Button(btn.enabled ? L.t("구매", "Buy") : btn.label) {
                             if let u = btn.url { NSWorkspace.shared.open(u) }
                         }
-                        .buttonStyle(PillButtonStyle(color: btn.enabled ? .accentColor : .gray))
+                        .buttonStyle(BuniButtonStyle(primary: btn.enabled))
                         .disabled(!btn.enabled)
                     }
                 }
@@ -253,7 +253,7 @@ enum OnboardingWindow {
         win.styleMask = [.titled, .closable]
         win.setContentSize(NSSize(width: 420, height: 420))
         win.title = L.t("부니에 오신 걸 환영해요", "Welcome to Buni")
-        win.backgroundColor = NSColor(BT.bgCanvas)
+        win.backgroundColor = BuniTheme.nsColor(BuniTheme.c.bg)
         win.titlebarAppearsTransparent = true
         win.isReleasedWhenClosed = false
         win.center()
@@ -292,26 +292,26 @@ struct OnboardingView: View {
             HStack {
                 HStack(spacing: 5) {
                     ForEach(0..<3) { i in
-                        Circle().fill(Color.white.opacity(i == page ? 0.9 : 0.25)).frame(width: 6, height: 6)
+                        Circle().fill(i == page ? Color.buniAccent : Color.buniLine).frame(width: 6, height: 6)
                     }
                 }
                 Spacer()
                 if page < 2 {
                     Button(L.t("건너뛰기", "Skip")) { onDone() }
-                        .buttonStyle(PillButtonStyle(color: .gray))
+                        .buttonStyle(BuniButtonStyle())
                     Button(L.t("다음", "Next")) { page += 1 }
-                        .buttonStyle(PillButtonStyle(color: .accentColor))
+                        .buttonStyle(BuniButtonStyle(primary: true))
                 } else {
                     Button(L.t("Pro 알아보기", "See Pro")) { onDone(); ProUpgradeWindow.show() }
-                        .buttonStyle(PillButtonStyle(color: .gray))
+                        .buttonStyle(BuniButtonStyle())
                     Button(L.t("시작하기", "Get started")) { onDone() }
-                        .buttonStyle(PillButtonStyle(color: .accentColor))
+                        .buttonStyle(BuniButtonStyle(primary: true))
                 }
             }
         }
         .padding(24)
         .frame(width: 420, height: 420)
-        .background(BT.bgCanvas)
+        .background(Color.buniBg)
     }
 
     private func step(_ icon: String, _ title: String, _ body: String) -> some View {
@@ -320,7 +320,7 @@ struct OnboardingView: View {
             Text(title).font(.system(size: 18, weight: .bold)).foregroundColor(.white)
             Text(body)
                 .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.75))
+                .foregroundColor(.buniInk2)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -335,15 +335,15 @@ struct ProSettingsSection: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L.t("부니 Pro", "Buni Pro"))
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(.buniInk)
             Text(pro.status().summary)
                 .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.65))
+                .foregroundColor(.buniDim)
             HStack(spacing: 8) {
                 Button(L.t("플랜 보기 · 키 등록", "Plans & license key")) { ProUpgradeWindow.show() }
-                    .buttonStyle(PillButtonStyle(color: .accentColor))
+                    .buttonStyle(BuniButtonStyle(primary: true))
                 Button(L.t("처음 안내 다시 보기", "Replay intro")) { OnboardingWindow.show() }
-                    .buttonStyle(PillButtonStyle(color: .gray))
+                    .buttonStyle(BuniButtonStyle())
             }
         }
     }

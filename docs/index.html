@@ -3,15 +3,28 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&family=Press+Start+2P&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
   :root{
-    --bg: #14161a;
-    --surface: #1b1e25;
-    --surface-2: #23272f;
-    --line: #2c313b;
-    --ink: #eef1f6;
-    --muted: #8b93a6;
-    --carrot: #f28c2e;
+    /* 부니 디자인 시스템 토큰 — 값의 기준은 docs/design-system.md (맥 BuniTheme.swift · Windows buni_theme.py 와 같다) */
+    --bg: #1E1E24;
+    --rail: #17171D;
+    --surface: #26262E;     /* panel */
+    --surface-2: #2A2A34;   /* field */
+    --raised: #34343F;
+    --line: #3A3A44;
+    --ink: #F2F2F6;
+    --ink-2: #C4C4CE;
+    --muted: #8A8A98;       /* dim */
+    --carrot: #F28C2E;      /* accent */
     --carrot-hi: #ffb066;
-    --leaf: #6bbf59;
+    --accent-ink: #1A1206;
+    --info: #6AA9FF;
+    --ok: #4DC780;
+    --warn: #D9B25A;
+    --danger: #E65A66;
+    --leaf: var(--ok);
+    --space-xs: 4px; --space-sm: 8px; --space-md: 12px; --space-lg: 16px; --space-xl: 24px; --space-xxl: 32px;
+    --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px;
+    --shadow-sm: 0 2px 6px rgba(0,0,0,0.25);
+    --shadow-md: 0 6px 16px rgba(0,0,0,0.35);
     --font-display: 'Fredoka', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
     --font-body: 'Manrope', -apple-system, 'Segoe UI', sans-serif;
     --font-pixel: 'Press Start 2P', var(--font-display);
@@ -40,7 +53,7 @@
   /* ── nav ─────────────────────────────────────────── */
   header.nav{
     position:sticky; top:0; z-index:40;
-    background:rgba(20,22,26,0.86);
+    background:rgba(30,30,36,0.86);
     backdrop-filter:blur(10px);
     border-bottom:1px solid var(--line);
   }
@@ -56,13 +69,13 @@
   @media (max-width:520px){ .nav-links{ display:none; } }
   .btn{
     font-family:var(--font-body); font-weight:700; font-size:0.92rem;
-    padding:10px 18px; border-radius:10px; border:1px solid transparent;
+    padding:10px 18px; border-radius:var(--radius-md); border:1px solid transparent;
     text-decoration:none; display:inline-flex; align-items:center; gap:8px;
     cursor:pointer; transition:transform .15s ease, background .15s, border-color .15s;
     white-space:nowrap;
   }
   .btn:active{ transform:translateY(1px); }
-  .btn-carrot{ background:var(--carrot); color:#1a1206; }
+  .btn-carrot{ background:var(--carrot); color:var(--accent-ink); }
   .btn-carrot:hover{ background:var(--carrot-hi); }
   .btn-ghost{ background:transparent; border-color:var(--line); color:var(--ink); }
   .btn-ghost:hover{ border-color:var(--muted); }
@@ -98,7 +111,7 @@
      이 배경만 넓게 잡아 크기 대비가 드러나게 한다 ── */
   .demo-stage{
     position:relative; border-radius:14px; overflow:hidden;
-    background: linear-gradient(180deg, #1b1e26, #14161a 70%);
+    background: linear-gradient(180deg, var(--surface), var(--bg) 70%);
     border:1px solid var(--line);
     aspect-ratio: 16 / 10;
   }
@@ -461,7 +474,7 @@
   .price-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-top:32px; }
   @media (max-width:900px){ .price-grid{ grid-template-columns:1fr 1fr; } }
   @media (max-width:560px){ .price-grid{ grid-template-columns:1fr; } }
-  .price-card{ background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:22px; display:flex; flex-direction:column; gap:10px; }
+  .price-card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); padding:22px; display:flex; flex-direction:column; gap:10px; }
   .price-card.best{ border-color:var(--carrot); box-shadow:0 0 0 1px var(--carrot) inset; }
   .price-card h3{ margin:0; font-size:1.05rem; }
   .price-amt{ font-family:var(--font-display); font-size:2rem; font-weight:700; }

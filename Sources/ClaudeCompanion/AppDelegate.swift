@@ -25,7 +25,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var scanTimer:         DispatchSourceTimer?
     private let scanQueue = DispatchQueue(label: "buni.session.scanner", qos: .background)
     private var claudeWasRunning        = false
-    private var claudeNotRunningStreak  = 0      // sysctl 경합 방지 디바운스 카운터
+    private var claudeLastSeen          = Date.distantPast   // sysctl 경합 방지 디바운스 기준(마지막으로 Claude를 본 시각)
+    private var lastTmpMod              = Date.distantPast   // /tmp 폴더가 마지막으로 바뀐 시각 (바뀐 게 없으면 목록을 다시 안 읽는다)
+    private var lastTmpScan             = Date.distantPast
     private var isInitialScan           = true
 
     // ── SSH Remote 이벤트 수신용 TCP 소켓 서버
@@ -154,27 +156,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startSessionScanner() {
         let t = DispatchSource.makeTimerSource(queue: scanQueue)
-        t.schedule(deadline: .now(), repeating: .milliseconds(500))
+        t.schedule(deadline: .now(), repeating: scanInterval, leeway: .milliseconds(250))
         t.setEventHandler { [weak self] in self?.scanForSessions() }
         t.resume()
         scanTimer = t
+    }
+
+    /// 스캔 주기 — Claude도 세션 창도 없는 대기 중에는 2초, 화면이 꺼져 있으면 4초로 늦춘다.
+    /// (예전에는 늘 0.5초마다 전체 프로세스 목록을 읽었다)
+    private var scanInterval: DispatchTimeInterval = .seconds(1)
+
+    private func adaptScanInterval(busy: Bool) {
+        let next: DispatchTimeInterval = AppActivity.shared.screenAsleep ? .seconds(4)
+                                       : (busy ? .seconds(1) : .seconds(2))
+        guard next != scanInterval else { return }
+        scanInterval = next
+        scanTimer?.schedule(deadline: .now() + next, repeating: next, leeway: .milliseconds(250))
     }
 
     private func scanForSessions() {
         let claudeRunning = isClaudeRunning()
         let wasInitial    = isInitialScan
         isInitialScan     = false
+        adaptScanInterval(busy: claudeRunning || claudeWasRunning || !sessions.isEmpty)
 
         // ── Claude 종료 감지 (디바운스: sysctl 경합 등으로 인한 false negative 방지)
-        // 3초(6틱) 연속 "실행 중 아님"일 때만 반응.
+        // 마지막으로 Claude를 본 뒤 3초 연속 "실행 중 아님"일 때만 반응 (주기가 바뀌어도 시간 기준).
+        let nowTick = Date()
         if claudeRunning {
-            claudeNotRunningStreak = 0
+            claudeLastSeen = nowTick
             claudeWasRunning = true
-        } else {
-            claudeNotRunningStreak += 1
         }
 
-        if claudeWasRunning && claudeNotRunningStreak >= 6 {
+        if claudeWasRunning && nowTick.timeIntervalSince(claudeLastSeen) >= 3 {
             // Claude 종료 확인 — 활성 세션(thinking/toolUse 등) 제거, 완료·권한 버블은 유지
             claudeWasRunning = false
             DispatchQueue.main.async {
@@ -185,7 +199,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard claudeRunning else { return }
 
         // ── 세션 파일 스캔
+        // /tmp 에 파일이 새로 생기거나 사라지지 않았으면 목록을 매번 다시 읽지 않고 5초에 한 번만 본다
+        // (이어서 재개된 세션처럼 기존 파일만 갱신되는 경우도 5초 안에 잡힌다)
         let tmp = URL(fileURLWithPath: "/tmp")
+        let tmpMod = (try? FileManager.default.attributesOfItem(atPath: "/private/tmp"))?[.modificationDate] as? Date
+        if let tmpMod, tmpMod == lastTmpMod, nowTick.timeIntervalSince(lastTmpScan) < 5, !wasInitial { return }
+        if let tmpMod { lastTmpMod = tmpMod }
+        lastTmpScan = nowTick
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: tmp,
             includingPropertiesForKeys: [.contentModificationDateKey]
@@ -207,6 +227,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let now = Date()
         var hasRecentSession = false
 
+        // 새 세션 후보: 패널이 없고, 무시 중이 아니고, 충분히 최근인 파일만
+        var candidates: [String: Date] = [:]
         for (sid, url) in found {
             guard sessions[sid] == nil else { hasRecentSession = true; continue }
             if let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate {
@@ -219,13 +241,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let threshold: TimeInterval = wasInitial
                     ? 90
                     : now.timeIntervalSince(appStartTime) + 10  // 앱 시작 10초 전까지 허용
-                if now.timeIntervalSince(modDate) < threshold {
-                    hasRecentSession = true
-                    DispatchQueue.main.async {
-                        self.ignoredSessionIds.removeValue(forKey: sid)
-                        self.addSession(id: sid, fileURL: url)
-                    }
-                }
+                if now.timeIntervalSince(modDate) < threshold { candidates[sid] = modDate }
+            }
+        }
+        // 스쿼드 파일(squad-<작업id>)은 작업마다 생겨도 부니는 하나만 만든다
+        // 고르는 일은 메인에서 한다 — 이 큐에서 sessions 를 읽으면 직전 스캔이 예약한 패널이 아직 없어
+        // 다른 squad-* 파일로 두 번째 패널이 만들어질 수 있었다.
+        if !candidates.isEmpty { hasRecentSession = true }
+        DispatchQueue.main.async {
+            self.collapseSquadPanels()
+            for sid in SessionDedupe.newSessions(found: candidates, existing: Set(self.sessions.keys)) {
+                guard let url = found[sid] else { continue }
+                self.ignoredSessionIds.removeValue(forKey: sid)
+                self.addSession(id: sid, fileURL: url)
             }
         }
 
@@ -306,8 +334,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for id in toRemove { removeSession(id: id) }
     }
 
+    /// 스쿼드 패널(`squad-<작업id>`)은 앱 전체에서 하나 — 생성 시점에 이미 있으면 새로 만들지 않는다 (소켓·스캐너 어느 경로든).
+    private func hasSquadPanel() -> Bool {
+        sessions.keys.contains { $0.hasPrefix(SessionDedupe.squadPrefix) }
+    }
+
+    /// 이미 떠 있는 스쿼드 패널이 둘 이상이면 가장 최근에 갱신된 이벤트 파일 하나만 남기고 패널만 닫는다.
+    /// 이벤트 파일·작업 데이터는 지우지 않고, 닫은 id 는 무시 목록에 올려 스캐너가 되살리지 않게 한다.
+    private func collapseSquadPanels() {
+        let ids = sessions.keys.filter { $0.hasPrefix(SessionDedupe.squadPrefix) }
+        guard ids.count > 1 else { return }
+        func mtime(_ id: String) -> Date {
+            let p = "/tmp/claude-companion-events-\(id).jsonl"
+            return ((try? FileManager.default.attributesOfItem(atPath: p))?[.modificationDate] as? Date) ?? .distantPast
+        }
+        let keep = ids.max { (mtime($0), $0) < (mtime($1), $1) }
+        for id in ids where id != keep { removeSession(id: id) }
+    }
+
     private func addSession(id: String, fileURL: URL) {
         guard sessions[id] == nil else { return }
+        if id.hasPrefix(SessionDedupe.squadPrefix), hasSquadPanel() { return }
 
         // 실제 Claude 세션이 추가될 때 레거시 대기 세션 및 완료된 세션 교체
         if id != "__legacy__" {
@@ -349,6 +396,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 이 세션이 실제로 작업을 시작할 때 비로소 나타난다.
         if hiddenUntilNextRunStart { win.markHiddenUntilNextStart() }
         win.setup(autoShow: !hiddenUntilNextRunStart)
+        publishLiveState()
         rebuildMenu()
         syncHotkeyPermissionState()
     }
@@ -383,8 +431,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         slotOwner.removeValue(forKey: win.slot)
         sessions.removeValue(forKey: id)
         sessionOrder.removeAll { $0 == id }
+        publishLiveState()
         rebuildMenu()
         syncHotkeyPermissionState()
+    }
+
+    /// 지금 떠 있는 패널 목록을 파일로 남긴다 — 스쿼드 엔진의 `tools/live-state.sh` 가 읽어 "부니가 여러 개" 같은 어긋남을 스스로 알아챈다.
+    private func publishLiveState() {
+        let panels = sessions.keys.sorted().map { ["id": $0, "kind": $0.hasPrefix(SessionDedupe.squadPrefix) ? "squad" : "claude"] }
+        let info: [String: Any] = ["pid": ProcessInfo.processInfo.processIdentifier, "updated": Date().timeIntervalSince1970, "panels": panels]
+        guard let data = try? JSONSerialization.data(withJSONObject: info, options: [.sortedKeys]),
+              let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("Buni") else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: dir.appendingPathComponent("live-state.json"), options: .atomic)
     }
 
     private func wire(_ win: SessionWindow) {
@@ -451,8 +510,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
-    /// 비활동 타임아웃으로 자동 종료된 세션 제거 — ignoredSessionIds에 추가하지 않아 재탐지 허용
+    /// 비활동 타임아웃으로 자동 종료된 세션 제거 — 파일에 새 활동이 생길 때만 재탐지
+    /// (기록을 안 남기면 안 바뀐 파일이 다음 스캔마다 새 패널로 되살아난다)
     private func removeStaledSession(id: String) {
+        ignoredSessionIds[id] = Date()
         remoteSessionIds.remove(id)
         guard let win = sessions[id] else { return }
         win.teardown()
@@ -942,6 +1003,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.rebuildMenuIfChatChanged()
             }
         }
+        chatMotionTimer?.tolerance = 1
     }
 
     private var lastChatMenuRoom: String?

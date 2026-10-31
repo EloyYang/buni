@@ -100,26 +100,26 @@ struct SquadProjectBoard: View {
             HStack(spacing: 8) {
                 if job.userPaused == true || store.settings.paused {
                     Button { if store.settings.paused { store.setGlobalPause(false) }; if job.userPaused == true { store.resumeJob(job) } } label: { Text(L.t("▶ 이어서", "▶ Resume")) }
-                        .buttonStyle(PillButtonStyle(color: .accentColor))
+                        .buttonStyle(PillButtonStyle(color: BT.accentBase))
                 } else if ["queued", "running", "waiting_limit"].contains(job.state) || (job.state == "paused" && job.phase != "waiting_start") {
                     Button { store.pauseJob(job) } label: { Text(L.t("⏸ 멈추기", "⏸ Pause")) }
-                        .buttonStyle(PillButtonStyle(color: .gray))
+                        .buttonStyle(PillButtonStyle(color: BT.quiet))
                 }
                 if ["queued", "paused", "waiting_limit"].contains(job.state), job.userPaused != true {
                     Button { store.runNow(job) } label: { Text(L.t("▶ 지금 바로 시작", "▶ Start now")) }
-                        .buttonStyle(PillButtonStyle(color: .accentColor))
+                        .buttonStyle(PillButtonStyle(color: BT.accentBase))
                 }
                 if job.state == "failed" {
                     Button { store.retry(job) } label: { Text(L.t("🔁 다시 시도", "🔁 Retry")) }
-                        .buttonStyle(PillButtonStyle(color: .accentColor))
+                        .buttonStyle(PillButtonStyle(color: BT.accentBase))
                 }
                 if job.state == "review" {
                     Button { store.markDone(job) } label: { Text(L.t("✅ 완료 처리", "✅ Mark done")) }
-                        .buttonStyle(PillButtonStyle(color: .accentColor))
+                        .buttonStyle(PillButtonStyle(color: BT.accentBase))
                 }
                 if ["queued", "running", "paused", "waiting_limit"].contains(job.state) { TeamCancelButton(job: job) }
                 Button { store.delete(job) } label: { Text(L.t("🗑 삭제", "🗑 Delete")) }
-                    .buttonStyle(PillButtonStyle(color: .gray))
+                    .buttonStyle(PillButtonStyle(color: BT.quiet))
                 Spacer()
                 Text(L.t("약 $\(String(format: "%.2f", job.costUsd ?? 0))", "≈ $\(String(format: "%.2f", job.costUsd ?? 0))"))
                     .font(.system(size: BuniTokens.Font.sizeXs)).foregroundColor(BT.textTertiary)
@@ -233,13 +233,13 @@ struct SquadProjectBoard: View {
                     .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 HStack(spacing: 8) {
                     if a.mode != "manual" {
-                        Button { store.applyResult(job) } label: { Text(L.t("✅ 승인하고 내 폴더에 반영", "✅ Approve & apply")) }
-                            .buttonStyle(PillButtonStyle(color: .accentColor))
+                        Button { store.approveChanges(job) } label: { Text(L.t("✅ 승인 — 바로 적용", "✅ Approve & apply now")) }
+                            .buttonStyle(PillButtonStyle(color: BT.accentBase))
                     }
                     Button { store.openDiff(job) } label: { Text(L.t("📄 변경 내용 보기", "📄 View changes")) }
-                        .buttonStyle(PillButtonStyle(color: .gray))
-                    Button { store.dismissApply(job) } label: { Text(L.t("반영하지 않고 닫기", "Dismiss")) }
-                        .buttonStyle(PillButtonStyle(color: .gray))
+                        .buttonStyle(PillButtonStyle(color: BT.quiet))
+                    Button { store.rejectChanges(job) } label: { Text(L.t("🚫 거절", "🚫 Reject")) }
+                        .buttonStyle(PillButtonStyle(color: BT.quiet))
                     if a.mode == "manual" {
                         Text("git merge \(a.branch)").font(.system(size: BuniTokens.Font.sizeXs, design: .monospaced))
                             .foregroundColor(BT.textTertiary).textSelection(.enabled)
@@ -343,143 +343,4 @@ private func squadMinutes(_ hhmm: String) -> Int? {
     let p = hhmm.split(separator: ":")
     guard p.count == 2, let h = Int(p[0]), let m = Int(p[1]) else { return nil }
     return h * 60 + m
-}
-
-// MARK: - 업무 카드 (내가 지시한 업무 하나)
-
-private struct SquadTaskCard: View {
-    let job: TeamJob
-    let task: TeamTask
-    let column: BoardColumn
-    var onOpenDM: (String) -> Void
-    @ObservedObject private var store = TeamStore.shared
-    @State private var hover = false
-
-    private static let clock: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "M/d HH:mm"; return f
-    }()
-
-    private var partIds: [String] { (task.parts ?? [:]).sorted { $0.value < $1.value }.map { $0.key } }
-    private func role(_ id: String) -> TeamRole? { job.plan?.roles?.first { $0.id == id } }
-    private var doneCount: Int { (task.partStatus ?? [:]).values.filter { $0 == "done" }.count }
-
-    var body: some View {
-        let (pIcon, pName, pColor) = priorityInfo(task.priority)
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Menu {
-                    ForEach(["urgent", "high", "normal", "low"], id: \.self) { p in
-                        let i = priorityInfo(p)
-                        Button { store.setTaskPriority(job, task: task, priority: p) } label: { Text((p == (task.priority ?? "normal") ? "✓ " : "") + i.0 + " " + i.1) }
-                    }
-                } label: {
-                    Text(pIcon + " " + pName + " ▾").font(.system(size: 10, weight: .bold)).foregroundColor(pColor).lineLimit(1).fixedSize()
-                        .padding(.horizontal, 7).padding(.vertical, 2).background(Capsule().fill(pColor.opacity(0.16)))
-                }
-                .menuStyle(.button).buttonStyle(.plain).fixedSize().help(L.t("우선순위 — 급한 업무를 맡은 팀원부터 일해요", "Priority — urgent tasks go first"))
-                Spacer(minLength: 2)
-                if let c = task.created, c > 0 { Text(Self.clock.string(from: Date(timeIntervalSince1970: c))).font(.system(size: 9.5)).foregroundColor(BT.textTertiary) }
-            }
-            Text(task.title ?? "").font(.system(size: BuniTokens.Font.sizeMd, weight: .medium)).foregroundColor(BT.textPrimary)
-                .lineLimit(3).fixedSize(horizontal: false, vertical: true)
-            if let text = task.text, !text.isEmpty, (task.source == "chat" || task.source == "note"), text.count > (task.title?.count ?? 0) + 4 {
-                Text(squadSummary(text, limit: 150).text).font(.system(size: BuniTokens.Font.sizeXs)).foregroundColor(BT.textTertiary).lineLimit(2)
-            }
-            parts
-            progressLine
-            detail
-            actions
-        }
-        .padding(BuniTokens.Space.s4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: BuniTokens.Radius.md + 2, style: .continuous).fill(hover ? BT.surface2 : BT.surface1))
-        .overlay(RoundedRectangle(cornerRadius: BuniTokens.Radius.md + 2, style: .continuous)
-            .stroke(column == .doing ? BT.success.opacity(0.5) : (task.priority == "urgent" && column != .done ? BT.danger.opacity(0.5) : BT.borderSubtle), lineWidth: 1))
-        .onHover { hover = $0 }
-        .animation(.easeOut(duration: BuniTokens.Motion.fast), value: hover)
-    }
-
-    /// 이 업무를 맡은 팀원들과 각자 처리 상태
-    private var parts: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(partIds, id: \.self) { rid in
-                let st = task.partStatus?[rid] ?? "todo"
-                HStack(spacing: 6) {
-                    SquadAvatar(icon: role(rid)?.icon ?? "🧑‍💻", id: rid, size: 18)
-                    Text(role(rid)?.name ?? rid).font(.system(size: BuniTokens.Font.sizeXs, weight: .medium)).foregroundColor(BT.textSecondary).lineLimit(1)
-                    Spacer(minLength: 2)
-                    switch st {
-                    case "done":   Text(L.t("✓ 처리됨", "✓ Done")).font(.system(size: 10, weight: .semibold)).foregroundColor(BT.success)
-                    case "doing":  HStack(spacing: 3) { ProgressView().controlSize(.mini); Text(L.t("처리 중", "Working")).font(.system(size: 10, weight: .semibold)).foregroundColor(BT.success) }
-                    case "review": Text(L.t("🔎 검토 중", "🔎 Review")).font(.system(size: 10, weight: .semibold)).foregroundColor(BT.warning)
-                    default:
-                        Text(job.roles?[rid]?.hold == true ? L.t("시작 대기", "Not started") : L.t("○ 대기", "○ Waiting"))
-                            .font(.system(size: 10, weight: .semibold)).foregroundColor(job.roles?[rid]?.hold == true ? BT.warning : BT.textTertiary)
-                    }
-                }
-            }
-            if partIds.isEmpty {
-                Text(task.applyNote != nil ? "" : L.t("⏳ 담당 팀원 정하는 중 / 확인 대기", "⏳ Assigning / waiting for confirmation"))
-                    .font(.system(size: BuniTokens.Font.sizeXs)).foregroundColor(BT.textTertiary)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var progressLine: some View {
-        if partIds.count > 1 {
-            HStack(spacing: 6) {
-                GeometryReader { g in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(BT.surface3)
-                        Capsule().fill(column == .done ? BT.success : BT.accentBase).frame(width: g.size.width * CGFloat(doneCount) / CGFloat(max(1, partIds.count)))
-                    }
-                }.frame(height: 4)
-                Text("\(doneCount)/\(partIds.count)").font(.system(size: 10, weight: .semibold)).foregroundColor(BT.textTertiary)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var detail: some View {
-        switch column {
-        case .doing:
-            if let rid = partIds.first(where: { task.partStatus?[$0] == "doing" }) {
-                let act = TeamStore.readActivity(jobId: job.id, key: rid)
-                Text("⏳ " + (act.lines.last?.text ?? L.t("시작하는 중…", "Starting…"))).font(.system(size: BuniTokens.Font.sizeXs))
-                    .foregroundColor(BT.textSecondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            }
-        case .review, .done:
-            if let rid = partIds.first(where: { task.partStatus?[$0] == "done" || task.partStatus?[$0] == "review" }),
-               let s = job.roles?[rid]?.summary, !s.isEmpty {
-                Text(squadSummary(s, limit: 120).text).font(.system(size: BuniTokens.Font.sizeXs)).foregroundColor(BT.textSecondary)
-                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
-            }
-            if column == .done {
-                if let d = task.doneAt { Text("✓ " + Self.clock.string(from: Date(timeIntervalSince1970: d)) + L.t(" 완료", " done")).font(.system(size: 10)).foregroundColor(BT.success) }
-                if let a = task.applied {
-                    Text("📥 " + L.t("내 폴더에 반영됨 \(task.files?.count ?? 0)개 파일 · ", "Applied \(task.files?.count ?? 0) files · ") + Self.clock.string(from: Date(timeIntervalSince1970: a)))
-                        .font(.system(size: 10)).foregroundColor(BT.info)
-                } else if let n = task.applyNote, !n.isEmpty {
-                    Text("✋ " + L.t("반영 승인 대기 — ", "Waiting for approval — ") + n).font(.system(size: 10)).foregroundColor(BT.warning).lineLimit(3)
-                }
-            }
-        case .todo:
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private var actions: some View {
-        HStack(spacing: 6) {
-            if let hold = partIds.first(where: { job.roles?[$0]?.hold == true }) {
-                Button { store.startRole(job, role: hold) } label: { Text(L.t("▶ 시작", "▶ Start")) }
-                    .buttonStyle(PillButtonStyle(color: .accentColor))
-            }
-            if let first = partIds.first {
-                Button { onOpenDM(first) } label: { Text(L.t("대화", "Chat")) }
-                    .buttonStyle(PillButtonStyle(color: .gray))
-            }
-        }
-    }
 }

@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import SwiftUI
 import UserNotifications
 
 // MARK: - 모델 (엔진 buni_team.py 가 쓰는 job.json 을 그대로 읽는다 — 모든 칸이 선택값이라 필드가 늘어도 깨지지 않는다)
@@ -22,9 +23,65 @@ struct TeamRole: Codable, Identifiable, Equatable {
     var deliverable: String?
     var dependsOn: [String]?
     var model: String?
+    var dept: String?
+    var duty: String?
+    var archived: Bool?
+    var archivedReason: String?
     enum CodingKeys: String, CodingKey {
-        case id, name, icon, kind, mission, deliverable, model
+        case id, name, icon, kind, mission, deliverable, model, dept, duty, archived
         case dependsOn = "depends_on"
+        case archivedReason = "archived_reason"
+    }
+
+    /// 직무 id — 저장된 `duty` 가 우선, 없는 옛 job.json 은 팀원 id 가 직무 id 와 같을 때만 (엔진 `role_duty` 의 앞 두 단계)
+    var dutyId: String { TeamDuties.byId[duty ?? ""] != nil ? duty! : (TeamDuties.byId[id] != nil ? id : "") }
+    /// 부서 id — 저장된 `dept` → 직무의 부서 → "" (기타)
+    var deptId: String {
+        if let d = dept, TeamDuties.deptNames[d] != nil { return d }
+        return TeamDuties.byId[dutyId]?.dept ?? ""
+    }
+    /// 화면에 보일 '부서 · 세부 담당' (엔진 `duty_label` 과 같은 문구). 직무를 모르면 ""
+    var dutyLabel: String {
+        guard let d = TeamDuties.byId[dutyId] else { return "" }
+        return "\(TeamDuties.deptName(d.dept)) · \(d.short)"
+    }
+    var isArchived: Bool { archived == true }
+}
+
+/// 상시 직무 카탈로그 — 엔진 `DEPARTMENTS`·`DUTIES` (windows/buni_team.py) 와 같은 문구
+enum TeamDuties {
+    struct Duty { let id: String; let dept: String; let short: String }
+    static let deptOrder = ["frontend", "backend"]
+    static let deptNames: [String: (ko: String, en: String)] = [
+        "frontend": ("프론트엔드", "Frontend"), "backend": ("백엔드", "Backend")]
+    static let duties: [Duty] = [
+        Duty(id: "frontend_mac", dept: "frontend", short: L.t("맥", "Mac")),
+        Duty(id: "frontend_win", dept: "frontend", short: "Windows"),
+        Duty(id: "backend_server", dept: "backend", short: L.t("서버·엔진", "Server/Engine")),
+        Duty(id: "backend_license", dept: "backend", short: L.t("라이선스·결제", "License/Payment")),
+        Duty(id: "backend_chat_cloud", dept: "backend", short: L.t("채팅·클라우드", "Chat/Cloud")),
+    ]
+    static var byId: [String: Duty] { Dictionary(uniqueKeysWithValues: duties.map { ($0.id, $0) }) }
+    static func deptName(_ id: String) -> String {
+        guard let n = deptNames[id] else { return L.t("기타", "Other") }
+        return L.t(n.ko, n.en)
+    }
+
+    /// 사이드바용 묶음: 부서(프론트엔드 → 백엔드 → 기타) → 세부 담당 순. 직무 없는 옛 팀원은 '기타'에 원래 순서로.
+    static func grouped(_ roles: [TeamRole]) -> [(dept: String, name: String, members: [TeamRole])] {
+        let order = duties.map { $0.id }
+        var out: [(dept: String, name: String, members: [TeamRole])] = []
+        for d in deptOrder + [""] {
+            var m = roles.filter { $0.deptId == d }
+            m = m.enumerated().sorted { a, b in
+                let ia = order.firstIndex(of: a.element.dutyId) ?? Int.max
+                let ib = order.firstIndex(of: b.element.dutyId) ?? Int.max
+                return ia != ib ? ia < ib : a.offset < b.offset
+            }.map { $0.element }
+            if !m.isEmpty { out.append((d, deptName(d), m)) }
+        }
+        // 알 수 없는 부서 값은 기타 묶음으로 (위에서 deptId 가 "" 로 돌려주므로 빠지는 일은 없다)
+        return out
     }
 }
 
@@ -32,12 +89,13 @@ struct TeamRoleState: Codable, Equatable {
     var status: String?
     var attempts: Int?
     var summary: String?
+    var feedback: String?
     var notes: [TeamExtraRequest]?
     var notePending: Bool?
     var hold: Bool?
     var finished: Double?
     enum CodingKeys: String, CodingKey {
-        case status, attempts, summary, notes, hold, finished
+        case status, attempts, summary, feedback, notes, hold, finished
         case notePending = "note_pending"
     }
 }
@@ -59,6 +117,7 @@ struct TeamChatMessage: Identifiable, Equatable {
     var to: String            // lead / user / all / 팀원 id
     var kind: String          // instruction / report / review / status / user / say
     var text: String
+    var attachments: [TeamAttachment] = []   // 채팅에 붙인 파일·이미지 (엔진이 jobs/<id>/attachments/ 에 보관)
 }
 
 /// 팀장이 정리해 준 '지금 확인할 것' 한 건
@@ -82,7 +141,24 @@ struct TeamNextStep: Identifiable, Equatable {
     var jobId: String?        // 예전 방식으로 따로 시작해 둔 작업 (지금은 같은 프로젝트에 이어 붙이므로 role_id 를 쓴다)
     var roleId: String?       // 이 프로젝트에서 이어서 진행하는 팀원
     var directionChange: Bool = true   // 사업 방향이 바뀌는 일이면 자동으로 시작하지 않고 대기
-    var auto: String?         // started(자동 시작) · manual · confirm(확인 필요) · limit(단계 상한) · cap · off
+    var auto: String?         // started(자동 시작) · manual · confirm(확인 필요) · limit(단계 상한) · cap · off · rejected(거절해서 닫음)
+    var rejected: Bool = false
+    var history: [TeamStepDecision] = []   // 승인·거절·의견 이력 (엔진 step_decision)
+}
+
+/// '다음에 할 일'에 남긴 결정 한 건 — decision: approve · reject · comment
+struct TeamStepDecision: Equatable {
+    var decision: String
+    var text: String
+    var ts: Double
+
+    var label: String {
+        switch decision {
+        case "approve": return L.t("승인", "Approved")
+        case "reject":  return L.t("거절", "Rejected")
+        default:        return L.t("의견", "Comment")
+        }
+    }
 }
 
 struct TeamWrapup: Equatable {
@@ -148,9 +224,14 @@ struct TeamTask: Codable, Identifiable, Equatable {
     var files: [String]?
     var applyNote: String?
     var parts: [String: Double]?
+    var approval: String?          // needs(중요해서 내 승인 대기) · conflict(겹쳐서 다 못 넣음) · 빈 값
+    var finished: Bool?            // 담당 팀원이 모두 끝냈다 (승인 대기 중이어도)
+    var changeId: String?          // 이 업무가 반영된 변경 기록 (되돌리기·화면 비교용)
+    var rolledBack: Double?
+    var rejected: Double?
     enum CodingKeys: String, CodingKey {
-        case id, title, text, source, priority, created, status, applied, files, parts
-        case partStatus = "part_status", doneAt = "done_at", applyNote = "apply_note"
+        case id, title, text, source, priority, created, status, applied, files, parts, approval, finished, rejected
+        case partStatus = "part_status", doneAt = "done_at", applyNote = "apply_note", changeId = "change_id", rolledBack = "rolled_back"
     }
     var rank: Int { ["urgent": 0, "high": 1, "normal": 2, "low": 3][priority ?? "normal"] ?? 2 }
 }
@@ -182,6 +263,9 @@ struct TeamJob: Codable, Identifiable, Equatable {
     var summary: String?
     var events: [TeamEvent]?
     var extraRequests: [TeamExtraRequest]?
+    var model: String?              // 프로젝트 단위 팀원 기본 모델 (빈 값 = 전역 설정)
+    var changedFiles: Int?          // 끝났을 때 엔진이 센 바뀐 파일 수 (업무 현황 카드 상세)
+    var leadModel: String?          // 프로젝트 단위 팀장 모델 (빈 값 = 전역 설정)
     var resultDir: String?
     var reqProposals: [TeamReqProposal]?
     var applyMode: String?
@@ -193,8 +277,9 @@ struct TeamJob: Codable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id, slug, title, goal, created, updated, status, phase, busy, permissions, interview, requirements, plan, roles
         case reqProposals = "req_proposals", applyMode = "apply_mode", runMode = "run_mode", tasks, userPaused = "user_paused"
-        case branch, workdir, error, report, summary, events
-        case extraRequests = "extra_requests", resultDir = "result_dir", projectDir = "project_dir", busyMsg = "busy_msg", baseRef = "base_ref", resumeAt = "resume_at", costUsd = "cost_usd"
+        case branch, workdir, error, report, summary, events, model
+        case leadModel = "lead_model"
+        case extraRequests = "extra_requests", resultDir = "result_dir", projectDir = "project_dir", busyMsg = "busy_msg", changedFiles = "changed_files", baseRef = "base_ref", resumeAt = "resume_at", costUsd = "cost_usd"
     }
 
     var displayTitle: String { (title?.isEmpty == false ? title! : goal) ?? L.t("작업", "Job") }
@@ -271,6 +356,17 @@ struct TeamSettings: Codable, Equatable {
     }
 }
 
+/// 파일 감시 신호(`liveTick`)가 올 때만 다시 그리는 래퍼 — 예전 `TimelineView(.periodic)` 폴링 대신.
+struct TeamLive<Content: View>: View {
+    @ObservedObject private var store = TeamStore.shared
+    let content: () -> Content
+    init(@ViewBuilder _ content: @escaping () -> Content) { self.content = content }
+    var body: some View {
+        let _ = store.liveTick
+        content()
+    }
+}
+
 // MARK: - 저장소 (엔진과 파일로만 주고받는다)
 
 @MainActor
@@ -283,7 +379,15 @@ final class TeamStore: ObservableObject {
     @Published private(set) var problem: String?
     @Published private(set) var claudePath: String = ""
 
+    /// 파일 감시가 놓친 변경을 잡는 긴 간격 안전망 (예전 2초 폴링 대신)
     private var timer: Timer?
+    private static let safetyInterval: TimeInterval = 30
+    /// job.json·chat.jsonl 등이 바뀔 때마다 오르는 값 — 화면이 이 값으로만 다시 그린다
+    @Published private(set) var liveTick = 0
+    private var sources: [String: DispatchSourceFileSystemObject] = [:]
+    private var watchDebounce: DispatchWorkItem?
+    private var deferredWork = false
+    private var deferTimer: Timer?
     private var lastStamp = ""
     private var lastStatus: [String: String] = [:]
     private var daemon: Process?
@@ -300,6 +404,7 @@ final class TeamStore: ObservableObject {
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Buni/team", isDirectory: true)
     }
+    nonisolated static var draftsFile: URL { home.appendingPathComponent("drafts.json") }
     nonisolated static var jobsDir: URL { home.appendingPathComponent("jobs", isDirectory: true) }
 
     nonisolated private static var scriptURL: URL? {
@@ -318,10 +423,77 @@ final class TeamStore: ObservableObject {
         guard timer == nil else { return }
         checkEnvironment()
         reload(force: true)
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.reload() }
+        rewatch()
+        timer = Timer.scheduledTimer(withTimeInterval: Self.safetyInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.rewatch(); self?.changed() }
         }
+        timer?.tolerance = 10
         startDaemon()
+    }
+
+    // MARK: 파일 감시 (DispatchSource) — 바뀔 때만 깨어난다
+
+    /// 지금 글을 쓰는 중인가 — 입력창(필드 에디터)에 포커스가 있으면 true
+    nonisolated static var isTyping: Bool {
+        MainActor.assumeIsolated {
+            guard NSApp.isActive, let r = NSApp.keyWindow?.firstResponder else { return false }
+            return r is NSTextView || r is NSTextField
+        }
+    }
+
+    /// 감시 대상: 작업 폴더 목록 · 각 작업 폴더(job.json 교체·새 파일) · chat.jsonl · 설정 폴더
+    private func rewatch() {
+        let fm = FileManager.default
+        var want: [String: DispatchSource.FileSystemEvent] = [:]
+        let dirMask: DispatchSource.FileSystemEvent = [.write, .rename]
+        let fileMask: DispatchSource.FileSystemEvent = [.write, .rename, .extend, .delete]
+        want[Self.home.path] = dirMask
+        want[Self.jobsDir.path] = dirMask
+        for d in (try? fm.contentsOfDirectory(atPath: Self.jobsDir.path)) ?? [] {
+            let dir = Self.jobsDir.appendingPathComponent(d)
+            want[dir.path] = dirMask
+            let chat = dir.appendingPathComponent("chat.jsonl").path
+            if fm.fileExists(atPath: chat) { want[chat] = fileMask }
+        }
+        for (path, src) in sources where want[path] == nil { src.cancel(); sources[path] = nil }
+        for (path, mask) in want where sources[path] == nil {
+            let fd = open(path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: mask, queue: .main)
+            src.setEventHandler { [weak self] in Task { @MainActor in self?.fileEvent() } }
+            src.setCancelHandler { close(fd) }
+            src.resume()
+            sources[path] = src
+        }
+    }
+
+    private func fileEvent() {
+        watchDebounce?.cancel()
+        let w = DispatchWorkItem { [weak self] in
+            Task { @MainActor in self?.rewatch(); self?.changed() }
+        }
+        watchDebounce = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)   // 연달아 쓰는 변경을 한 번으로
+    }
+
+    /// 변경 반영 — 입력 중이면 미뤄 두었다가 입력이 끝나면 한 번만 반영한다
+    private func changed() {
+        if Self.isTyping { deferredWork = true; scheduleDeferred(); return }
+        deferredWork = false
+        reload()
+        liveTick &+= 1
+    }
+
+    private func scheduleDeferred() {
+        guard deferTimer == nil else { return }
+        deferTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.deferredWork, !Self.isTyping { self.deferTimer?.invalidate(); self.deferTimer = nil; self.changed() }
+                else if !self.deferredWork { self.deferTimer?.invalidate(); self.deferTimer = nil }
+            }
+        }
+        deferTimer?.tolerance = 0.5
     }
 
     /// python3(개발자 도구)와 claude 명령이 있는지 확인한다
@@ -494,8 +666,13 @@ final class TeamStore: ObservableObject {
         var out: [TeamChatMessage] = []
         for line in text.split(separator: "\n") {
             guard let d = line.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+            let atts = (o["attachments"] as? [[String: Any]] ?? []).map {
+                TeamAttachment(name: $0["name"] as? String ?? "", path: $0["path"] as? String ?? "",
+                               kind: $0["kind"] as? String ?? "file", size: ($0["size"] as? NSNumber)?.intValue ?? 0)
+            }
             out.append(TeamChatMessage(id: out.count, ts: o["ts"] as? Double ?? 0, from: o["from"] as? String ?? "",
-                                       to: o["to"] as? String ?? "", kind: o["kind"] as? String ?? "say", text: o["text"] as? String ?? ""))
+                                       to: o["to"] as? String ?? "", kind: o["kind"] as? String ?? "say", text: o["text"] as? String ?? "",
+                                       attachments: atts))
         }
         return out
     }
@@ -509,11 +686,14 @@ final class TeamStore: ObservableObject {
     }
 
     /// 채팅방에서 말을 건다 — 팀원을 지목하면 그 팀원에게 바로, 팀장(lead)에게 하면 팀장이 이해해서 나눠 지시한다
-    func sendChat(_ job: TeamJob, to: String, text: String) {
+    /// files: 첨부할 파일들 — 엔진이 작업 폴더로 복사해 팀장(또는 지목한 팀원)이 읽게 한다
+    func sendChat(_ job: TeamJob, to: String, text: String, files: [URL] = []) {
         let f = FileManager.default.temporaryDirectory.appendingPathComponent("buni-team-chat-\(UUID().uuidString).txt")
         try? text.write(to: f, atomically: true, encoding: .utf8)
-        fire(["chat-send", job.id, "--to", to, "--text-file", f.path], wait: true)
+        fireChecked(["chat-send", job.id, "--to", to, "--text-file", f.path] + Self.attachArgs(files))
     }
+
+    nonisolated static func attachArgs(_ files: [URL]) -> [String] { files.flatMap { ["--attach", $0.path] } }
 
     /// 결과 화면에서 후속 작업을 시작하면 그 작업으로 이동하게 알린다
     @Published var focusJobId: String?
@@ -532,7 +712,10 @@ final class TeamStore: ObservableObject {
             TeamNextStep(id: $0["id"] as? String ?? "", title: $0["title"] as? String ?? "", why: $0["why"] as? String ?? "",
                          goal: $0["goal"] as? String ?? "", doneCriteria: $0["done_criteria"] as? [String] ?? [],
                          jobId: $0["job_id"] as? String, roleId: $0["role_id"] as? String, directionChange: $0["direction_change"] as? Bool ?? true,
-                         auto: $0["auto"] as? String)
+                         auto: $0["auto"] as? String, rejected: $0["rejected"] as? Bool ?? false,
+                         history: ($0["history"] as? [[String: Any]] ?? []).map {
+                             TeamStepDecision(decision: $0["decision"] as? String ?? "", text: $0["text"] as? String ?? "", ts: $0["ts"] as? Double ?? 0)
+                         })
         }
         return TeamWrapup(items: items, steps: steps)
     }
@@ -556,14 +739,14 @@ final class TeamStore: ObservableObject {
     }
 
     /// 확인한 항목에 대한 반응 — verdict: "ok"(문제 없어요) / "fix"(피드백). 피드백은 팀장이 해당 팀원에게 수정 지시를 내려 반영한다
-    func reviewFeedback(_ job: TeamJob, itemId: String, verdict: String, text: String = "") {
+    func reviewFeedback(_ job: TeamJob, itemId: String, verdict: String, text: String = "", files: [URL] = []) {
         var args = ["review-feedback", job.id, itemId, "--verdict", verdict]
         if !text.isEmpty {
             let f = FileManager.default.temporaryDirectory.appendingPathComponent("buni-team-fb-\(UUID().uuidString).txt")
             try? text.write(to: f, atomically: true, encoding: .utf8)
             args += ["--text-file", f.path]
         }
-        fire(args, wait: true)
+        fireChecked(args + Self.attachArgs(files))
         // 보고서 파일은 job.json 과 별개라 화면이 알아채지 못하므로, '전달하는 중' 표시가 보이게 곧 한 번 다시 그리게 한다
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.objectWillChange.send() }
     }
@@ -585,8 +768,22 @@ final class TeamStore: ObservableObject {
         var jobRunMode = ""
         var note = ""
         var reasons: [String] = []
+        var conflicts: [String] = []          // 겹쳐서 아직 못 넣은 파일
+        var changes: [ChangeInfo] = []        // 내 폴더에 반영한 변경 기록 (되돌리기 · 변경 전·후 화면)
+    }
+    struct ShotPair: Equatable { var name: String; var before: String; var after: String }
+    struct ChangeInfo: Equatable, Identifiable {
+        var id: String
+        var title: String
+        var ts: Double
+        var files: [String]
+        var tasks: [String]
+        var rolledBack: Double
+        var shots: [ShotPair]
     }
     @Published var applyStates: [String: ApplyState] = [:]
+    /// 승인·되돌리기처럼 오래 걸릴 수 있는 일을 하는 중인 작업 (버튼을 잠그고 '적용 중…' 을 보여 준다)
+    @Published var busyJobs: Set<String> = []
 
     func refreshApplyState(_ job: TeamJob) {
         Task.detached {
@@ -604,6 +801,12 @@ final class TeamStore: ObservableObject {
             s.reasons = o["reasons"] as? [String] ?? []
             s.jobApplyMode = o["job_apply_mode"] as? String ?? ""
             s.jobRunMode = o["job_run_mode"] as? String ?? ""
+            s.conflicts = o["conflicts"] as? [String] ?? []
+            s.changes = (o["changes"] as? [[String: Any]] ?? []).map { c in
+                ChangeInfo(id: c["id"] as? String ?? "", title: c["title"] as? String ?? "", ts: c["ts"] as? Double ?? 0,
+                           files: c["files"] as? [String] ?? [], tasks: c["tasks"] as? [String] ?? [], rolledBack: c["rolled_back"] as? Double ?? 0,
+                           shots: (c["shots"] as? [[String: Any]] ?? []).map { ShotPair(name: $0["name"] as? String ?? "", before: $0["before"] as? String ?? "", after: $0["after"] as? String ?? "") })
+            }
             await MainActor.run { if TeamStore.shared.applyStates[job.id] != s { TeamStore.shared.applyStates[job.id] = s } }
         }
     }
@@ -642,6 +845,7 @@ final class TeamStore: ObservableObject {
     /// 확인이 필요한 상황인가 — 반영 승인 대기 · 사전요구서 변경 확인 · 수동 진행에서 시작 대기 · 한도로 멈춤
     func needsAttention(_ j: TeamJob) -> String? {
         if !j.pendingProposals.isEmpty { return L.t("사전요구서 변경 확인", "Confirm requirement change") }
+        if (j.tasks ?? []).contains(where: taskNeedsApproval) { return L.t("승인 필요 — 업무 카드에서 ✅ 승인", "Needs your OK — approve on the task card") }
         if let a = applyStates[j.id], a.pending, !["auto"].contains(a.mode) || !a.reasons.isEmpty || !a.note.isEmpty {
             if a.mode == "manual" { return nil }
             return !a.reasons.isEmpty ? L.t("중요한 변경 — 승인 필요", "Important change — approve") : (a.note.isEmpty ? L.t("반영 승인 필요", "Approve to apply") : L.t("자동 반영 실패", "Apply failed"))
@@ -706,20 +910,71 @@ final class TeamStore: ObservableObject {
     }
 
     /// 별도 작업 공간에 있는 결과를 내 폴더에 반영한다 (커밋은 하지 않는다)
-    func applyResult(_ job: TeamJob) {
+    func applyResult(_ job: TeamJob) { approveChanges(job) }
+
+    /// 승인 — 누르면 바로 내 폴더에 적용된다 (내 변경과 겹치면 서로 다른 곳은 합치고, 같은 곳은 Claude 가 정리한다)
+    func approveChanges(_ job: TeamJob) {
+        busyJobs.insert(job.id)
         Task.detached {
             let data = Self.cli(["apply-result", job.id])
             let o = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             await MainActor.run {
+                TeamStore.shared.busyJobs.remove(job.id)
                 TeamStore.shared.reload(force: true)
+                TeamStore.shared.refreshApplyState(job)
                 if o?["ok"] as? Bool != true {
                     let a = NSAlert()
-                    a.messageText = L.t("반영하지 못했어요", "Couldn't apply it")
+                    a.messageText = (o?["partial"] as? Bool == true) ? L.t("일부만 반영했어요", "Partly applied") : L.t("반영하지 못했어요", "Couldn't apply it")
                     a.informativeText = (o?["error"] as? String) ?? ""
                     a.runModal()
                 }
             }
         }
+    }
+
+    /// 거절 — 이 변경은 내 폴더에 넣지 않고 팀의 작업에서도 걷어 낸다
+    func rejectChanges(_ job: TeamJob) {
+        busyJobs.insert(job.id)
+        Task.detached {
+            _ = Self.cli(["reject-changes", job.id])
+            await MainActor.run {
+                TeamStore.shared.busyJobs.remove(job.id)
+                TeamStore.shared.reload(force: true)
+                TeamStore.shared.refreshApplyState(job)
+            }
+        }
+    }
+
+    func rollbackChange(_ job: TeamJob, change: ChangeInfo) { swapChange(job, change, cmd: "rollback-change") }
+    func reapplyChange(_ job: TeamJob, change: ChangeInfo) { swapChange(job, change, cmd: "reapply-change") }
+
+    private func swapChange(_ job: TeamJob, _ change: ChangeInfo, cmd: String) {
+        busyJobs.insert(job.id)
+        Task.detached {
+            let data = Self.cli([cmd, job.id, change.id])
+            let o = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            await MainActor.run {
+                TeamStore.shared.busyJobs.remove(job.id)
+                TeamStore.shared.reload(force: true)
+                TeamStore.shared.refreshApplyState(job)
+                let skipped = o?["skipped"] as? [String] ?? []
+                if o?["ok"] as? Bool != true || !skipped.isEmpty {
+                    let a = NSAlert()
+                    a.messageText = o?["ok"] as? Bool == true ? L.t("일부는 건너뛰었어요", "Some files were skipped") : L.t("하지 못했어요", "Couldn't do it")
+                    a.informativeText = o?["ok"] as? Bool == true
+                        ? L.t("내가 그 뒤에 또 고친 파일이라 건드리지 않았어요:\n", "You edited these after the change, so they were left alone:\n") + skipped.joined(separator: "\n")
+                        : (o?["error"] as? String) ?? ""
+                    a.runModal()
+                }
+            }
+        }
+    }
+
+    /// 이 업무에 추가로 요청한다 — 팀장이 알아듣고 이어서 개선하도록 지시를 나눈다
+    func requestMore(_ job: TeamJob, task: TeamTask, text: String) {
+        let f = FileManager.default.temporaryDirectory.appendingPathComponent("buni-team-more-\(UUID().uuidString).txt")
+        try? text.write(to: f, atomically: true, encoding: .utf8)
+        fire(["task-more", job.id, task.id, "--text-file", f.path], wait: true)
     }
 
     /// 제안된 다음 작업을 이 프로젝트에서 이어서 진행한다 (같은 작업에 새 팀원으로 붙인다 — 다른 프로젝트로 옮기지 않는다)
@@ -732,11 +987,23 @@ final class TeamStore: ObservableObject {
         }
     }
 
+    /// 보류 중인 '다음에 할 일'에 대한 결정 — decision: approve(이 프로젝트에서 이어서 진행) · reject(닫기) · comment(팀장에게 의견 전달)
+    func stepDecision(_ job: TeamJob, stepId: String, decision: String, text: String = "") {
+        var args = ["step-decision", job.id, stepId, "--decision", decision]
+        if !text.isEmpty {
+            let f = FileManager.default.temporaryDirectory.appendingPathComponent("buni-team-step-\(UUID().uuidString).txt")
+            try? text.write(to: f, atomically: true, encoding: .utf8)
+            args += ["--text-file", f.path]
+        }
+        fire(args, wait: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.objectWillChange.send() }
+    }
+
     /// 특정 팀원(세션)에게 요구사항을 전한다
-    func sendRoleNote(_ job: TeamJob, role: String, text: String) {
+    func sendRoleNote(_ job: TeamJob, role: String, text: String, files: [URL] = []) {
         let f = FileManager.default.temporaryDirectory.appendingPathComponent("buni-team-note-\(UUID().uuidString).txt")
         try? text.write(to: f, atomically: true, encoding: .utf8)
-        fire(["role-note", job.id, role, "--text-file", f.path], wait: true)
+        fireChecked(["role-note", job.id, role, "--text-file", f.path] + Self.attachArgs(files))
     }
 
     /// 그 세션을 터미널에서 `claude --resume` 으로 열어 Claude 에서 이어 본다
@@ -804,6 +1071,16 @@ final class TeamStore: ObservableObject {
     func retry(_ job: TeamJob)   { fire(["retry", job.id], wait: true) }
     func markDone(_ job: TeamJob) { fire(["mark-done", job.id], wait: true) }
     func delete(_ job: TeamJob)  { fire(["delete", job.id], wait: true) }
+    /// 사이드바 우클릭 — 빈 이름은 엔진도 거부한다
+    func rename(_ job: TeamJob, to title: String) {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        fire(["rename", job.id, "--title", t], wait: true)
+    }
+    /// 프로젝트 단위 모델 (값이 비면 전역 설정을 따른다)
+    func setProjectSettings(_ job: TeamJob, model: String, leadModel: String) {
+        fire(["project-settings", job.id, "--model", model, "--lead-model", leadModel], wait: true)
+    }
 
     func saveSettings(_ s: TeamSettings) {
         let patch: [String: Any] = ["enabled": s.enabled, "window_start": s.windowStart, "window_end": s.windowEnd,
@@ -818,6 +1095,21 @@ final class TeamStore: ObservableObject {
     }
 
     /// 엔진 명령을 뒤에서 실행한다 (질문 정리처럼 오래 걸리는 것도 화면은 job.json 의 busy 로 따라간다)
+    /// 보내기 명령 — 끝나면 화면을 다시 읽고, 엔진이 {"ok": false, "error": …} 로 거절했으면(첨부 상한 등) 이유를 알려 준다
+    private func fireChecked(_ args: [String]) {
+        Task.detached {
+            let data = Self.cli(args)
+            let o = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            await MainActor.run {
+                TeamStore.shared.reload(force: true)
+                if o?["ok"] as? Bool == false, let e = o?["error"] as? String, !e.isEmpty {
+                    let a = NSAlert(); a.messageText = L.t("보내지 못했어요", "Couldn't send it")
+                    a.informativeText = e; a.runModal()
+                }
+            }
+        }
+    }
+
     private func fire(_ args: [String], wait: Bool = false) {
         Task.detached {
             _ = Self.cli(args)
@@ -853,5 +1145,51 @@ final class TeamStore: ObservableObject {
         guard let script = scriptURL else { return nil }
         let r = run(python, [script.path] + args)
         return r.status == 0 ? r.out : nil
+    }
+}
+
+
+/// 입력창에 쓰던 글 — 방·화면·프로젝트를 옮겼다 돌아와도 남고(엔진 `draft_key` 와 같은 열쇠: "<작업id>|<방>"),
+/// 앱을 껐다 켜도 `drafts.json` 에서 돌아온다. 보낸 뒤에만 비운다.
+final class TeamDrafts: @unchecked Sendable {
+    static let shared = TeamDrafts()
+    private let lock = NSLock()
+    private var items: [String: String]
+    private var pending: DispatchWorkItem?
+    private static let queue = DispatchQueue(label: "buni.drafts", qos: .utility)
+
+    private init() {
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { _ in TeamDrafts.shared.flush() }
+        let raw = (try? Data(contentsOf: TeamStore.draftsFile)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: String]
+        items = (raw ?? [:]).filter { !$0.value.isEmpty }
+    }
+
+    static func key(_ jobId: String, _ room: String) -> String { jobId + "|" + room }
+
+    func get(_ key: String) -> String {
+        lock.lock(); defer { lock.unlock() }
+        return items[key] ?? ""
+    }
+
+    func set(_ key: String, _ text: String) {
+        lock.lock(); defer { lock.unlock() }
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { items.removeValue(forKey: key) } else { items[key] = text }
+        // 키마다 파일에 쓰면 입력이 끊긴다 — 메모리에는 바로 반영하고, 잠깐 멈추면(0.6초) 백그라운드에서 한 번에 쓴다
+        pending?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.flush() }
+        pending = work
+        Self.queue.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    /// 아직 안 쓴 글을 지금 디스크에 쓴다 (앱을 끌 때도 부른다).
+    func flush() {
+        lock.lock()
+        pending?.cancel(); pending = nil
+        let snapshot = items
+        lock.unlock()
+        if let data = try? JSONSerialization.data(withJSONObject: snapshot) {
+            try? FileManager.default.createDirectory(at: TeamStore.home, withIntermediateDirectories: true)
+            try? data.write(to: TeamStore.draftsFile, options: .atomic)
+        }
     }
 }

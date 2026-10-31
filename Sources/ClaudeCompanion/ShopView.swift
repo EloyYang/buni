@@ -107,7 +107,7 @@ struct ShopView: View {
                         .padding(.trailing, 10)
                 } else {
                     Button(L.t("☁️ 다른 PC와 연동", "☁️ Sync")) { Task { await cloud.signIn() } }
-                        .buttonStyle(PillButtonStyle(color: .gray))
+                        .buttonStyle(PillButtonStyle(color: BT.quiet))
                         .padding(.trailing, 8)
                 }
             }
@@ -185,7 +185,7 @@ struct ShopView: View {
             Spacer()
             if !tryOn.isEmpty {
                 Button(L.t("원래대로", "Reset")) { tryOn = [:] }
-                    .buttonStyle(PillButtonStyle(color: Color.gray))
+                    .buttonStyle(PillButtonStyle(color: BT.quiet))
             }
         }
         .padding(.horizontal, 22).padding(.bottom, 10)
@@ -304,7 +304,7 @@ struct ShopView: View {
             }
             // 해제는 빨강, 착용은 파랑 — 색만 봐도 누르면 어떻게 되는지 구분된다
             .buttonStyle(PillButtonStyle(color: equipped ? BT.danger
-                                                         : .accentColor))
+                                                         : BT.accentBase))
         } else {
             // 아직 내 것이 아닌 아이템 — 레벨·코인이 모자라도 입어볼 수는 있다
             HStack(spacing: 8) {

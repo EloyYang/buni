@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>부니 디자인 전후 비교</title>
+<style>
+  :root{ --page:#101014; --pageink:#F2F2F6; --pagedim:#8A8A98; --pageline:#3A3A44; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--page); color:var(--pageink); font:14px/1.6 -apple-system,'Segoe UI','Malgun Gothic',sans-serif; }
+  .wrap{ max-width:1180px; margin:0 auto; padding:24px 16px 64px; }
+  .banner{ background:#3a3020; border:1px solid #8a6a2a; color:#ffd98a; padding:12px 16px; border-radius:10px; font-weight:700; }
+  h1{ font-size:22px; margin:20px 0 4px; } h2{ font-size:17px; margin:36px 0 4px; } p.note{ color:var(--pagedim); margin:2px 0 10px; font-size:13px; }
+  code{ background:#26262E; padding:1px 5px; border-radius:4px; font-size:12px; }
+  .pair{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:760px){ .pair{ grid-template-columns:1fr; } }
+  .col > .tag{ font-size:12px; font-weight:700; letter-spacing:.04em; color:var(--pagedim); margin-bottom:6px; }
+  .col.after > .tag{ color:#F28C2E; }
+  .tokens{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .sw{ display:flex; align-items:center; gap:6px; font-size:11px; color:var(--pagedim); }
+  .sw i{ width:16px; height:16px; border-radius:4px; border:1px solid #fff2; display:inline-block; }
+  ul.how li{ margin:4px 0; }
+
+  /* ── 화면 모형 공통 ── */
+  .win{ border:1px solid var(--pageline); border-radius:10px; padding:16px; min-height:250px; font-size:12px; }
+  .row{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:5px 0; }
+  .btn{ padding:4px 12px; border-radius:var(--rb,6px); font-weight:600; font-size:12px; border:0; }
+  .chip{ display:inline-block; padding:1px 8px; border-radius:99px; font-size:11px; }
+
+  /* BEFORE: 9be345b^ 의 값 (Windows 기준 파랑 #3377E0 버튼, 맥은 시스템 강조색/골드 #FAB84D) */
+  .before .win{ background:#1E1E24; color:#fff; --rb:6px; }
+  .before .dim{ color:#8A8A98; } .before .prim{ background:#3377E0; color:#fff; } .before .sec{ background:#444455; color:#fff; }
+  .before .line{ border-top:1px solid #3A3A44; margin:8px 0; } .before .warnbox{ background:#3A3220; color:#FAB84D; padding:8px; border-radius:8px; }
+
+  /* AFTER: 현재 토큰 (docs/design-system.md · windows/buni_theme.py · BuniTheme.swift) */
+  .after .win{ background:#1E1E24; color:#F2F2F6; --rb:10px; box-shadow:0 6px 16px rgba(0,0,0,.35); }
+  .after .dim{ color:#8A8A98; } .after .prim{ background:#F28C2E; color:#1A1206; } .after .sec{ background:#34343F; color:#F2F2F6; }
+  .after .line{ border-top:1px solid #3A3A44; margin:8px 0; } .after .warnbox{ background:rgba(217,178,90,.12); color:#D9B25A; padding:8px; border-radius:10px; }
+
+  /* 보드 */
+  .board{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .bcol{ background:#17171D; border-radius:8px; padding:8px; }
+  .bcol h4{ margin:0 0 6px; font-size:12px; }
+  .card{ padding:8px; margin-bottom:6px; font-size:12px; }
+  .before .card{ background:#2A2A34; border:1px solid #3A3A44; border-radius:8px; } .before .card.sel{ background:#3A3A48; }
+  .after .card{ background:#2A2A34; border:1px solid #3A3A44; border-radius:10px; } .after .card.sel{ background:#34343F; }
+  /* 스쿼드 */
+  .squad{ display:grid; grid-template-columns:120px 1fr; gap:0; border-radius:8px; overflow:hidden; }
+  .rail{ background:#17171D; padding:8px 6px; } .nav{ padding:4px 8px; border-radius:6px; margin-bottom:2px; }
+  .before .nav.on{ background:#3377E0; } .after .nav.on{ background:#34343F; }
+  .msgs{ background:#26262E; padding:10px; }
+  .bubble{ padding:6px 10px; border-radius:12px; display:inline-block; }
+  .before .bubble{ background:#3377E0; color:#fff; } .after .bubble{ background:#F28C2E; color:#1A1206; }
+  .badge{ border-radius:99px; padding:0 6px; font-size:10px; font-weight:700; color:#fff; }
+  .before .badge{ background:#E04858; } .after .badge{ background:#E65A66; }
+  .input{ margin-top:8px; padding:6px 8px; border-radius:8px; color:#8A8A98; }
+  .before .input{ background:#2A2A34; border:1px solid #4A4A58; } .after .input{ background:#2A2A34; border:1px solid #3A3A44; }
+  /* 사이트 */
+  .site{ padding:0 !important; overflow:hidden; }
+  .nav-s{ padding:10px 14px; border-bottom:1px solid; display:flex; justify-content:space-between; align-items:center; }
+  .before .site{ background:#14161a; } .before .nav-s{ background:rgba(20,22,26,.86); border-color:#2c313b; }
+  .after .site{ background:#1E1E24; } .after .nav-s{ background:rgba(30,30,36,.86); border-color:#3A3A44; }
+  .pc{ margin:12px; padding:14px; }
+  .before .pc{ background:#1b1e25; border:1px solid #2c313b; border-radius:16px; } .after .pc{ background:#26262E; border:1px solid #3A3A44; border-radius:14px; }
+  .before .site .prim{ background:#f28c2e; color:#1a1206; border-radius:10px; } .after .site .prim{ background:#F28C2E; color:#1A1206; border-radius:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="banner">⚠️ 실제 캡처가 아니라 코드 값 기반 재현입니다. 이 환경에는 화면이 없어 앱·브라우저를 띄워 캡처하지 못했습니다. 아래 모형은 커밋에 있는 색·간격·모서리 값을 같은 HTML/CSS 로 옮겨 그린 것이라 실제 픽셀과는 다릅니다.</div>
+  <h1>부니 디자인 전후 비교</h1>
+  <p class="note">바뀌기 전 = 디자인 토큰 도입 직전 커밋 <code>9be345b^</code> (<code>git show 9be345b^:경로</code> 로 읽음, worktree 안 씀). 바뀐 후 = 현재 브랜치 <code>buni/job-6001</code> 의 값. 캐릭터 그림은 바꾸지 않아 비교에서 뺐습니다.</p>
+
+  <h2>1. Pro 업그레이드 창</h2>
+  <p class="note">출처: <code>windows/buni_pro_ui.py</code>, <code>ProViews.swift</code>. 주 버튼 파랑 #3377E0 → 당근색 #F28C2E(글자 #1A1206), 보조 버튼 #444455 → raised #34343F, 안내 상자 #3A3220 → warn 12% 틴트, 여백 20 → 24.</p>
+  <div class="pair">
+    <div class="col before"><div class="tag">BEFORE · 9be345b^</div>
+      <div class="win"><b style="font-size:15px">⭐ 부니 Pro</b><div class="dim">체험 중 · 12일 남음</div>
+        <div class="warnbox" style="margin:8px 0">🔒 이 기능은 Pro 에서 열려요</div>
+        <div class="row"><span><b>월간 $3</b><br><span class="dim">매달</span></span><button class="btn prim">결제 준비 중</button></div>
+        <div class="line"></div>
+        <div class="row"><span>라이선스 키</span><span><button class="btn prim">등록</button></span></div>
+        <div class="row"><span></span><button class="btn sec">닫기</button></div></div></div>
+    <div class="col after"><div class="tag">AFTER · 현재</div>
+      <div class="win"><b style="font-size:15px">⭐ 부니 Pro</b><div class="dim">체험 중 · 12일 남음</div>
+        <div class="warnbox" style="margin:8px 0">🔒 이 기능은 Pro 에서 열려요</div>
+        <div class="row"><span><b>월간 $3</b><br><span class="dim">매달</span></span><button class="btn prim">결제 준비 중</button></div>
+        <div class="line"></div>
+        <div class="row"><span>라이선스 키</span><span><button class="btn prim">등록</button></span></div>
+        <div class="row"><span></span><button class="btn sec">닫기</button></div></div></div>
+  </div>
+  <p class="note">※ 실제 앱에서 결제 링크가 없으면 주 버튼은 비활성(raised 색)으로 보입니다. 모형은 색 비교를 위해 활성 색으로 그렸습니다.</p>
+
+  <h2>2. 업무 현황 보드</h2>
+  <p class="note">출처: <code>SquadBoardViews.swift</code>, <code>buni_team_ui.py</code>. 칼럼 색을 임의 RGB 에서 info/ok/warn/dim/danger 토큰으로, 카드 모서리 8 → 10, 선택 카드 #3A3A48 → raised #34343F.</p>
+  <div class="pair">
+    <div class="col before"><div class="tag">BEFORE</div>
+      <div class="win"><div class="board">
+        <div class="bcol"><h4 style="color:#6B9EF2">● 대기</h4><div class="card">짧은 제목 A<br><span class="dim">🐰 결제 개발자</span></div></div>
+        <div class="bcol"><h4 style="color:#4DBF80">● 진행 중</h4><div class="card sel">짧은 제목 B<br><span class="dim">🐰 마케팅 작가</span></div></div>
+        <div class="bcol"><h4 style="color:#E65966">● 확인 필요</h4><div class="card">짧은 제목 C<br><span style="color:#E65966">⟳ 상한으로 멈춤</span></div></div>
+      </div></div></div>
+    <div class="col after"><div class="tag">AFTER</div>
+      <div class="win"><div class="board">
+        <div class="bcol"><h4 style="color:#6AA9FF">● 대기</h4><div class="card">짧은 제목 A<br><span class="dim">🐰 결제 개발자</span></div></div>
+        <div class="bcol"><h4 style="color:#4DC780">● 진행 중</h4><div class="card sel">짧은 제목 B<br><span class="dim">🐰 마케팅 작가</span></div></div>
+        <div class="bcol"><h4 style="color:#E65A66">● 확인 필요</h4><div class="card">짧은 제목 C<br><span style="color:#E65A66">⟳ 상한으로 멈춤</span></div></div>
+      </div></div></div>
+  </div>
+
+  <h2>3. 스쿼드 화면 (사이드바·채팅)</h2>
+  <p class="note">출처: <code>SquadSlackViews.swift</code>, <code>TeamViews.swift</code>, <code>buni_team_ui.py</code>. 선택 행 파랑 #3377E0 → raised, 내 말풍선 파랑 → 당근색, 안 읽음 배지 #E04858 → danger #E65A66, 입력창 테두리 #4A4A58 → line.</p>
+  <div class="pair">
+    <div class="col before"><div class="tag">BEFORE</div>
+      <div class="win"><div class="squad"><div class="rail"><div class="nav on">📊 업무 현황</div><div class="nav"># 스쿼드 <span class="badge">3</span></div><div class="nav dim">팀장</div></div>
+        <div class="msgs"><div class="dim">팀장 · 지시</div><div class="bubble">가격 페이지 점검해 줘</div><div class="input">메시지 입력…</div></div></div></div></div>
+    <div class="col after"><div class="tag">AFTER</div>
+      <div class="win"><div class="squad"><div class="rail"><div class="nav on">📊 업무 현황</div><div class="nav"># 스쿼드 <span class="badge">3</span></div><div class="nav dim">팀장</div></div>
+        <div class="msgs"><div class="dim">팀장 · 지시</div><div class="bubble">가격 페이지 점검해 줘</div><div class="input">메시지 입력…</div></div></div></div></div>
+  </div>
+
+  <h2>4. docs 사이트</h2>
+  <p class="note">출처: <code>git show 9be345b^:docs/index.html</code> ↔ 현재 <code>docs/index.html</code> 의 <code>:root</code>. 바탕 #14161a → #1E1E24, 카드 #1b1e25 → #26262E, 선 #2c313b → #3A3A44, 카드 모서리 16 → 14, 토큰(간격·그림자) 추가. 글꼴(Fredoka·Manrope·Press Start 2P)은 그대로.</p>
+  <div class="pair">
+    <div class="col before"><div class="tag">BEFORE</div>
+      <div class="win site"><div class="nav-s"><b>🐰 부니</b><button class="btn prim">다운로드</button></div>
+        <div class="pc"><b>Pro 월간</b><div style="font-size:26px;font-weight:700">$3</div><div class="dim">매달</div><button class="btn prim" style="margin-top:6px">결제 준비 중</button></div></div></div>
+    <div class="col after"><div class="tag">AFTER</div>
+      <div class="win site"><div class="nav-s"><b>🐰 부니</b><button class="btn prim">다운로드</button></div>
+        <div class="pc"><b>Pro 월간</b><div style="font-size:26px;font-weight:700">$3</div><div class="dim">매달</div><button class="btn prim" style="margin-top:6px">결제 준비 중</button></div></div></div>
+  </div>
+
+  <h2>토큰 값 요약</h2>
+  <div class="pair">
+    <div class="col before"><div class="tag">BEFORE (임의 값)</div><div class="tokens">
+      <span class="sw"><i style="background:#14161a"></i>site bg #14161a</span><span class="sw"><i style="background:#1b1e25"></i>site card #1b1e25</span>
+      <span class="sw"><i style="background:#3377E0"></i>Win accent #3377E0</span><span class="sw"><i style="background:#444455"></i>보조 버튼 #444455</span>
+      <span class="sw"><i style="background:#E04858"></i>배지 #E04858</span><span class="sw"><i style="background:#3A3A48"></i>선택 카드 #3A3A48</span></div></div>
+    <div class="col after"><div class="tag">AFTER (토큰)</div><div class="tokens">
+      <span class="sw"><i style="background:#1E1E24"></i>bg</span><span class="sw"><i style="background:#26262E"></i>panel</span><span class="sw"><i style="background:#2A2A34"></i>field</span>
+      <span class="sw"><i style="background:#34343F"></i>raised</span><span class="sw"><i style="background:#3A3A44"></i>line</span><span class="sw"><i style="background:#F28C2E"></i>accent</span>
+      <span class="sw"><i style="background:#6AA9FF"></i>info</span><span class="sw"><i style="background:#4DC780"></i>ok</span><span class="sw"><i style="background:#D9B25A"></i>warn</span><span class="sw"><i style="background:#E65A66"></i>danger</span></div></div>
+  </div>
+
+  <h2>직접 앱을 켜서 보는 방법</h2>
+  <ul class="how">
+    <li><b>바뀐 후(맥)</b>: 이 브랜치에서 <code>swift build</code> 후 <code>./build_app.sh</code>(설치 옵션 없이)로 만든 앱을 실행 → 설정의 <code>플랜 보기 · 키 등록</code>(업그레이드 창), <code>⌃⌥S</code>(스쿼드) → 사이드바 맨 위 <code>📊 업무 현황</code>.</li>
+    <li><b>바뀌기 전(맥)</b>: 저장소를 건드리지 않으려면 <code>git archive 9be345b^ | tar -x -C /임시폴더</code> 로 옛 소스를 임시 폴더에 풀어 같은 방법으로 빌드(이 기능 자체가 이 커밋 이후에 일부 생겼으므로 보드 화면은 옛 소스에 없을 수 있음).</li>
+    <li><b>Windows</b>: <code>windows/buni.py</code> 실행 → 트레이/설정에서 Pro, <code>Ctrl+Alt+S</code> 로 스쿼드 창. 옛 모습은 <code>git show 9be345b^:windows/buni_pro_ui.py</code> 로 옛 파일을 임시 폴더에 저장해 실행.</li>
+    <li><b>사이트</b>: <code>docs/index.html</code> 을 브라우저로 열기(현재). 옛 모습은 <code>git show 9be345b^:docs/index.html &gt; /임시폴더/old.html</code> 후 열기.</li>
+    <li>실제 캡처를 만들면 이 폴더에 <code>before-*.png</code> / <code>after-*.png</code> 로 넣으세요. 지금은 캡처 파일이 하나도 없습니다.</li>
+  </ul>
+</div>
+</body>
+</html>

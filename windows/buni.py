@@ -17,6 +17,8 @@ import buni_items
 import buni_update
 import buni_pro
 import buni_pro_ui
+import buni_sessions
+from buni_theme import C, mix  # 상점·채팅 창 색은 docs/design-system.md 토큰 (맥 BuniTheme.swift 와 같다)
 
 # ── Pixel unit (matches macOS p = 6.5)
 P = 6.5
@@ -464,6 +466,9 @@ def _run_hook(hook_type: str):
     예: Buni-Windows.exe --hook pretool
     Python 설치 불필요 — exe 자체가 훅을 처리한다.
     """
+    # 부니 스쿼드가 띄운 세션(BUNI_TEAM_RUN)은 부니를 따로 만들지 않는다 — 스쿼드 전체를 팀장 부니 하나가 대신 보여 주고 알려 준다.
+    if os.environ.get('BUNI_TEAM_RUN'):
+        sys.exit(0)
     try:
         raw = sys.stdin.buffer.read()
         d   = json.loads(raw.decode('utf-8', errors='replace'))
@@ -834,6 +839,7 @@ class GlobalHotkeyManager:
         self._id_map : dict   = {}   # hid → action
         self._next_id         = 300
         self._callbacks: dict = {}
+        self._tid             = 0     # 메시지 루프 스레드 id — 등록·해제 요청 때 깨울 때 쓴다
 
     @classmethod
     def label(cls, mods: int, vk: int) -> str:
@@ -845,13 +851,23 @@ class GlobalHotkeyManager:
         parts.append(cls._VK_NAMES.get(vk, f'[{vk}]'))
         return '+'.join(parts)
 
+    def _wake(self):
+        """GetMessage 로 잠든 루프 스레드를 깨워 대기 중인 요청을 처리하게 한다."""
+        if self._tid:
+            try:
+                ctypes.windll.user32.PostThreadMessageW(self._tid, 0x0000, 0, 0)   # WM_NULL
+            except Exception:
+                pass
+
     def set_shortcut(self, action: str, mods: int, vk: int):
         with self._lock:
             self._pending.append(('set', action, mods, vk))
+        self._wake()
 
     def clear_shortcut(self, action: str):
         with self._lock:
             self._pending.append(('clear', action))
+        self._wake()
 
     def start(self, tk_root: tk.Tk, callbacks: dict):
         self._callbacks = callbacks
@@ -867,7 +883,7 @@ class GlobalHotkeyManager:
                     cb()
         except queue.Empty:
             pass
-        tk_root.after(50, lambda: self._poll(tk_root))
+        tk_root.after(100, lambda: self._poll(tk_root))
 
     def _loop(self):
         class _P(ctypes.Structure):
@@ -883,6 +899,9 @@ class GlobalHotkeyManager:
             ]
         u32 = ctypes.windll.user32
         msg = _M()
+        # 메시지 큐를 먼저 만든 뒤 스레드 id 를 알린다 (그 전에 온 PostThreadMessage 는 사라진다)
+        u32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
+        self._tid = ctypes.windll.kernel32.GetCurrentThreadId()
         while True:
             with self._lock:
                 pending, self._pending = self._pending[:], []
@@ -908,13 +927,17 @@ class GlobalHotkeyManager:
                             u32.UnregisterHotKey(None, hid)
                             self._id_map.pop(hid, None)
                         del self._reg[action]
-            if u32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
-                if msg.message == self.WM_HOTKEY:
-                    action = self._id_map.get(msg.wParam)
-                    if action:
-                        self._q.put(action)
-            else:
-                time.sleep(0.005)
+            # 이전엔 5ms 마다 깨어 확인(초당 200번) — 메시지가 올 때까지 잠들어 CPU 를 쓰지 않는다
+            r = u32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+            if r == -1:
+                time.sleep(1.0)
+                continue
+            if r == 0:           # WM_QUIT
+                break
+            if msg.message == self.WM_HOTKEY:
+                action = self._id_map.get(msg.wParam)
+                if action:
+                    self._q.put(action)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1891,6 +1914,7 @@ class SessionWindow(CharacterDrawMixin):
         self._completion_win: tk.Toplevel | None = None
         self._ask_user_win:   tk.Toplevel | None = None
         self._destroyed    = False
+        self._click_over   = None          # 마지막으로 적용한 클릭 투과 판정 (None=모름)
 
         # ── File monitoring
         self._file_offset = 0
@@ -2028,20 +2052,37 @@ class SessionWindow(CharacterDrawMixin):
         # 절대 발생하지 않음 → 30ms 폴링으로 마우스 위치를 직접 확인
         self._poll_click_through()
 
+    # 마우스가 창 근처일 때만 30ms, 멀면 100ms, 창이 숨겨져 있으면 500ms 로 확인한다.
+    CLICK_POLL_NEAR_MS   = 30
+    CLICK_POLL_FAR_MS    = 100
+    CLICK_POLL_HIDDEN_MS = 500
+    CLICK_POLL_MARGIN    = 160     # 100ms 동안 마우스가 움직일 수 있는 거리보다 넉넉하게
+
     def _poll_click_through(self):
-        """30ms마다 마우스가 창 위에 있는지 확인해 클릭 투과를 토글."""
+        """마우스가 창 위에 있는지 확인해 클릭 투과를 토글 (거리에 따라 주기를 바꾼다)."""
         if self._destroyed or not self._hwnd:
             return
+        delay = self.CLICK_POLL_NEAR_MS
         try:
-            mx = self.win.winfo_pointerx()
-            my = self.win.winfo_pointery()
-            wx = self.win.winfo_rootx()
-            wy = self.win.winfo_rooty()
-            over = wx <= mx < wx + WIN_W and wy <= my < wy + WIN_H
-            _set_click_through(self._hwnd, not over)
+            if not self.is_visible:
+                delay = self.CLICK_POLL_HIDDEN_MS
+            else:
+                mx = self.win.winfo_pointerx()
+                my = self.win.winfo_pointery()
+                wx = self.win.winfo_rootx()
+                wy = self.win.winfo_rooty()
+                over = wx <= mx < wx + WIN_W and wy <= my < wy + WIN_H
+                # 상태가 바뀔 때만 SetWindowLong (매번 호출하면 창 스타일 갱신이 반복된다)
+                if over != self._click_over:
+                    self._click_over = over
+                    _set_click_through(self._hwnd, not over)
+                m = self.CLICK_POLL_MARGIN
+                near = (wx - m <= mx < wx + WIN_W + m) and (wy - m <= my < wy + WIN_H + m)
+                if not near:
+                    delay = self.CLICK_POLL_FAR_MS
         except Exception:
             pass
-        self.win.after(30, self._poll_click_through)
+        self.win.after(delay, self._poll_click_through)
 
     # ── Drag ─────────────────────────────────────────────────
 
@@ -2052,6 +2093,7 @@ class SessionWindow(CharacterDrawMixin):
         self._press_xy = (e.x, e.y)
         if self._hwnd:
             _set_click_through(self._hwnd, False)
+            self._click_over = None      # 직접 바꿨으니 다음 확인 때 다시 맞춘다
 
     def _drag_motion(self, e: tk.Event):
         if not self._drag_start:
@@ -2125,6 +2167,7 @@ class SessionWindow(CharacterDrawMixin):
         self._drag_start = None
         if self._hwnd:
             _set_click_through(self._hwnd, True)
+            self._click_over = None
         if self.slot == 0:
             self.persist.set('window_pos',
                              [self.win.winfo_x(), self.win.winfo_y()])
@@ -2272,7 +2315,7 @@ class SessionWindow(CharacterDrawMixin):
     def _tick_bar_refresh(self):
         if self._destroyed:
             return
-        if self.state != 'idle':
+        if self.state != 'idle' and self.is_visible:    # 숨겨진 창은 다시 그릴 필요 없다
             self._draw()
         self.win.after(30_000, self._tick_bar_refresh)
 
@@ -2286,6 +2329,8 @@ class SessionWindow(CharacterDrawMixin):
     def _do_blink(self):
         if self._destroyed:
             return
+        if not self.is_visible:               # 숨겨진 창은 깜빡이지 않고 다음 차례만 잡는다
+            self._schedule_blink(); return
         self.blinking = True;  self._draw()
         self.win.after(130, self._end_blink)
 
@@ -2305,7 +2350,7 @@ class SessionWindow(CharacterDrawMixin):
     def _do_idle_hop(self):
         if self._destroyed:
             return
-        if self.state != 'ready':
+        if self.state != 'ready' or not self.is_visible:
             self._schedule_idle_hop(); return
         if random.random() < 0.5:
             self._hop_anim(on_done=self._schedule_idle_hop)
@@ -3588,14 +3633,18 @@ class SessionWindow(CharacterDrawMixin):
         """시간에 따라 계속 바뀌는 아이템(무기 흔들림·뜨개질·후광)이 있을 때만 다시 그린다."""
         if self._destroyed:
             return
+        animating = True
         try:
             if self._needs_anim() and self.is_visible:
                 # 기울임은 목표 각도로 부드럽게 따라간다
                 self.weapon_swing += (self._swing_target - self.weapon_swing) * 0.5
                 self._draw()
+            else:
+                animating = False
         except Exception:
-            pass
-        self._anim_job = self.win.after(90, self._tick_anim)
+            animating = False
+        # 움직이는 아이템이 없으면(대부분) 90ms 대신 느리게 확인만 한다
+        self._anim_job = self.win.after(90 if animating else 500, self._tick_anim)
 
     # ── Disconnect ────────────────────────────────────────────
 
@@ -3707,16 +3756,16 @@ class ShopPreview(CharacterDrawMixin):
 class ShopWindow:
     """부니 상점 창."""
 
-    WEAR  = '#4DC780'     # 착용 중 — 초록
-    TRY   = '#599EFA'     # 입어보는 중 — 파랑 (착용 중과 구분)
-    BG    = '#1E1E24'
-    CARD  = '#2A2A33'
-    DIM   = '#7A7A88'
-    GOLD  = '#F2CC25'
-    COIN  = '#FAD238'
-    ACCENT = '#3377E0'
-    BUY   = '#F29926'
-    OFF   = '#DB4D4D'
+    WEAR  = C['ok']       # 착용 중 — 초록
+    TRY   = C['info']     # 입어보는 중 — 파랑 (착용 중과 구분)
+    BG    = C['bg']
+    CARD  = C['panel']
+    DIM   = C['dim']
+    GOLD  = C['warn']
+    COIN  = C['warn']
+    ACCENT = C['accent']
+    BUY   = C['accent']
+    OFF   = C['danger']
 
     MODE_FOR_SLOT = {'weapon': 'done', 'tool': 'working'}
 
@@ -3743,11 +3792,11 @@ class ShopWindow:
         # ── 머리말: 제목 · 클라우드 · 코인 · 레벨
         head = tk.Frame(win, bg=self.BG)
         head.pack(fill='x', padx=18, pady=(14, 6))
-        tk.Label(head, text=t('부니 상점', 'Buni Shop'), bg=self.BG, fg='white',
+        tk.Label(head, text=t('부니 상점', 'Buni Shop'), bg=self.BG, fg=C['ink'],
                  font=('Malgun Gothic', 14, 'bold')).pack(side='left')
         self._lv = tk.Label(head, bg=self.BG, fg=self.GOLD, font=('Consolas', 11, 'bold'))
         self._lv.pack(side='right')
-        self._coins = tk.Label(head, bg=self.BG, fg='#FAE080', font=('Consolas', 12, 'bold'))
+        self._coins = tk.Label(head, bg=self.BG, fg=self.COIN, font=('Consolas', 12, 'bold'))
         self._coins.pack(side='right', padx=(0, 12))
         self._cloud_box = tk.Frame(head, bg=self.BG)
         self._cloud_box.pack(side='right', padx=(0, 12))
@@ -3790,11 +3839,12 @@ class ShopWindow:
                                  justify='left', anchor='w', wraplength=300)
         self._sum_txt.pack(side='left', padx=(6, 0))
         self._sum_reset = tk.Button(self._summary, text=t('원래대로', 'Reset'), relief='flat', bd=0,
-                                    bg='#555566', fg='white', cursor='hand2',
+                                    bg=C['raised'], fg=C['ink'], cursor='hand2',
+                                    activebackground=C['line'], activeforeground=C['ink'],
                                     font=('Malgun Gothic', 8), padx=8, pady=1,
                                     command=self._reset_try)
 
-        tk.Frame(win, bg='#3A3A44', height=1).pack(fill='x', padx=16)
+        tk.Frame(win, bg=C['line'], height=1).pack(fill='x', padx=16)
 
         # ── 자리 선택
         self._slot_btns = {}
@@ -3855,9 +3905,14 @@ class ShopWindow:
     def _tick(self):
         if not self.is_open():
             return
-        self.preview.try_on = self._displayed()
-        self.preview.redraw()
-        self._job = self.win.after(100, self._tick)
+        try:
+            hidden = self.win.state() != 'normal'     # 최소화·숨김이면 그리지 않고 가끔만 확인
+        except Exception:
+            hidden = False
+        if not hidden:
+            self.preview.try_on = self._displayed()
+            self.preview.redraw()
+        self._job = self.win.after(1000 if hidden else 100, self._tick)
 
     # ── 상태 ─────────────────────────────────────────────────
 
@@ -3922,12 +3977,14 @@ class ShopWindow:
         self._refresh_cloud()
         for cid, b in self._char_btns.items():
             on = cid == self.target
-            b.config(bg=self.ACCENT if on else '#2F2F3A', fg='white' if on else '#AAAAB4',
-                     activebackground=self.ACCENT if on else '#3A3A48', activeforeground='white')
+            b.config(bg=self.ACCENT if on else C['field'], fg=C['accent_ink'] if on else C['ink2'],
+                     activebackground=self.ACCENT if on else C['raised'],
+                     activeforeground=C['accent_ink'] if on else C['ink'])
         for sl, b in self._slot_btns.items():
             on = sl == self.slot
-            b.config(bg=self.ACCENT if on else '#2F2F3A', fg='white' if on else '#AAAAB4',
-                     activebackground=self.ACCENT if on else '#3A3A48', activeforeground='white')
+            b.config(bg=self.ACCENT if on else C['field'], fg=C['accent_ink'] if on else C['ink2'],
+                     activebackground=self.ACCENT if on else C['raised'],
+                     activeforeground=C['accent_ink'] if on else C['ink'])
         self._refresh_modes()
         self._refresh_summary()
         self._refresh_list()
@@ -3935,8 +3992,8 @@ class ShopWindow:
     def _refresh_modes(self):
         for m, b in self._mode_btns.items():
             on = m == self.preview.mode
-            b.config(bg=self.ACCENT if on else '#3A3A48', fg='white' if on else '#BBBBC4',
-                     activebackground=self.ACCENT, activeforeground='white')
+            b.config(bg=self.ACCENT if on else C['raised'], fg=C['accent_ink'] if on else C['ink2'],
+                     activebackground=self.ACCENT, activeforeground=C['accent_ink'])
 
     def _refresh_cloud(self):
         for w in self._cloud_box.winfo_children():
@@ -3949,7 +4006,8 @@ class ShopWindow:
                      font=('Malgun Gothic', 9, 'bold')).pack()
         else:
             tk.Button(self._cloud_box, text=t('☁ 다른 PC와 연동', '☁ Sync'), relief='flat', bd=0,
-                      bg='#555566', fg='white', cursor='hand2', font=('Malgun Gothic', 8),
+                      bg=C['raised'], fg=C['ink'], cursor='hand2', font=('Malgun Gothic', 8),
+                      activebackground=C['line'], activeforeground=C['ink'],
                       padx=8, pady=2, command=self.manager.cloud_sign_in_ui).pack()
 
     def _refresh_summary(self):
@@ -3966,7 +4024,7 @@ class ShopWindow:
         self._sum_tag.config(text=t('미리보기', 'Preview') if trying else t('착용 중', 'Wearing'),
                              fg=self.TRY if trying else self.WEAR)
         self._sum_txt.config(text='  ·  '.join(parts) if parts else t('없음 — 기본 모습', 'Nothing — default look'),
-                             fg='#DDDDE4' if parts else '#666672')
+                             fg=C['ink2'] if parts else C['dim'])
         if trying:
             self._sum_reset.pack(side='right')
         else:
@@ -3982,7 +4040,7 @@ class ShopWindow:
                 'weapon': t('무기는 생각하거나 도구를 쓰는 작업 중에만 손에 듭니다.',
                             'Weapons are only drawn while Claude is working.')}.get(self.slot)
         if note:
-            tk.Label(self._list, text=note, bg=self.BG, fg='#5C5C6A', font=('Malgun Gothic', 8),
+            tk.Label(self._list, text=note, bg=self.BG, fg=self.DIM, font=('Malgun Gothic', 8),
                      wraplength=380, justify='left').pack(anchor='w', pady=(4, 8))
 
     def _row(self, it):
@@ -3998,25 +4056,25 @@ class ShopWindow:
         if equipped:                                         # 왼쪽 굵은 띠 — 입은 항목이 바로 보이게
             tk.Frame(card, bg=self.WEAR, width=5).pack(side='left', fill='y')
         if equipped:
-            card.config(bg='#23382E')
+            card.config(bg=mix(self.WEAR, self.CARD, 0.15))
         body = tk.Frame(card, bg=card['bg'])
         body.pack(side='left', fill='x', expand=True, padx=12, pady=10)
 
         top = tk.Frame(body, bg=card['bg'])
         top.pack(anchor='w')
         tk.Label(top, text=t(it.name_ko, it.name_en), bg=card['bg'],
-                 fg='white' if unlocked else '#6A6A76', font=self._fontb).pack(side='left')
+                 fg=C['ink'] if unlocked else self.DIM, font=self._fontb).pack(side='left')
         if trying:
-            tk.Label(top, text=t('👀 미리보기 중', '👀 Previewing'), bg=self.TRY, fg='white',
+            tk.Label(top, text=t('👀 미리보기 중', '👀 Previewing'), bg=self.TRY, fg=C['bg'],
                      font=('Malgun Gothic', 8, 'bold'), padx=6).pack(side='left', padx=(8, 0))
         if equipped:
             tk.Label(top, text=(t('✓ 사용 중', '✓ In use') if shop.is_default(it) else t('✓ 착용 중', '✓ Equipped')),
-                     bg=self.WEAR, fg='#10261A', font=('Malgun Gothic', 8, 'bold'),
+                     bg=self.WEAR, fg=C['bg'], font=('Malgun Gothic', 8, 'bold'),
                      padx=6).pack(side='left', padx=(8, 0))
         info = tk.Frame(body, bg=card['bg'])
         info.pack(anchor='w', pady=(3, 0))
         tk.Label(info, text=f'Lv.{it.level}', bg=card['bg'],
-                 fg=self.GOLD if unlocked else '#E6665A', font=('Consolas', 9)).pack(side='left')
+                 fg=self.GOLD if unlocked else C['danger'], font=('Consolas', 9)).pack(side='left')
         if not owned:
             tk.Label(info, text=f'🪙 {it.price}', bg=card['bg'], fg=self.COIN,
                      font=('Consolas', 9, 'bold')).pack(side='left', padx=(10, 0))
@@ -4026,9 +4084,9 @@ class ShopWindow:
         acts.pack(side='right', padx=10)
 
         def pill(parent, text, color, cmd):
-            return tk.Button(parent, text=text, bg=color, fg='white', relief='flat', bd=0, cursor='hand2',
+            return tk.Button(parent, text=text, bg=color, fg=C['accent_ink'], relief='flat', bd=0, cursor='hand2',
                              font=('Malgun Gothic', 9, 'bold'), padx=10, pady=3,
-                             activebackground=color, activeforeground='white', command=cmd)
+                             activebackground=color, activeforeground=C['accent_ink'], command=cmd)
 
         if shop.is_default(it) and equipped:
             pass                                             # 기본 아이템을 쓰는 중 — 배지가 대신 알려준다
@@ -4041,10 +4099,10 @@ class ShopWindow:
         else:
             if not unlocked:
                 tk.Label(acts, text=t(f'Lv.{it.level} 필요', f'Needs Lv.{it.level}'), bg=card['bg'],
-                         fg='#6A6A76', font=('Malgun Gothic', 8)).pack(side='left', padx=(0, 6))
+                         fg=self.DIM, font=('Malgun Gothic', 8)).pack(side='left', padx=(0, 6))
             elif shop.coins < it.price:
                 tk.Label(acts, text=t('코인 부족', 'Not enough'), bg=card['bg'],
-                         fg='#6A6A76', font=('Malgun Gothic', 8)).pack(side='left', padx=(0, 6))
+                         fg=self.DIM, font=('Malgun Gothic', 8)).pack(side='left', padx=(0, 6))
             # 아직 내 것이 아닌 아이템 — 레벨·코인이 모자라도 입어볼 수는 있다
             pill(acts, t('취소', 'Cancel') if trying else t('입어보기', 'Try on'), self.TRY,
                  lambda i=it: self._try_on_item(i)).pack(side='left')
@@ -4095,8 +4153,8 @@ class ChatAvatar(ShopPreview):
 
 def draw_name_tag(cv, cx, y, name, me, level=1):
     """이름표 — 'Lv.N 닉네임' 알약. 배경은 레벨·닉네임 글자 둘 다의 아래에 깐다."""
-    lv = cv.create_text(0, y, text=f'Lv.{level}', font=('Malgun Gothic', 7, 'bold'), fill='#FFD966', anchor='w')
-    tid = cv.create_text(0, y, text=name, font=('Malgun Gothic', 8, 'bold'), fill='white', anchor='w')
+    lv = cv.create_text(0, y, text=f'Lv.{level}', font=('Malgun Gothic', 7, 'bold'), fill=C['warn'], anchor='w')
+    tid = cv.create_text(0, y, text=name, font=('Malgun Gothic', 8, 'bold'), fill=C['ink'], anchor='w')
     lw = cv.bbox(lv)[2] - cv.bbox(lv)[0]
     nw = cv.bbox(tid)[2] - cv.bbox(tid)[0]
     left = cx - (lw + 4 + nw) / 2
@@ -4105,7 +4163,7 @@ def draw_name_tag(cv, cx, y, name, me, level=1):
     x0, y0, x1, y1 = cv.bbox(lv, tid)
     pill = cv.create_polygon(
         [x0-6, y0, x1+6, y0, x1+8, y0+2, x1+8, y1-2, x1+6, y1, x0-6, y1, x0-8, y1-2, x0-8, y0+2],
-        smooth=True, fill='#3377E0' if me else '#2E2E36', outline='')
+        smooth=True, fill=C['accent'] if me else C['rail'], outline='')
     cv.tag_lower(pill, lv)           # lv가 tid보다 아래에 있으므로 lv 기준으로 내린다
 
 
@@ -4212,6 +4270,12 @@ class ChatWindow:
         if not self.is_open():
             return
         try:
+            if self.win.state() != 'normal':          # 최소화·숨김이면 그리지 않고 가끔만 확인
+                self._job = self.win.after(1000, self._tick)
+                return
+        except Exception:
+            pass
+        try:
             self._place()
             self.chat.sync_profile()
             self.redraw()
@@ -4258,7 +4322,7 @@ class ChatWindow:
     def _bubble(self, cx, oy, text):
         # 글자 수만큼만 감싼다 — 줄임표 없이 전부 보이고, 짧으면 말풍선도 짧아진다
         tid = self.cv.create_text(cx, 0, text=text, width=90, justify='center',
-                                  font=('Malgun Gothic', 8), fill='#222222', anchor='s')
+                                  font=('Malgun Gothic', 8), fill=C['bg'], anchor='s')
         x0, y0, x1, y1 = self.cv.bbox(tid)
         # 말풍선은 캐릭터 귀 위쪽(영역 아래 끝)에 붙인다
         bottom = oy + self.BUBBLE_H - 6
@@ -4268,8 +4332,8 @@ class ChatWindow:
         L, T, R, B = x0 - pad, y0 - pad, x1 + pad, y1 + pad
         r = 8
         pts = [L+r, T, R-r, T, R, T, R, T+r, R, B-r, R, B, R-r, B, L+r, B, L, B, L, B-r, L, T+r, L, T]
-        poly = self.cv.create_polygon(pts, smooth=True, fill='#FFFFFF', outline='#CCCCCC')
-        tail = self.cv.create_polygon(cx-5, B-1, cx+5, B-1, cx, B+6, fill='#FFFFFF', outline='')
+        poly = self.cv.create_polygon(pts, smooth=True, fill=C['ink'], outline=C['line'])
+        tail = self.cv.create_polygon(cx-5, B-1, cx+5, B-1, cx, B+6, fill=C['ink'], outline='')
         self.cv.tag_lower(tail, tid); self.cv.tag_lower(poly, tid)
 
     def _controls(self):
@@ -4283,7 +4347,7 @@ class ChatWindow:
         items = []
         total = 0
         for tag, text in labels:
-            tid = self.cv.create_text(0, y, text=text, font=('Malgun Gothic', 8, 'bold'), fill='white', tags=('ctl', tag))
+            tid = self.cv.create_text(0, y, text=text, font=('Malgun Gothic', 8, 'bold'), fill=C['ink'], tags=('ctl', tag))
             bb = self.cv.bbox(tid)
             items.append((tag, tid, bb[2] - bb[0]))
             total += bb[2] - bb[0] + 14
@@ -4291,12 +4355,12 @@ class ChatWindow:
         pill_l = x - 8
         for tag, tid, w in items:
             self.cv.coords(tid, x + w / 2, y)
-            self.cv.tag_bind(tid, '<Enter>', lambda e, i=tid: self.cv.itemconfig(i, fill='#FFDD66'))
-            self.cv.tag_bind(tid, '<Leave>', lambda e, i=tid: self.cv.itemconfig(i, fill='white'))
+            self.cv.tag_bind(tid, '<Enter>', lambda e, i=tid: self.cv.itemconfig(i, fill=C['warn']))
+            self.cv.tag_bind(tid, '<Leave>', lambda e, i=tid: self.cv.itemconfig(i, fill=C['ink']))
             x += w + 14
         pill = self.cv.create_polygon(
             [pill_l+8, y-9, x-6, y-9, x+2, y-9, x+2, y+9, x-6, y+9, pill_l+8, y+9, pill_l, y+9, pill_l, y-9],
-            smooth=True, fill='#26262E', outline='')
+            smooth=True, fill=C['panel'], outline='')
         self.cv.tag_lower(pill)
         self._ctl = {tag: tid for tag, tid, _ in items}
 
@@ -4385,15 +4449,15 @@ class ChatWindow:
         w = self._input = tk.Toplevel(self.manager.root)
         w.overrideredirect(True)
         w.attributes('-topmost', True)
-        w.configure(bg='#3377E0')                          # 파란 테두리 — 입력칸이라는 걸 알아보게
-        inner = tk.Frame(w, bg='#17171C')
+        w.configure(bg=C['accent'])                        # 강조색 테두리 — 입력칸이라는 걸 알아보게
+        inner = tk.Frame(w, bg=C['rail'])
         inner.pack(padx=2, pady=2)
-        tk.Label(inner, text='💬', bg='#17171C', fg='#6FA3FF', font=('Segoe UI Emoji', 8)).pack(side='left', padx=(5, 0))
+        tk.Label(inner, text='💬', bg=C['rail'], fg=C['accent'], font=('Segoe UI Emoji', 8)).pack(side='left', padx=(5, 0))
         self._text_var = tk.StringVar(value=self._draft)
         self._entry = tk.Entry(inner, textvariable=self._text_var, width=12, font=('Malgun Gothic', 9),
-                               relief='flat', bd=0, bg='#17171C', fg='white', insertbackground='#6FA3FF')
+                               relief='flat', bd=0, bg=C['rail'], fg=C['ink'], insertbackground=C['accent'])
         self._entry.pack(side='left', padx=(3, 0), ipady=3)
-        self._hint = tk.Label(inner, text='↵', bg='#17171C', fg='#6A6A78', font=('Consolas', 9, 'bold'), width=2)
+        self._hint = tk.Label(inner, text='↵', bg=C['rail'], fg=C['dim'], font=('Consolas', 9, 'bold'), width=2)
         self._hint.pack(side='left', padx=(0, 3))
         self._text_var.trace_add('write', self._on_text)
         self._entry.bind('<Return>', lambda e: self._send())
@@ -4448,7 +4512,7 @@ class ChatWindow:
 class ChatLobbyWindow:
     """방 만들기 · 코드로 입장 · 내 채팅 프로필."""
 
-    BG = '#1E1E24'
+    BG = C['bg']
 
     def __init__(self, manager: 'BuniManager'):
         self.manager = manager
@@ -4497,49 +4561,50 @@ class ChatLobbyWindow:
         for w in self.body.winfo_children():
             w.destroy()
         c, B = self.chat, self.BG
-        tk.Label(self.body, text=t('부니 채팅', 'Buni Chat'), bg=B, fg='white',
+        tk.Label(self.body, text=t('부니 채팅', 'Buni Chat'), bg=B, fg=C['ink'],
                  font=('Malgun Gothic', 13, 'bold')).pack(anchor='w')
 
-        def note(text, fg='#8A8A98'):
+        def note(text, fg=C['dim']):
             tk.Label(self.body, text=text, bg=B, fg=fg, font=('Malgun Gothic', 8), justify='left',
                      wraplength=360, anchor='w').pack(anchor='w', pady=(6, 0))
 
         def button(parent, text, color, cmd, **kw):
-            return tk.Button(parent, text=text, bg=color, fg='white', relief='flat', bd=0, cursor='hand2',
+            fg = C['ink'] if color == C['raised'] else C['accent_ink']     # 중립 버튼은 ink, 색 버튼은 accent_ink
+            return tk.Button(parent, text=text, bg=color, fg=fg, relief='flat', bd=0, cursor='hand2',
                              font=('Malgun Gothic', 9, 'bold'), padx=12, pady=4,
-                             activebackground=color, activeforeground='white', command=cmd, **kw)
+                             activebackground=color, activeforeground=fg, command=cmd, **kw)
 
         if not c.is_available:
             note(t('서버 설정(cloud-config.json)이 없어서 채팅을 쓸 수 없어요.',
-                   'Chat needs the server config (cloud-config.json).'), '#D9B25A')
+                   'Chat needs the server config (cloud-config.json).'), C['warn'])
         elif not c.cloud.is_signed_in:
             note(t('채팅은 Google 로그인이 필요해요. 로그인하면 같은 방 사람들과 이름이 보여요.',
                    'Chat needs a Google sign-in so people in the room can tell you apart.'))
-            button(self.body, t('Google로 로그인', 'Sign in with Google'), '#3377E0',
+            button(self.body, t('Google로 로그인', 'Sign in with Google'), C['accent'],
                    self.manager.cloud_sign_in_ui,
                    state='disabled' if c.cloud.busy else 'normal').pack(anchor='w', pady=(10, 0))
         else:
             self._profile(button)
-            tk.Frame(self.body, bg='#3A3A44', height=1).pack(fill='x', pady=12)
+            tk.Frame(self.body, bg=C['line'], height=1).pack(fill='x', pady=12)
             if c.room_code:
                 self._in_room(button)
             else:
                 self._lobby(button)
         if c.last_error:
-            note(c.last_error, '#F28C70')
+            note(c.last_error, C['danger'])
         note(t('방에는 최대 10명까지 들어올 수 있어요. 다른 사람에게는 내 닉네임·캐릭터·옷차림·대화와 '
                '작업 모션(대기/작업 중/완료)만 보이고, 어떤 작업을 하는지는 전해지지 않아요.',
                'Up to 10 people per room. Others only see your nickname, character, outfit, messages and a work '
-               'motion (idle / working / done) — never what you are working on.'), '#555566')
+               'motion (idle / working / done) — never what you are working on.'), C['dim'])
 
     def _profile(self, button):
         c, B = self.chat, self.BG
         row = tk.Frame(self.body, bg=B); row.pack(fill='x', pady=(10, 0))
-        tk.Label(row, text=t('닉네임', 'Nickname'), bg=B, fg='#CCCCCC', width=8, anchor='w',
+        tk.Label(row, text=t('닉네임', 'Nickname'), bg=B, fg=C['ink2'], width=8, anchor='w',
                  font=('Malgun Gothic', 9)).pack(side='left')
         var = tk.StringVar(value=c.nickname)
         ent = tk.Entry(row, textvariable=var, width=24, font=('Malgun Gothic', 10), relief='flat',
-                       bg='#2A2A34', fg='white', insertbackground='white')
+                       bg=C['field'], fg=C['ink'], insertbackground=C['ink'])
         ent.pack(side='left', ipady=3)
         ent.insert(0, '') if c.nickname else None
 
@@ -4548,10 +4613,10 @@ class ChatLobbyWindow:
             c.push_profile()
         ent.bind('<Return>', save); ent.bind('<FocusOut>', save)
         tk.Label(row, text=t(f'(비우면 {c.character_name(c.character)})', f'(empty = {c.character_name(c.character)})'),
-                 bg=B, fg='#8A8A98', font=('Malgun Gothic', 8)).pack(side='left', padx=6)
+                 bg=B, fg=C['dim'], font=('Malgun Gothic', 8)).pack(side='left', padx=6)
 
         row2 = tk.Frame(self.body, bg=B); row2.pack(fill='x', pady=(8, 0))
-        tk.Label(row2, text=t('캐릭터', 'Character'), bg=B, fg='#CCCCCC', width=8, anchor='w',
+        tk.Label(row2, text=t('캐릭터', 'Character'), bg=B, fg=C['ink2'], width=8, anchor='w',
                  font=('Malgun Gothic', 9)).pack(side='left')
         for cid in CHARACTERS:
             on = cid == c.character
@@ -4560,21 +4625,21 @@ class ChatLobbyWindow:
                 c.push_profile()
                 self.refresh(force=True)
             tk.Button(row2, text=char_display_name(cid).split(' ')[0], relief='flat', bd=0, cursor='hand2',
-                      bg='#3377E0' if on else '#2F2F3A', fg='white' if on else '#AAAAB4',
+                      bg=C['accent'] if on else C['field'], fg=C['accent_ink'] if on else C['ink2'],
                       font=('Malgun Gothic', 8, 'bold'), padx=6, pady=3,
-                      activebackground='#3377E0', activeforeground='white', command=pick).pack(side='left', padx=(0, 3))
+                      activebackground=C['accent'], activeforeground=C['accent_ink'], command=pick).pack(side='left', padx=(0, 3))
 
         self._profile_preview(var)
 
     def _profile_preview(self, nick_var):
         """방에 들어가기 전에 "다른 사람에게 내가 이렇게 보여요"를 미리 보여 준다 (닉네임·캐릭터·옷차림·레벨 실시간 반영)."""
         c, B = self.chat, self.BG
-        box = tk.Frame(self.body, bg='#26262E'); box.pack(fill='x', pady=(10, 0))
-        cv = tk.Canvas(box, width=132, height=108, bg='#26262E', highlightthickness=0)
+        box = tk.Frame(self.body, bg=C['panel']); box.pack(fill='x', pady=(10, 0))
+        cv = tk.Canvas(box, width=132, height=108, bg=C['panel'], highlightthickness=0)
         cv.pack(side='left', padx=(6, 0), pady=4)
-        tk.Label(box, text=t('미리보기', 'Preview'), bg='#26262E', fg='white', anchor='w',
+        tk.Label(box, text=t('미리보기', 'Preview'), bg=C['panel'], fg=C['ink'], anchor='w',
                  font=('Malgun Gothic', 9, 'bold')).place(x=150, y=14)
-        tk.Label(box, bg='#26262E', fg='#8A8A98', justify='left', anchor='nw', wraplength=190, font=('Malgun Gothic', 8),
+        tk.Label(box, bg=C['panel'], fg=C['dim'], justify='left', anchor='nw', wraplength=190, font=('Malgun Gothic', 8),
                  text=t('방에 들어가면 다른 사람에게 이렇게 보여요.\n닉네임·캐릭터를 바꾸면 바로 바뀌어요. 옷차림은 상점에서 바꿔요.',
                         'This is how others see you in the room.\nIt updates as you change nickname or character; outfits are changed in the shop.')
                  ).place(x=150, y=36)
@@ -4592,46 +4657,50 @@ class ChatLobbyWindow:
                       'equip': dict(self.manager.shop.equipped.get(c.character, {}))})
             av.tick_blink(); av.paint()
             draw_name_tag(cv, 66, 88, nick, True, int(self.manager.shop.level))
-            cv.after(100, tick)
+            try:
+                hidden = cv.winfo_toplevel().state() != 'normal'
+            except Exception:
+                hidden = False
+            cv.after(1000 if hidden else 100, tick)
         tick()
 
     def _lobby(self, button):
         c, B = self.chat, self.BG
-        button(self.body, t('새 방 만들기', 'Create a room'), '#3377E0',
+        button(self.body, t('새 방 만들기', 'Create a room'), C['accent'],
                lambda: threading.Thread(target=c.create_room, daemon=True).start()).pack(anchor='w')
         row = tk.Frame(self.body, bg=B); row.pack(fill='x', pady=(12, 0))
         var = tk.StringVar()
         ent = tk.Entry(row, textvariable=var, width=14, font=('Consolas', 13), relief='flat',
-                       bg='#2A2A34', fg='white', insertbackground='white')
+                       bg=C['field'], fg=C['ink'], insertbackground=C['ink'])
         ent.pack(side='left', ipady=4)
 
         def enter(_e=None):
             code = var.get()
             threading.Thread(target=lambda: c.join(code), daemon=True).start()
         ent.bind('<Return>', enter)
-        button(row, t('입장', 'Join'), '#F29926', enter).pack(side='left', padx=(8, 0))
-        tk.Label(self.body, text=t('방 코드 6자리', '6-character room code'), bg=B, fg='#666672',
+        button(row, t('입장', 'Join'), C['accent'], enter).pack(side='left', padx=(8, 0))
+        tk.Label(self.body, text=t('방 코드 6자리', '6-character room code'), bg=B, fg=C['dim'],
                  font=('Malgun Gothic', 8)).pack(anchor='w', pady=(2, 0))
 
     def _in_room(self, button):
         c, B = self.chat, self.BG
         row = tk.Frame(self.body, bg=B); row.pack(fill='x')
-        tk.Label(row, text=t('방 코드', 'Room code'), bg=B, fg='#CCCCCC', font=('Malgun Gothic', 9)).pack(side='left')
-        tk.Label(row, text=c.room_code, bg=B, fg='white', font=('Consolas', 20, 'bold')).pack(side='left', padx=10)
+        tk.Label(row, text=t('방 코드', 'Room code'), bg=B, fg=C['ink2'], font=('Malgun Gothic', 9)).pack(side='left')
+        tk.Label(row, text=c.room_code, bg=B, fg=C['ink'], font=('Consolas', 20, 'bold')).pack(side='left', padx=10)
 
         def copy():
             self.manager.root.clipboard_clear(); self.manager.root.clipboard_append(c.room_code)
-        button(row, t('복사', 'Copy'), '#555566', copy).pack(side='left')
-        tk.Label(row, text=f'{len(c.members)}/{buni_chat.MAX_MEMBERS}', bg=B, fg='#CCCCCC',
+        button(row, t('복사', 'Copy'), C['raised'], copy).pack(side='left')
+        tk.Label(row, text=f'{len(c.members)}/{buni_chat.MAX_MEMBERS}', bg=B, fg=C['ink2'],
                  font=('Consolas', 10)).pack(side='right')
-        colors = {'idle': '#8A8A98', 'working': '#F2BF33', 'done': '#4DC780'}
+        colors = {'idle': C['dim'], 'working': C['warn'], 'done': C['ok']}
         labels = {'idle': t('대기', 'Idle'), 'working': t('작업 중', 'Working'), 'done': t('완료', 'Done')}
         for m in c.members:
             r = tk.Frame(self.body, bg=B); r.pack(fill='x', pady=(6, 0))
             tk.Label(r, text='●', bg=B, fg=colors[m['motion']], font=('Malgun Gothic', 8)).pack(side='left')
-            tk.Label(r, text=m['name'], bg=B, fg='white', font=('Malgun Gothic', 10, 'bold')).pack(side='left', padx=6)
-            tk.Label(r, text=labels[m['motion']], bg=B, fg='#8A8A98', font=('Malgun Gothic', 9)).pack(side='left')
-        button(self.body, t('방 나가기', 'Leave room'), '#DB4D4D',
+            tk.Label(r, text=m['name'], bg=B, fg=C['ink'], font=('Malgun Gothic', 10, 'bold')).pack(side='left', padx=6)
+            tk.Label(r, text=labels[m['motion']], bg=B, fg=C['dim'], font=('Malgun Gothic', 9)).pack(side='left')
+        button(self.body, t('방 나가기', 'Leave room'), C['danger'],
                lambda: threading.Thread(target=c.leave, daemon=True).start()).pack(anchor='w', pady=(14, 0))
 
 
@@ -4683,10 +4752,16 @@ class BuniManager:
         self.sessions: dict[str, SessionWindow] = {}
         self._slot_map: dict[int, str] = {}
         self._disconnected: set[str] = set()   # 수동으로 끊긴 세션 ID 차단 목록
+        self._removed_at: dict[str, float] = {}   # 치운 세션 id → 치운 시각 (파일이 그 뒤로 안 바뀌었으면 다시 만들지 않는다)
+        self._pending_add: set[str] = set()       # 창 만들기를 예약해 둔 세션 id (감시 주기마다 중복 예약 방지)
+        self._squad_removed_at = 0.0              # 스쿼드 패널을 마지막으로 치운 시각 — 그 뒤로 안 바뀐 다른 작업의 스쿼드 파일로 새 패널을 만들지 않는다
         self._is_manually_hidden = False
         self._monthly_tokens = 0
         self._claude_was_running = False
         self._claude_not_running_streak = 0
+        self._claude_checked_at = 0.0
+        self._token_cache: dict = {}       # 경로 → ((연,월,mtime,size), 이번 달 토큰 합) — 안 바뀐 파일은 다시 안 읽는다
+        self._tokens_sent = False
         self._server_utilization: float | None = None
         self._server_resets_at:   datetime.datetime | None = None
         self._tray_icon = None   # _start_tray()에서 채움 — 트레이 툴팁에 한도 표시용
@@ -4724,8 +4799,18 @@ class BuniManager:
         return len(self._slot_map)
 
     def _add_session(self, session_id: str, event_file: Path):
+        self._pending_add.discard(session_id)
         if session_id in self.sessions:
             return
+        # 스쿼드 창이 이미 있으면 다른 스쿼드 작업 파일로 또 만들지 않는다 (소켓 경로·감시 루프 모두 이 관문을 지난다)
+        if session_id.startswith(buni_sessions.SQUAD_PREFIX):
+            if any(s.startswith(buni_sessions.SQUAD_PREFIX) for s in self.sessions):
+                return
+            try:                                  # 치운 뒤로 안 바뀐 묵은 스쿼드 파일은 되살리지 않는다
+                if event_file.stat().st_mtime <= self._squad_removed_at:
+                    return
+            except Exception:
+                return
         if session_id in self._disconnected:
             return
 
@@ -4774,8 +4859,25 @@ class BuniManager:
     def remove_session(self, session_id: str):
         win = self.sessions.pop(session_id, None)
         if win:
+            # 치운 뒤 파일에 새 이벤트가 쌓일 때까지는 같은 세션을 새 창으로 되살리지 않는다 (맥 ignoredSessionIds 와 같다)
+            self._removed_at[session_id] = time.time()
+            if session_id.startswith(buni_sessions.SQUAD_PREFIX):
+                self._squad_removed_at = self._removed_at[session_id]
             self._slot_map.pop(win.slot, None)
             win.destroy()
+
+    def collapse_squad_panels(self):
+        """스쿼드 팀장 패널은 하나만 — 둘 이상이면 이벤트 파일이 가장 최근에 갱신된 것만 남기고 나머지는 패널만 닫는다 (파일·데이터는 지우지 않는다).
+        시작 직후와 주기적 확인(_poll_sessions)에서 불러 어떤 경로로 생겼든 한 번 더 걸러 준다. 맥 collapseSquadPanels 와 같다."""
+        panels = {}
+        for sid, win in list(self.sessions.items()):
+            if sid.startswith(buni_sessions.SQUAD_PREFIX):
+                try:
+                    panels[sid] = win.event_file.stat().st_mtime
+                except OSError:
+                    panels[sid] = 0.0
+        for sid in buni_sessions.squad_panels_to_close(panels):
+            self.remove_session(sid)
 
     def cleanup_finished_sessions(self):
         """새 세션 추가 전 종료된(idle/completed) 세션 제거.
@@ -4927,12 +5029,31 @@ class BuniManager:
     # ── Session polling (main thread) ─────────────────────────
 
     def _poll_sessions(self):
+        self.collapse_squad_panels()
         for sid in list(self.sessions.keys()):
             win = self.sessions.get(sid)
             if win and not win.poll_events():
                 # event file gone — remove session
                 self.root.after(0, lambda s=sid: self.remove_session(s))
-        self.root.after(500, self._poll_sessions)
+        # 세션이 없거나 모두 조용하면(최근 이벤트 없음) 파일 확인을 늦춘다 — 새 이벤트는 1초 안에 본다
+        self.root.after(self._session_poll_ms(), self._poll_sessions)
+
+    SESSION_POLL_ACTIVE_MS = 500      # 일하는 중이거나 방금 이벤트가 있었을 때
+    SESSION_POLL_QUIET_MS  = 1000     # 한동안 조용할 때
+    SESSION_POLL_NONE_MS   = 2000     # 세션이 하나도 없을 때
+    SESSION_QUIET_AFTER    = 60       # 마지막 이벤트로부터 이 초가 지나면 조용하다고 본다
+
+    def _session_poll_ms(self) -> int:
+        wins = list(self.sessions.values())
+        if not wins:
+            return self.SESSION_POLL_NONE_MS
+        now = time.time()
+        for w in wins:
+            if w.state in SessionWindow.RUNNING_STATES or w.state in ('permission', 'ask_user'):
+                return self.SESSION_POLL_ACTIVE_MS
+            if now - w._last_event_time < self.SESSION_QUIET_AFTER:
+                return self.SESSION_POLL_ACTIVE_MS
+        return self.SESSION_POLL_QUIET_MS
 
     # ── File monitor (background thread) ─────────────────────
 
@@ -4941,12 +5062,17 @@ class BuniManager:
         while True:
             try:
                 found: dict[str, Path] = {}
+                mtimes: dict[str, float] = {}
                 for p in glob.glob(str(_TEMP / 'claude-companion-events-*.jsonl')):
                     fp  = Path(p)
                     sid = self._sid_from_file(fp)
                     if sid in self._disconnected:
                         continue
                     found[sid] = fp
+                    try:
+                        mtimes[sid] = fp.stat().st_mtime
+                    except OSError:
+                        mtimes[sid] = 0.0
                 # 세션 ID 없이 쓴 고정 파일 — 세션별 파일이 하나도 없을 때만 폴백으로 사용
                 fixed = _TEMP / 'claude-companion-events.jsonl'
                 if fixed.exists() and not found:
@@ -4958,27 +5084,44 @@ class BuniManager:
                     self.root.after(0, lambda: self.remove_session('windows-default'))
 
                 # New sessions
-                for sid, fp in found.items():
-                    if sid not in self.sessions:
-                        self.root.after(0, lambda s=sid, f=fp: self._add_session(s, f))
+                # (치운 세션의 파일이 그대로면 다시 만들지 않고, 스쿼드 파일은 부니 하나만 만든다)
+                candidates = {sid: mtimes.get(sid, 0.0) for sid in found
+                              if sid not in self.sessions
+                              and sid not in self._pending_add
+                              and mtimes.get(sid, 0.0) > self._removed_at.get(sid, 0.0)}
+                # 만들기를 예약만 해 둔 세션도 '이미 있는 것'으로 센다 — 안 그러면 예약 중에 돈 다음 감시가 다른 스쿼드 파일을 또 고른다
+                for sid in buni_sessions.pick_new_sessions(candidates, set(self.sessions) | set(self._pending_add), self._squad_removed_at):
+                    self._pending_add.add(sid)
+                    self.root.after(0, lambda s=sid, f=found[sid]: self._add_session(s, f))
 
                 # Claude process state (for idle detection)
-                running = self._is_claude_running()
-                if running:
-                    self._claude_not_running_streak = 0
-                    self._claude_was_running = True
-                else:
-                    self._claude_not_running_streak += 1
+                # tasklist 는 프로세스를 새로 띄우는 비싼 호출이라 간격을 두고 부르고,
+                # 세션이 없고 지켜볼 것도 없으면 더 드물게 부른다.
+                now = time.time()
+                gap = (self.CLAUDE_CHECK_SEC if (self.sessions or self._claude_was_running)
+                       else self.CLAUDE_CHECK_NO_SESSION_SEC)
+                if now - self._claude_checked_at >= gap:
+                    self._claude_checked_at = now
+                    if self._is_claude_running():
+                        self._claude_not_running_streak = 0
+                        self._claude_was_running = True
+                    else:
+                        self._claude_not_running_streak += 1
 
-                if self._claude_was_running and self._claude_not_running_streak >= 3:
-                    # 3틱(~3초) 연속 미감지 시 비활성 세션 제거, completed/permission 유지
-                    self._claude_was_running = False
-                    if self.sessions:
-                        self.root.after(0, self.cleanup_inactive_sessions)
+                    if self._claude_was_running and self._claude_not_running_streak >= self.CLAUDE_MISS_LIMIT:
+                        # 연속 미감지 시 비활성 세션 제거, completed/permission 유지
+                        self._claude_was_running = False
+                        if self.sessions:
+                            self.root.after(0, self.cleanup_inactive_sessions)
 
             except Exception:
                 pass
-            time.sleep(1.0)
+            time.sleep(self.MONITOR_SLEEP_SEC)
+
+    MONITOR_SLEEP_SEC               = 2.0    # 이벤트 파일 목록 확인 주기 (전: 1초)
+    CLAUDE_CHECK_SEC                = 4.0    # 세션이 있을 때 tasklist 주기 (전: 1초)
+    CLAUDE_CHECK_NO_SESSION_SEC     = 10.0   # 세션이 없을 때 (전: 1초)
+    CLAUDE_MISS_LIMIT               = 2      # 연속 미감지 횟수 → 약 8초 (전: 3틱 ≈ 3초)
 
     def _all_sessions_idle(self):
         for win in list(self.sessions.values()):
@@ -5015,29 +5158,51 @@ class BuniManager:
                 projects_dir = Path.home() / '.claude' / 'projects'
                 if projects_dir.exists():
                     now = datetime.datetime.now()
+                    month_start = datetime.datetime(now.year, now.month, 1).timestamp()
+                    seen = set()
                     for jf in projects_dir.rglob('*.jsonl'):
                         try:
-                            for line in jf.read_text(
-                                    encoding='utf-8', errors='replace').splitlines():
-                                if not line.strip():
-                                    continue
-                                obj = json.loads(line)
-                                ts_str = obj.get('timestamp', '')
-                                if ts_str:
-                                    try:
-                                        ts = datetime.datetime.fromisoformat(
-                                            ts_str.replace('Z', '+00:00'))
-                                        if ts.year != now.year or ts.month != now.month:
-                                            continue
-                                    except Exception:
+                            st = jf.stat()
+                            # 이번 달 시작 전에 마지막으로 바뀐 파일엔 이번 달 기록이 없다 — 읽지 않는다
+                            if st.st_mtime < month_start:
+                                continue
+                            key = str(jf)
+                            seen.add(key)
+                            sig = (now.year, now.month, st.st_mtime_ns, st.st_size)
+                            hit = self._token_cache.get(key)
+                            if hit and hit[0] == sig:      # 안 바뀐 파일은 지난번 합계를 쓴다
+                                total += hit[1]
+                                continue
+                            part = 0
+                            with jf.open(encoding='utf-8', errors='replace') as f:
+                                for line in f:
+                                    if not line.strip():
                                         continue
-                                usage = (obj.get('message', {}) or {}).get('usage', {})
-                                total += usage.get('input_tokens', 0)
-                                total += usage.get('output_tokens', 0)
+                                    obj = json.loads(line)
+                                    ts_str = obj.get('timestamp', '')
+                                    if ts_str:
+                                        try:
+                                            ts = datetime.datetime.fromisoformat(
+                                                ts_str.replace('Z', '+00:00'))
+                                            if ts.year != now.year or ts.month != now.month:
+                                                continue
+                                        except Exception:
+                                            continue
+                                    usage = (obj.get('message', {}) or {}).get('usage', {})
+                                    part += usage.get('input_tokens', 0)
+                                    part += usage.get('output_tokens', 0)
+                            self._token_cache[key] = (sig, part)
+                            total += part
                         except Exception:
                             continue
+                    for k in list(self._token_cache):
+                        if k not in seen:
+                            del self._token_cache[k]
+                changed = total != self._monthly_tokens
                 self._monthly_tokens = total
-                self.root.after(0, self._broadcast_tokens)
+                if changed or not self._tokens_sent:
+                    self._tokens_sent = True
+                    self.root.after(0, self._broadcast_tokens)
             except Exception:
                 pass
             time.sleep(300)
@@ -5158,14 +5323,16 @@ class BuniManager:
             self._team_window.show(job_id)
 
     def _team_tick(self):
-        """20초마다 예약 시간대인지 보고 대기열을 진행한다 (진행 중이면 PC가 잠들지 않게 한다)."""
+        """20초(쉴 땐 45초)마다 예약 시간대인지 보고 대기열을 진행한다 (진행 중이면 PC가 잠들지 않게 한다)."""
         try:
             self.team_sched.tick()
             if self.team_sched.running_job_id and sys.platform.startswith('win'):
                 ctypes.windll.kernel32.SetThreadExecutionState(0x00000001)       # ES_SYSTEM_REQUIRED
         except Exception:
             pass
-        self.root.after(20000, self._team_tick)
+        # 진행 중일 때만 20초, 쉬는 동안엔 45초 간격 (예약 시작은 이 안에 잡힌다)
+        busy = getattr(self.team_sched, 'running_job_id', None) is not None
+        self.root.after(20000 if busy else 45000, self._team_tick)
 
     def _team_unseen(self) -> int:
         try:

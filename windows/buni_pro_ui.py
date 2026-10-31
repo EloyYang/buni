@@ -8,16 +8,21 @@ import webbrowser
 
 import buni_pro
 
-BG, PANEL, DIM, ACCENT = '#1E1E24', '#2A2A34', '#8A8A98', '#3377E0'
-GOLD = '#FAB84D'
+from buni_theme import C, SPACE, FONT_SIZE, mix  # 색·간격은 docs/design-system.md 토큰
+
+BG, PANEL, DIM, ACCENT = C['bg'], C['field'], C['dim'], C['accent']
+GOLD = C['accent']  # 잠금 안내 글자 (맥 ProUpgradeView 의 accent 와 같다)
 FONT = 'Malgun Gothic'
 
 
 def _btn(parent, text, command, color=ACCENT, state='normal'):
-    return tk.Button(parent, text=text, bg=color, fg='white', relief='flat', bd=0,
-                     font=(FONT, 9), padx=12, pady=4, cursor='hand2' if state == 'normal' else 'arrow',
-                     activebackground='#2255BB', activeforeground='white',
-                     disabledforeground='#BBBBBB', state=state, command=command)
+    # 주 버튼(accent)은 accent_ink 글자, 보조 버튼(raised)은 ink 글자
+    fg = C['accent_ink'] if color == ACCENT else C['ink']
+    return tk.Button(parent, text=text, bg=color, fg=fg, relief='flat', bd=0,
+                     font=(FONT, FONT_SIZE['body']), padx=SPACE['md'], pady=SPACE['xs'],
+                     cursor='hand2' if state == 'normal' else 'arrow',
+                     activebackground=C['accent_ink'] if color == ACCENT else C['line'], activeforeground=fg,
+                     disabledforeground=C['dim'], state=state, command=command)
 
 
 def _center(win):
@@ -61,23 +66,23 @@ class ProUpgradeWindow:
         win.attributes('-topmost', True)
 
         body = tk.Frame(win, bg=BG)
-        body.pack(padx=20, pady=16, anchor='w')
+        body.pack(padx=SPACE['xl'], pady=SPACE['lg'], anchor='w')
 
-        tk.Label(body, text='⭐ ' + t('부니 Pro', 'Buni Pro'), bg=BG, fg='white',
+        tk.Label(body, text='⭐ ' + t('부니 Pro', 'Buni Pro'), bg=BG, fg=C['ink'],
                  font=(FONT, 14, 'bold')).pack(anchor='w')
         tk.Label(body, text=t(*buni_pro.status_text(store.status())), bg=BG, fg=DIM,
                  font=(FONT, 9)).pack(anchor='w', pady=(2, 8))
 
         if reason:
-            tk.Label(body, text='🔒 ' + reason, bg='#3A3220', fg=GOLD, font=(FONT, 9),
+            tk.Label(body, text='🔒 ' + reason, bg=mix(GOLD, BG, 0.12), fg=GOLD, font=(FONT, 9),
                      justify='left', anchor='w', wraplength=360, padx=10, pady=8).pack(fill='x', pady=(0, 8))
 
         for fid, (ko, en) in buni_pro.FEATURES.items():
-            tk.Label(body, text=('✅ ' if store.can(fid) else '🔒 ') + t(ko, en), bg=BG, fg='#DDDDDD',
+            tk.Label(body, text=('✅ ' if store.can(fid) else '🔒 ') + t(ko, en), bg=BG, fg=C['ink'],
                      font=(FONT, 9)).pack(anchor='w')
 
         self._sep(body)
-        tk.Label(body, text=t('플랜', 'Plans'), bg=BG, fg='white', font=(FONT, 10, 'bold')).pack(anchor='w')
+        tk.Label(body, text=t('플랜', 'Plans'), bg=BG, fg=C['ink'], font=(FONT, 10, 'bold')).pack(anchor='w')
         for plan, ko, en, note_ko, note_en in (
                 ('monthly',  '월간', 'Monthly',  '매달', 'per month'),
                 ('yearly',   '연간', 'Yearly',   '1년 · 약 33% 저렴', 'per year · ~33% less'),
@@ -85,13 +90,13 @@ class ProUpgradeWindow:
             self._plan_row(body, plan, t(ko, en), t(note_ko, note_en))
 
         self._sep(body)
-        tk.Label(body, text=t('라이선스 키', 'License key'), bg=BG, fg='white',
+        tk.Label(body, text=t('라이선스 키', 'License key'), bg=BG, fg=C['ink'],
                  font=(FONT, 10, 'bold')).pack(anchor='w')
         row = tk.Frame(body, bg=BG)
         row.pack(anchor='w', pady=(4, 0))
         self._key = tk.StringVar()
-        entry = tk.Entry(row, textvariable=self._key, width=34, bg=PANEL, fg='white', relief='flat',
-                         insertbackground='white', font=('Consolas', 9))
+        entry = tk.Entry(row, textvariable=self._key, width=34, bg=PANEL, fg=C['ink'], relief='flat',
+                         insertbackground=C['ink'], font=('Consolas', 9))
         entry.pack(side='left', ipady=3)
         _btn(row, t('등록', 'Activate'), self._activate).pack(side='left', padx=(6, 0))
         self._msg = tk.Label(body, text='', bg=BG, fg=DIM, font=(FONT, 8), justify='left',
@@ -99,7 +104,7 @@ class ProUpgradeWindow:
         self._msg.pack(anchor='w', pady=(4, 0))
 
         self._sep(body)
-        tk.Label(body, text=t('꾸미기 팩', 'Cosmetic packs'), bg=BG, fg='white',
+        tk.Label(body, text=t('꾸미기 팩', 'Cosmetic packs'), bg=BG, fg=C['ink'],
                  font=(FONT, 10, 'bold')).pack(anchor='w')
         for p in buni_pro.PACKS:
             self._pack_row(body, p)
@@ -108,15 +113,15 @@ class ProUpgradeWindow:
                               '앱은 사용 정보를 수집하지 않아요.',
                               'Free features (session panels, status, chat, base characters) keep working without Pro.\n'
                               'The app collects no usage data.'),
-                 bg=BG, fg='#555566', font=(FONT, 8), justify='left').pack(anchor='w', pady=(12, 0))
-        _btn(body, t('닫기', 'Close'), self.close, color='#444455').pack(anchor='e', pady=(8, 0))
+                 bg=BG, fg=DIM, font=(FONT, 8), justify='left').pack(anchor='w', pady=(12, 0))
+        _btn(body, t('닫기', 'Close'), self.close, color=C['raised']).pack(anchor='e', pady=(8, 0))
 
         win.bind('<Escape>', lambda _: self.close())
         _center(win)
 
     @staticmethod
     def _sep(parent):
-        tk.Frame(parent, bg='#3A3A44', height=1).pack(fill='x', pady=10)
+        tk.Frame(parent, bg=C['line'], height=1).pack(fill='x', pady=10)
 
     def _open_link(self, link):
         try:
@@ -131,10 +136,10 @@ class ProUpgradeWindow:
         row.pack(fill='x', pady=3)
         col = tk.Frame(row, bg=BG)
         col.pack(side='left')
-        tk.Label(col, text=f'{name}  {price}', bg=BG, fg='white', font=(FONT, 9, 'bold')).pack(anchor='w')
+        tk.Label(col, text=f'{name}  {price}', bg=BG, fg=C['ink'], font=(FONT, 9, 'bold')).pack(anchor='w')
         tk.Label(col, text=note, bg=BG, fg=DIM, font=(FONT, 8)).pack(anchor='w')
         _btn(row, self._t(*label), (lambda l=link: self._open_link(l)) if enabled else (lambda: None),
-             color=ACCENT if enabled else '#555566',
+             color=ACCENT if enabled else C['raised'],
              state='normal' if enabled else 'disabled').pack(side='right')
 
     def _pack_row(self, parent, p):
@@ -143,7 +148,7 @@ class ProUpgradeWindow:
         row.pack(fill='x', pady=3)
         col = tk.Frame(row, bg=BG)
         col.pack(side='left')
-        tk.Label(col, text=t(p.name_ko, p.name_en), bg=BG, fg='white', font=(FONT, 9)).pack(anchor='w')
+        tk.Label(col, text=t(p.name_ko, p.name_en), bg=BG, fg=C['ink'], font=(FONT, 9)).pack(anchor='w')
         if p.pro_only:
             note = t('Pro 전용 · 구독하면 포함', 'Pro only · included with Pro')
         else:
@@ -161,7 +166,7 @@ class ProUpgradeWindow:
             enabled, link, label = buni_pro.checkout_button('pack:' + p.id)
             _btn(row, t('구매', 'Buy') if enabled else t(*label),
                  (lambda l=link: self._open_link(l)) if enabled else (lambda: None),
-                 color=ACCENT if enabled else '#555566',
+                 color=ACCENT if enabled else C['raised'],
                  state='normal' if enabled else 'disabled').pack(side='right')
 
     def _activate(self):
@@ -172,9 +177,9 @@ class ProUpgradeWindow:
                 try: self._on_change()
                 except Exception: pass
             self.show()
-            self._msg.config(text=t('등록됐어요! 고마워요 🐰', 'Activated! Thank you 🐰'), fg='#4DC780')
+            self._msg.config(text=t('등록됐어요! 고마워요 🐰', 'Activated! Thank you 🐰'), fg=C['ok'])
         else:
-            self._msg.config(text=t(*buni_pro.activation_message(reason)), fg='#E6665A')
+            self._msg.config(text=t(*buni_pro.activation_message(reason)), fg=C['danger'])
 
 
 # ═══════════════════════ 첫 실행 안내 ═══════════════════════
@@ -230,18 +235,18 @@ class OnboardingWindow:
             w.destroy()
         icon, title, text = self._pages()[self._page]
         tk.Label(self._body, text=icon, bg=BG, font=(FONT, 36)).pack(anchor='w')
-        tk.Label(self._body, text=title, bg=BG, fg='white', font=(FONT, 14, 'bold')).pack(anchor='w', pady=(8, 6))
-        tk.Label(self._body, text=text, bg=BG, fg='#CCCCCC', font=(FONT, 10), justify='left').pack(anchor='w')
+        tk.Label(self._body, text=title, bg=BG, fg=C['ink'], font=(FONT, 14, 'bold')).pack(anchor='w', pady=(8, 6))
+        tk.Label(self._body, text=text, bg=BG, fg=C['ink2'], font=(FONT, 10), justify='left').pack(anchor='w')
 
         dots = ''.join('●' if i == self._page else '○' for i in range(3))
         tk.Label(self._bar, text=dots, bg=BG, fg=DIM, font=(FONT, 9)).pack(side='left')
         last = self._page == 2
         if last:
             _btn(self._bar, t('시작하기', 'Get started'), self._finish).pack(side='right')
-            _btn(self._bar, t('Pro 알아보기', 'See Pro'), self._see_pro, color='#444455').pack(side='right', padx=(0, 6))
+            _btn(self._bar, t('Pro 알아보기', 'See Pro'), self._see_pro, color=C['raised']).pack(side='right', padx=(0, 6))
         else:
             _btn(self._bar, t('다음', 'Next'), self._next).pack(side='right')
-            _btn(self._bar, t('건너뛰기', 'Skip'), self._finish, color='#444455').pack(side='right', padx=(0, 6))
+            _btn(self._bar, t('건너뛰기', 'Skip'), self._finish, color=C['raised']).pack(side='right', padx=(0, 6))
 
     def _next(self):
         self._page += 1
@@ -264,7 +269,7 @@ def fill_settings_section(f, t, store, open_upgrade, open_onboarding):
     """설정 창의 Pro 구역을 (다시) 채운다 — 상태가 바뀌면 같은 Frame 에 다시 불러도 된다."""
     for w in f.winfo_children():
         w.destroy()
-    tk.Label(f, text=t('부니 Pro', 'Buni Pro'), bg=BG, fg='white', font=(FONT, 10, 'bold')).pack(anchor='w')
+    tk.Label(f, text=t('부니 Pro', 'Buni Pro'), bg=BG, fg=C['ink'], font=(FONT, 10, 'bold')).pack(anchor='w')
     tk.Label(f, text=t(*buni_pro.status_text(store.status())), bg=BG, fg=DIM, font=(FONT, 9)).pack(anchor='w', pady=(2, 4))
     row = tk.Frame(f, bg=BG)
     row.pack(anchor='w')

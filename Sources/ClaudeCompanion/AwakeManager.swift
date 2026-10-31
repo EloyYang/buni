@@ -94,6 +94,7 @@ final class AwakeManager: ObservableObject {
         scheduleTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.applySchedule()
         }
+        scheduleTimer?.tolerance = 10
         applySchedule()
     }
 
@@ -141,6 +142,7 @@ final class AwakeManager: ObservableObject {
         followTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             self?.evaluateFollowing()
         }
+        followTimer?.tolerance = 2
         return true
     }
 
@@ -235,6 +237,7 @@ final class AwakeManager: ObservableObject {
         lidTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.checkLid()
         }
+        lidTimer?.tolerance = 1
     }
 
     private func stopLidWatch() {

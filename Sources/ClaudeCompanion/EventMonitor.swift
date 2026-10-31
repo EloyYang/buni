@@ -30,6 +30,7 @@ class EventMonitor {
     private let queue = DispatchQueue(label: "claude.companion.events", qos: .background)
     private var timer:       DispatchSourceTimer?
     private var serverTimer: DispatchSourceTimer?
+    private var watcher:     DispatchSourceFileSystemObject?
     private static let serverUsageFile = "/tmp/claude-companion-plan-usage.json"
     private static let fetchScript = NSHomeDirectory() + "/.claude/companion-fetch-usage.py"
 
@@ -123,8 +124,28 @@ class EventMonitor {
     }
 
     func start() {
+        // setup()과 showCompanion()이 둘 다 부르므로, 이미 돌고 있으면 타이머를 또 만들지 않는다
+        // (예전에는 앞 타이머가 취소 못 하는 채로 남아 폴링이 두 배로 돌았다)
+        guard timer == nil else { return }
+        // 이벤트 파일에 줄이 덧붙으면 바로 읽는다 — 0.5초 폴링 대신 파일 변경 알림(vnode)을 쓴다.
+        // 아래 타이머는 알림을 놓쳤을 때(파일 교체 등)와 오래 걸림·종료 판단용 안전망이라 느려도 된다.
+        let fd = open(eventFile, O_EVTONLY)
+        if fd >= 0 {
+            let w = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd,
+                                                              eventMask: [.write, .extend],
+                                                              queue: queue)
+            w.setEventHandler { [weak self] in self?.pollFile() }
+            w.setCancelHandler { close(fd) }
+            w.resume()
+            watcher = w
+        }
+
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now(), repeating: .milliseconds(500))
+        // 파일 감시가 붙었으면 2초(판정 기준은 20초 이상), 못 붙었으면 예전처럼 0.5초
+        let hasWatcher = watcher != nil
+        t.schedule(deadline: .now(),
+                   repeating: hasWatcher ? .seconds(2) : .milliseconds(500),
+                   leeway: hasWatcher ? .milliseconds(500) : .milliseconds(100))
         t.setEventHandler { [weak self] in
             self?.pollFile()
             self?.reapFinishedBackgroundTasks()
@@ -134,7 +155,7 @@ class EventMonitor {
         timer = t
 
         let st = DispatchSource.makeTimerSource(queue: queue)
-        st.schedule(deadline: .now() + 2, repeating: .seconds(300))
+        st.schedule(deadline: .now() + 2, repeating: .seconds(300), leeway: .seconds(30))
         st.setEventHandler { [weak self] in
             self?.fetchServerUsage()
             self?.updateMonthlyTokens()
@@ -148,6 +169,7 @@ class EventMonitor {
     func stop() {
         timer?.cancel();       timer = nil
         serverTimer?.cancel(); serverTimer = nil
+        watcher?.cancel();     watcher = nil
         pendingCompletionWork?.cancel(); pendingCompletionWork = nil
     }
 

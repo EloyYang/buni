@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// 상점에서 산 꾸미기 아이템·무기를 캐릭터 위에 그린다.
 ///
@@ -164,7 +165,7 @@ struct EquipmentFrontLayer: View {
     /// 보여주기가 끝나는 타이머가 새로 시작된 보여주기를 끊지 않도록 구분하는 표
     @State private var showToken = 0
     /// 몇 초마다 꺼낼지 고민하는 주기 — 확률로 걸러서 평균 12초 안팎에 한 번 나온다
-    private let idleDrawTick = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
+    private let idleDrawTick = Timer.publish(every: 4, tolerance: 2, on: .main, in: .common).autoconnect()
 
     /// 무기를 드는 자리
     private enum Hold: Hashable {
@@ -193,11 +194,27 @@ struct EquipmentFrontLayer: View {
         }
         .offset(y: bodyDY)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: hold)
-        .onAppear { sway = true; pulse = true }
+        .onAppear { syncLoops() }
+        .onChange(of: ctrl.isPaused) { _ in syncLoops() }
         .onReceive(idleDrawTick) { _ in maybeShowWeaponWhileIdle() }
         .onChange(of: ctrl.state) { _ in
             // 작업이 시작되는 등 대기 상태를 벗어나면 보여주기를 바로 접는다
             if ctrl.isShowingWeapon, !isIdleReady { ctrl.isShowingWeapon = false; swingAngle = 0 }
+        }
+    }
+
+    /// 끝없이 반복하는 반짝임·흔들림 — 가려졌거나 화면이 꺼져 있으면 멈춘다(보이지 않는데 계속 그릴 이유가 없다)
+    private func loop(_ duration: Double) -> Animation? {
+        ctrl.isPaused ? nil : .easeInOut(duration: duration).repeatForever(autoreverses: true)
+    }
+
+    private func syncLoops() {
+        var t = Transaction(animation: nil)
+        t.disablesAnimations = true
+        if ctrl.isPaused {
+            withTransaction(t) { sway = false; pulse = false }   // 돌던 반복 애니메이션을 끊는다
+        } else {
+            sway = true; pulse = true
         }
     }
 
@@ -210,7 +227,7 @@ struct EquipmentFrontLayer: View {
     ///  ① 오른팔을 들어 올리며 무기를 꺼낸다 → ② 천천히 좌우로 기울여 보여준다 →
     ///  ③ 팔을 내리며 집어넣는다. 팔 동작은 캐릭터 뷰가 isShowingWeapon에 맞춰 한다.
     private func maybeShowWeaponWhileIdle() {
-        guard isIdleReady, !ctrl.isShowingWeapon, !ctrl.isSliding,
+        guard isIdleReady, !ctrl.isPaused, !ctrl.isShowingWeapon, !ctrl.isSliding,
               shop.resolved(.weapon, for: character, tryOn: tryOn).map({ $0.id != "carrot" }) == true,
               Int.random(in: 0..<3) == 0 else { return }
 
@@ -269,7 +286,7 @@ struct EquipmentFrontLayer: View {
             }
             .opacity(pulse ? 1.0 : 0.72)
             .offset(y: pulse ? -3 : 0)                    // 둥둥 떠 있는 느낌
-            .animation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true), value: pulse)
+            .animation(loop(1.3), value: pulse)
         case "devil_horns":
             let red  = Color(red: 0.80, green: 0.10, blue: 0.14)
             let dark = Color(red: 0.48, green: 0.04, blue: 0.10)
@@ -375,7 +392,7 @@ struct EquipmentFrontLayer: View {
         .rotationEffect(.degrees(ctrl.isShowingWeapon ? swingAngle : 0))
         // 보여줄 때는 천천히 흔들림 없이, 작업 중에는 계속 살짝 흔들린다
         .rotationEffect(.degrees(hold == .showOff ? 0 : (sway ? 9 : 2)))
-        .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: sway)
+        .animation(loop(0.7), value: sway)
         // 왼손은 거울상으로 — 칼날이 바깥(왼쪽)으로 기울어야 자연스럽다
         .scaleEffect(x: hold == .raisedLeft ? -1 : 1, y: 1)
         .offset(x: (hold == .raisedLeft ? -3.7 : 3.7) * P,
@@ -406,7 +423,7 @@ struct EquipmentFrontLayer: View {
             blk(0.5, 0.7, core, x: -0.4, y: pulse ? -5.5 : -5.1)
             blk(0.4, 0.6, hot,  x: 0.4,  y: pulse ? -5.2 : -5.6)
         }
-        .animation(.easeInOut(duration: 0.35).repeatForever(autoreverses: true), value: pulse)
+        .animation(loop(0.35), value: pulse)
     }
 
     private var baton: some View {
@@ -445,7 +462,7 @@ struct EquipmentFrontLayer: View {
             blk(0.3, 1.2, metal, x:  0.8, y: -4.4)
             blk(0.2, 0.3, Color.white.opacity(pulse ? 0.9 : 0.4), y: -5.5)   // 끝 반짝임
         }
-        .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
+        .animation(loop(0.6), value: pulse)
     }
 
     private var staff: some View {
@@ -461,7 +478,7 @@ struct EquipmentFrontLayer: View {
             blk(0.25, 0.25, orb, x: -1.3, y: pulse ? -5.4 : -5.0)
             blk(0.25, 0.25, orb, x: 1.3,  y: pulse ? -4.8 : -5.3)
         }
-        .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
+        .animation(loop(0.6), value: pulse)
     }
 }
 

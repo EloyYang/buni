@@ -110,7 +110,7 @@ class SessionWindow {
             ctrl.memo       = saved
             ctrl.memoIsAuto = false
         } else {
-            ctrl.memo       = UserDefaults.standard.string(forKey: "memo.slot.\(slot)") ?? ""
+            ctrl.memo       = SessionWindow.squadLeadMemo(sessionId) ?? UserDefaults.standard.string(forKey: "memo.slot.\(slot)") ?? ""
             ctrl.memoIsAuto = true
         }
         // 전체 허용 모드 복원: 세션 UUID → 슬롯 기반 순서로 시도
@@ -151,7 +151,7 @@ class SessionWindow {
             controller.memo       = saved
             controller.memoIsAuto = false
         } else {
-            controller.memo       = UserDefaults.standard.string(forKey: "memo.slot.\(slot)") ?? ""
+            controller.memo       = SessionWindow.squadLeadMemo(sessionId) ?? UserDefaults.standard.string(forKey: "memo.slot.\(slot)") ?? ""
             controller.memoIsAuto = true
         }
 
@@ -220,7 +220,7 @@ class SessionWindow {
     private func startTitleSync() {
         guard sessionId != "__legacy__" else { return }
         let t = DispatchSource.makeTimerSource(queue: titleQueue)
-        t.schedule(deadline: .now(), repeating: .seconds(15))
+        t.schedule(deadline: .now(), repeating: .seconds(15), leeway: .seconds(5))
         t.setEventHandler { [weak self] in self?.syncSessionTitle() }
         t.resume()
         titleSyncTimer = t
@@ -231,7 +231,19 @@ class SessionWindow {
         titleSyncTimer = nil
     }
 
+    /// 스쿼드 팀장 부니는 세션 이름이 없다 — 메모 자리에 '부니(팀장)' 을 보여 준다 (사용자가 직접 정한 메모가 있으면 그게 우선).
+    static func squadLeadMemo(_ sessionId: String) -> String? {
+        sessionId.hasPrefix("squad-") ? L.t("부니(팀장)", "Buni (Lead)") : nil
+    }
+
     private func syncSessionTitle() {
+        if let lead = SessionWindow.squadLeadMemo(sessionId) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.controller.memoIsAuto, self.controller.memo != lead else { return }
+                self.controller.memo = lead
+            }
+            return
+        }
         guard let title = SessionTitleReader.title(for: sessionId), !title.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -269,6 +281,14 @@ class SessionWindow {
         p.contentView = ClickThroughHostingView(rootView: rootView)
         panel = p
 
+        // 가려지거나(occlusion) 화면이 꺼지면 끝없는 애니메이션을 멈춘다
+        NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification, object: p)
+            .merge(with: NotificationCenter.default.publisher(for: AppActivity.didChange))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.syncPaused() }
+            .store(in: &cancellables)
+        syncPaused()
+
         // idle ↔ non-idle 전환 때만 패널 위치를 애니메이션
         // (thinking→toolUse 같은 sub-state 변화마다 호출하면 슬롯 1+ 패널이 아래로 밀리는 버그 발생)
         controller.$state
@@ -277,6 +297,12 @@ class SessionWindow {
             .removeDuplicates()
             .sink { [weak self] isIdle in self?.animatePanel(isIdle: isIdle) }
             .store(in: &cancellables)
+    }
+
+    private func syncPaused() {
+        let hidden = !(panel?.occlusionState.contains(.visible) ?? false)
+        let paused = hidden || AppActivity.shared.screenAsleep
+        if controller.isPaused != paused { controller.isPaused = paused }
     }
 
     // MARK: - Show / Hide
@@ -532,6 +558,7 @@ class SessionWindow {
         passthroughTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
             self?.updateMousePassthrough()
         }
+        passthroughTimer?.tolerance = 0.2   // 깨우기를 다른 타이머와 묶어 CPU가 덜 깬다
     }
 
     func updateMousePassthrough() {

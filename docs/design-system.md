@@ -1,4 +1,83 @@
-# 부니 디자인 시스템 (v2 — Raycast·Apple 톤)
+# 부니 디자인 시스템
+
+맥 앱(SwiftUI) · Windows 앱(Tk) · 사이트(`docs/index.html`)가 같은 값을 쓴다. **값은 이 문서가 기준**이고, 코드에서는 아래 세 곳에만 적는다.
+
+| 어디 | 파일 |
+|---|---|
+| 맥 | `Sources/ClaudeCompanion/BuniTheme.swift` (`BuniTheme`) |
+| Windows | `windows/buni_theme.py` |
+| 사이트 | `docs/index.html` 맨 위 `:root` |
+
+값을 바꾸면 세 곳과 `tests/test_design_tokens.py` 가 서로 같은지 확인한다(시험이 색·간격·모서리 값을 세 파일에서 읽어 비교한다).
+
+## 참고한 원칙 (로고·상표·에셋은 쓰지 않는다)
+- **Raycast 쪽**: 어두운 바탕 위에 낮은 대비의 면(bg → panel → field)을 겹쳐 깊이를 만들고, 강조색은 한 가지만 아주 아끼며, 목록·키보드 중심의 촘촘하지만 숨 쉬는 간격을 쓴다.
+- **Apple 쪽**: 시스템 서체 계층(제목·본문·보조), 4pt 격자, 둥근 모서리의 일관된 단계, 얕고 부드러운 그림자, 라이트/다크가 같은 의미의 색 이름을 공유한다.
+- 부니만의 것: 픽셀아트 토끼의 당근색(carrot)을 유일한 브랜드 강조색으로 쓴다. 캐릭터 그림은 이 시스템의 영향을 받지 않는다.
+
+## 1. 색 (이름 = 의미)
+| 토큰 | 다크 | 라이트 | 쓰임 |
+|---|---|---|---|
+| `bg` | `#1E1E24` | `#F5F5F7` | 창 바탕 |
+| `rail` | `#17171D` | `#ECECF0` | 사이드바 |
+| `panel` | `#26262E` | `#FFFFFF` | 카드·패널 |
+| `field` | `#2A2A34` | `#F0F0F4` | 입력창·칩 |
+| `raised` | `#34343F` | `#E4E4EA` | 눌림·선택·호버 |
+| `line` | `#3A3A44` | `#D8D8E0` | 1px 구분선·테두리 |
+| `ink` | `#F2F2F6` | `#1D1D22` | 제목·본문 |
+| `ink2` | `#C4C4CE` | `#4A4A55` | 보조 본문 |
+| `dim` | `#8A8A98` | `#6A6A78` | 설명·라벨·placeholder |
+| `accent` | `#F28C2E` | `#D9731A` | 브랜드 강조(주 버튼·선택 표시). 위 글자는 `accent_ink` |
+| `accent_ink` | `#1A1206` | `#FFFFFF` | accent 위 글자 |
+| `info` | `#6AA9FF` | `#2F6FD6` | 링크·정보 |
+| `ok` | `#4DC780` | `#1F8F4E` | 성공·진행 중 |
+| `warn` | `#D9B25A` | `#A9791A` | 주의·확인 필요 |
+| `danger` | `#E65A66` | `#C8323F` | 오류·삭제·막힘 |
+
+규칙: 한 화면에서 `accent` 는 주 행동 하나(또는 선택 표시)에만 쓴다. 의미색(`ok`/`warn`/`danger`/`info`)은 글자·점·테두리에 쓰고 넓은 면을 채우지 않는다(면은 12% 투명도 틴트).
+
+## 2. 다크/라이트
+- 같은 토큰 이름이 모드에 따라 다른 값을 가진다. 코드는 색 값을 직접 쓰지 않고 토큰 이름만 쓴다.
+- 기본은 **다크**. 맥·Windows 앱 창은 지금까지처럼 다크 고정이고, 라이트 값은 코드에 정의만 해 둔다(`BuniTheme.light` / `buni_theme.LIGHT`, 팔레트를 고르는 함수 `palette(dark=True)`).
+- 사이트는 다크 고정(그림 속 목업이 다크 전제). 라이트 대응이 필요하면 같은 이름의 변수만 `@media (prefers-color-scheme: light)` 에서 바꾼다.
+- 글자 대비 최소 4.5:1(`ink`/`ink2` 가 `bg`·`panel` 위에서 충족, `dim` 은 보조 문구 전용).
+
+## 3. 타이포
+시스템 서체를 쓴다(맥 SF Pro, Windows Segoe UI → 한글 Malgun Gothic). 숫자·코드는 mono. 사이트는 Fredoka(제목)·Manrope(본문)·Press Start 2P(픽셀 라벨)을 그대로 두고 크기 단계만 맞춘다.
+
+| 토큰 | 크기(pt/px) | 굵기 | 쓰임 |
+|---|---|---|---|
+| `title` | 18 | 700 | 창 제목 |
+| `heading` | 13 | 600 | 구역 제목 |
+| `body` | 12 | 400 | 본문 |
+| `small` | 11 | 400 | 보조 |
+| `caption` | 10 | 400 | 주석·힌트 |
+
+Windows 는 9pt 기본(Tk 단위)이라 `FONT_SIZE = {title:14, heading:10, body:9, small:8, caption:8}` 로 환산한다.
+
+## 4. 간격 (4pt 격자)
+`xs 4 · sm 8 · md 12 · lg 16 · xl 24 · xxl 32`. 창 안쪽 여백은 `xl`(24), 구역 사이는 `lg`, 줄 사이는 `sm`/`xs`.
+
+## 5. 모서리
+`sm 6`(칩·입력창) · `md 10`(카드·버튼) · `lg 14`(큰 패널·말풍선) · `pill 999`. Tk 는 둥근 모서리가 없어 `flat` + 1px `line` 테두리로 대신하고, 값은 사이트·맥에서만 쓴다.
+
+## 6. 그림자·깊이
+다크에서는 그림자보다 **면 색 차이**로 깊이를 만든다(bg < panel < raised). 그림자는 떠 있는 것(말풍선·팝업)만.
+- `shadow_sm`: y 2 · blur 6 · 검정 25%
+- `shadow_md`: y 6 · blur 16 · 검정 35%
+- 라이트: 같은 y/blur, 검정 12% / 18%
+
+## 7. 적용 범위
+- 맥: `ProViews.swift`(업그레이드 창·첫 실행 안내), `TeamViews.swift`·`SquadSlackViews.swift`·`SquadBoardViews.swift`(스쿼드).
+- Windows: `buni_pro_ui.py`, `buni_team_ui.py` (색 상수를 `buni_theme` 에서 가져온다).
+- 사이트: `docs/index.html` `:root` 의 변수와 버튼·카드 모서리·그림자.
+- 건드리지 않은 것: 캐릭터 그림(`*CharacterView.swift`, `buni_items.py`), 상점·장비 화면, 말풍선 안의 의미색.
+
+---
+
+> 위의 `BuniTheme` 이 코드의 기준이다. 아래는 같은 팔레트를 `BuniTokens`(`BT`)로 정리한 v2 안으로, `BT` 를 쓰는 화면이 남아 있어 함께 둔다.
+
+# 부록 — v2 토큰 (Raycast·Apple 톤, `BuniTokens` / `BT`)
 
 > v2: 어두운 면은 거의 검정에 가까운 중립 회색(Raycast), 글자·회색 단계는 Apple 의 시스템 회색 체계(#F5F5F7 · #8E8E93)를 따랐다. 당근색 강조와 토큰 이름은 그대로.
 
@@ -204,6 +283,7 @@ RADIUS = {'sm': 4, 'md': 8, 'lg': 12, 'xl': 16}
 - 새 hex 를 코드에 직접 쓰지 않고 토큰만 쓴다. 필요한 색이 없으면 이 문서에 먼저 추가한다.
 - **캐릭터 그림(`*CharacterView.swift`, `buni_items.py` Painter, 노트북·문서·탭 색 `LAP_*`/`DOC_*`/`TAB_*`)은 건드리지 않는다.** 정체성 영역.
 - 주 버튼 = `accent.base` 면 + `text.onAccent` 글자. 보조 버튼 = `surface.2` + `border.strong`. 위험 = `danger`.
+- **업무 카드 버튼 4종** (맥 `CardActionStyle` · Windows `_action_btn`): `primary` accent 면(승인하고 적용·시작 — 한 카드에 하나, 남는 폭을 채운다) · `danger` danger 12% 면 + danger 글자 + 35% 테두리(거절) · `secondary` `surface.2` + `border.strong`(변경 전·후 화면, 되돌리기, 다시 적용) · `quiet` 면 없음 + `text.secondary`(대화, 추가 요청, 변경 내용 보기). 높이 28 · 좌우 `space.4` · 반경 `radius.md` · 버튼 사이 `space.3`(조용한 버튼끼리는 `space.2`). 이모지 대신 시스템 기호(SF Symbols)를 글자 앞에 쓴다. 승인·거절은 한 줄(승인이 넓게), 변경 내용 보기는 그 아래 줄에 둔다.
 - 기존 파란 `#3377E0` 주 버튼은 `accent.base` 로, 정보용 파랑은 `info` 로 옮긴다.
 - 사이드바 = `bg.sidebar`, 본문 = `bg.canvas`, 카드 = `surface.1`, 입력창 = `surface.2` + `border.strong`.
 - 글자는 3단계(`primary/secondary/tertiary`)만 쓰고 투명도로 회색을 만들지 않는다.

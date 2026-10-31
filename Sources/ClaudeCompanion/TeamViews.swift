@@ -129,6 +129,8 @@ struct TeamRootView: View {
     @State private var seen: [String: Double] = [:]          // "작업|화면" → 마지막으로 본 시각
     @State private var openedAt: [String: Double] = [:]      // 작업을 처음 연 시각 (이전 대화는 안 읽음으로 치지 않는다)
     @State private var showSettings = false
+    @State private var settingsJob: TeamJob?                  // 프로젝트 설정 (모델) 시트
+    @State private var showArchived = false                   // 보관된 팀원 보기
     @State private var boardOn = false                        // 현황 모니터링 화면
 
     init(initialSelection: String? = nil, initialPane: SquadPane? = nil) {
@@ -159,6 +161,7 @@ struct TeamRootView: View {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
             }
         }
+        .sheet(item: $settingsJob) { j in ProjectSettingsSheet(job: j) { settingsJob = nil } }
         .onAppear {
             if selection == nil, let j = store.jobs.last(where: { $0.state == "review" }) ?? store.jobs.last { selection = j.id }
             if let id = selection { touch(id) }
@@ -201,11 +204,11 @@ struct TeamRootView: View {
                         .font(.system(size: 15)).foregroundColor(store.settings.paused ? BT.warning : .white.opacity(0.7))
                 }.buttonStyle(.plain).help(store.settings.paused ? L.t("모든 작업 이어서 진행", "Resume all squad work") : L.t("모든 작업 잠시 멈추기", "Pause all squad work"))
                 Button { showSettings = true } label: {
-                    Image(systemName: "gearshape").font(.system(size: 13)).foregroundColor(.white.opacity(0.7))
+                    Image(systemName: "gearshape").font(.system(size: 13)).foregroundColor(.buniInk2)
                 }.buttonStyle(.plain).help(L.t("스쿼드 설정", "Squad settings"))
                 Button { selection = nil; boardOn = false } label: {
-                    Image(systemName: "square.and.pencil").font(.system(size: 13)).foregroundColor(.white.opacity(0.9))
-                        .frame(width: 26, height: 24).background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.12)))
+                    Image(systemName: "square.and.pencil").font(.system(size: 13)).foregroundColor(.buniInk)
+                        .frame(width: 26, height: 24).background(RoundedRectangle(cornerRadius: 6).fill(Color.buniRaised))
                 }.buttonStyle(.plain).help(L.t("새 작업", "New job"))
             }
             .padding(.horizontal, 14).padding(.vertical, 12)
@@ -233,7 +236,7 @@ struct TeamRootView: View {
                  : (s.scheduleMode == "anytime" ? L.t("⚡ 언제든 자동 진행 · 동시 \(s.concurrency)명", "⚡ Auto-run any time · \(s.concurrency) at a time")
                     : (s.scheduleMode == "window" ? L.t("🌙 \(s.windowStart)~\(s.windowEnd) 자동 진행 · 동시 \(s.concurrency)명", "🌙 Auto-run \(s.windowStart)–\(s.windowEnd) · \(s.concurrency) at a time")
                        : L.t("내가 시작할 때만 진행해요", "Runs only when I start it"))))
-                .font(.system(size: 10)).foregroundColor(.white.opacity(0.4))
+                .font(.system(size: 10)).foregroundColor(.buniDim)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
         }
         .background(SQ.rail)
@@ -258,9 +261,9 @@ struct TeamRootView: View {
         return Button { selection = j.id; boardOn = false } label: {
             HStack(spacing: 6) {
                 Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.white.opacity(0.5)).frame(width: 12)
+                    .foregroundColor(.buniDim).frame(width: 12)
                 Text(j.displayTitle).font(.system(size: 13, weight: open || j.state == "review" || tint != nil ? .bold : .medium))
-                    .foregroundColor(.white.opacity(open || tint != nil ? 1 : 0.85)).lineLimit(1)
+                    .foregroundColor(Color.buniInk.opacity(open || tint != nil ? 1 : 0.85)).lineLimit(1)
                 Spacer(minLength: 4)
                 if working { ProgressView().controlSize(.mini) }
                 if let attention { Text(attention).font(.system(size: 9, weight: .bold)).foregroundColor(BT.warning).lineLimit(1) }
@@ -273,6 +276,46 @@ struct TeamRootView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button(L.t("이름 수정", "Rename")) { promptRename(j) }
+            Button(L.t("프로젝트 설정", "Project settings")) { settingsJob = j }
+            Divider()
+            Button(L.t("삭제", "Delete")) { confirmDelete(j) }
+        }
+    }
+
+    private func promptRename(_ j: TeamJob) {
+        let a = NSAlert()
+        a.messageText = L.t("프로젝트 이름 수정", "Rename project")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = j.displayTitle
+        a.accessoryView = field
+        a.addButton(withTitle: L.t("저장", "Save"))
+        a.addButton(withTitle: L.t("취소", "Cancel"))
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let t = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty {
+            let e = NSAlert(); e.messageText = L.t("이름을 비워 둘 수 없어요", "The name can't be empty"); e.runModal(); return
+        }
+        store.rename(j, to: t)
+    }
+
+    private func confirmDelete(_ j: TeamJob) {
+        if j.state == "running" || j.busy == true {                 // 진행 중이면 거부 — 먼저 취소해야 한다
+            let e = NSAlert()
+            e.messageText = L.t("진행 중인 프로젝트예요", "This project is running")
+            e.informativeText = L.t("먼저 취소한 뒤 삭제해 주세요.", "Cancel it first, then delete.")
+            e.runModal(); return
+        }
+        let a = NSAlert()
+        a.messageText = L.t("'\(j.displayTitle)' 프로젝트를 삭제할까요?", "Delete project '\(j.displayTitle)'?")
+        a.informativeText = L.t("이 작업 기록을 지워요. (git 브랜치와 결과 파일은 남아요)", "Deletes this job record. (the git branch and result files remain)")
+        a.alertStyle = .warning
+        a.addButton(withTitle: L.t("삭제", "Delete"))
+        a.addButton(withTitle: L.t("취소", "Cancel"))
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        store.delete(j)
+        if selection == j.id { selection = nil }
     }
 
     @ViewBuilder
@@ -303,12 +346,12 @@ struct TeamRootView: View {
                         unread: j.pendingProposals.count) { pane[j.id] = .requirements; boardOn = false }
         }
         if hasRoom(j) {
-            TimelineView(.periodic(from: .now, by: 2)) { _ in
+            TeamLive {
                 let msgs = TeamStore.readChat(jobId: j.id)
                 VStack(alignment: .leading, spacing: 1) {
                     SquadSectionTitle(text: L.t("채널", "Channels"))
                     SquadNavRow(selected: cur == .channel,
-                                leading: AnyView(Text("#").font(.system(size: 15, weight: .bold)).foregroundColor(.white.opacity(0.6))),
+                                leading: AnyView(Text("#").font(.system(size: 15, weight: .bold)).foregroundColor(.buniDim)),
                                 title: L.t("스쿼드", "squad"),
                                 unread: unread(j, .channel, msgs)) { pane[j.id] = .channel; boardOn = false }
 
@@ -317,21 +360,42 @@ struct TeamRootView: View {
                                 leading: AnyView(SquadAvatar(icon: "🐰", id: "lead", size: 20)),
                                 title: L.t("팀장", "Team lead"), subtitle: leadStatus(j),
                                 unread: unread(j, .lead, msgs)) { pane[j.id] = .lead; boardOn = false }
-                    ForEach(j.plan?.roles ?? []) { r in
-                        let st = j.roles?[r.id]
-                        let (label, color) = roleInfo(st?.status ?? "pending")
-                        SquadNavRow(selected: cur == .dm(r.id),
-                                    leading: AnyView(SquadPresence(icon: r.icon ?? "🧑‍💻", id: r.id, color: color,
-                                                                  working: st?.status == "running")),
-                                    title: r.name ?? r.id, subtitle: label, subtitleColor: color.opacity(0.9),
-                                    unread: unread(j, .dm(r.id), msgs),
-                                    tint: st?.status == "running" ? BT.success : (st?.status == "done_unreviewed" ? BT.warning : nil),
-                                    spinner: st?.status == "running") { pane[j.id] = .dm(r.id); boardOn = false }
+                    ForEach(TeamDuties.grouped(visibleRoles(j)), id: \.dept) { g in
+                        SquadSectionTitle(text: g.name)
+                        ForEach(g.members) { r in
+                            let st = j.roles?[r.id]
+                            let (label, color) = roleInfo(st?.status ?? "pending")
+                            SquadNavRow(selected: cur == .dm(r.id),
+                                        leading: AnyView(SquadPresence(icon: r.icon ?? "🧑‍💻", id: r.id, color: color,
+                                                                      working: st?.status == "running")),
+                                        title: r.name ?? r.id,
+                                        subtitle: r.isArchived ? L.t("보관됨", "archived") : label,
+                                        subtitleColor: color.opacity(0.9),
+                                        unread: unread(j, .dm(r.id), msgs),
+                                        tint: st?.status == "running" ? BT.success : (st?.status == "done_unreviewed" ? BT.warning : nil),
+                                        spinner: st?.status == "running") { pane[j.id] = .dm(r.id); boardOn = false }
+                                .opacity(r.isArchived ? 0.55 : 1)
+                        }
+                    }
+                    let archivedCount = (j.plan?.roles ?? []).filter { $0.isArchived && !isWorking(j, $0) }.count
+                    if archivedCount > 0 {
+                        Button { showArchived.toggle() } label: {
+                            Text(showArchived ? L.t("보관된 팀원 숨기기", "Hide archived teammates")
+                                              : L.t("보관된 팀원 보기 (\(archivedCount))", "Show archived teammates (\(archivedCount))"))
+                                .font(.system(size: 10.5)).foregroundColor(.buniDim)
+                                .padding(.horizontal, 16).padding(.vertical, 4)
+                        }.buttonStyle(.plain)
                     }
                 }
             }
         }
     }
+
+    /// 사이드바에 보일 팀원 — 보관된 팀원은 토글을 켜거나 다시 일하는 중일 때만 (docs/team-structure.md §5)
+    private func visibleRoles(_ j: TeamJob) -> [TeamRole] {
+        (j.plan?.roles ?? []).filter { !$0.isArchived || showArchived || isWorking(j, $0) }
+    }
+    private func isWorking(_ j: TeamJob, _ r: TeamRole) -> Bool { j.roles?[r.id]?.status == "running" }
 
     private func leadStatus(_ j: TeamJob) -> String {
         switch j.phase {
@@ -455,7 +519,7 @@ private struct TeamNewJob: View {
                 field(L.t("제목", "Title")) { TextField("", text: $title).textFieldStyle(.roundedBorder) }
                 field(L.t("맡길 내용 (자세할수록 좋아요)", "What to build (the more detail the better)")) {
                     TextEditor(text: $goal).font(.system(size: 12)).frame(height: 130)
-                        .padding(4).background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.07)))
+                        .padding(4).background(RoundedRectangle(cornerRadius: 6).fill(Color.buniField))
                 }
                 field(L.t("프로젝트 폴더", "Project folder")) {
                     HStack {
@@ -612,7 +676,7 @@ private struct TeamAddRequestBox: View {
         VStack(alignment: .leading, spacing: 6) {
             if !hint.isEmpty { Text(hint).font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true) }
             TextEditor(text: $text).font(.system(size: 12)).frame(height: 60)
-                .padding(4).background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.07)))
+                .padding(4).background(RoundedRectangle(cornerRadius: 6).fill(Color.buniField))
             Button(button) {
                 let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !t.isEmpty else { return }
@@ -623,7 +687,7 @@ private struct TeamAddRequestBox: View {
             .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.04)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.buniPanel))
     }
 }
 
@@ -659,7 +723,7 @@ private struct TeamQuestionsForm: View {
                         .textFieldStyle(.roundedBorder).font(.system(size: 11))
                 }
                 .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.buniField))
             }
             HStack {
                 Button(L.t("답변 보내기 →", "Send answers →")) { TeamStore.shared.answer(job, answers: collected()) }
@@ -710,7 +774,7 @@ private struct TeamRequirements: View {
                      "Requirements — the team works from this document alone at night. Edit it if needed."))
                 .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
             TextEditor(text: $text).font(.system(size: 12, design: .monospaced)).frame(minHeight: 300)
-                .padding(4).background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.07)))
+                .padding(4).background(RoundedRectangle(cornerRadius: 6).fill(Color.buniField))
             Text(L.t("바로 시작하면 지금 곧 일을 시작하고, 예약을 고르면 \(s.windowStart)~\(s.windowEnd) 사이에 자동으로 시작해요. 웹 검색: \(job.permissions?.web == true ? "허용" : "안 함").",
                      "Start now begins right away; schedule starts automatically between \(s.windowStart) and \(s.windowEnd). Web search: \(job.permissions?.web == true ? "allowed" : "off")."))
                 .font(.system(size: 11)).foregroundColor(.secondary)
@@ -757,7 +821,7 @@ private struct TeamChatView: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.5)) { _ in
+        TeamLive {
             let msgs = TeamStore.readChat(jobId: job.id)
             let typing = TeamStore.readTyping(jobId: job.id)
             VStack(alignment: .leading, spacing: 10) {
@@ -796,11 +860,11 @@ private struct TeamChatView: View {
                 Spacer(minLength: 60)
                 Text(Self.clock.string(from: Date(timeIntervalSince1970: m.ts))).font(.system(size: 9)).foregroundColor(.secondary)
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(L.t("나 → ", "Me → ") + name(m.to)).font(.system(size: 10)).foregroundColor(.white.opacity(0.8))
-                    Text(m.text).font(.system(size: 13)).foregroundColor(.white).textSelection(.enabled)
+                    Text(L.t("나 → ", "Me → ") + name(m.to)).font(.system(size: 10)).foregroundColor(Color.buniAccentInk.opacity(0.75))
+                    Text(m.text).font(.system(size: 13)).foregroundColor(.buniAccentInk).textSelection(.enabled)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.accentColor))
+                .background(RoundedRectangle(cornerRadius: BuniTheme.rLg).fill(Color.buniAccent))
             }
         } else {
             HStack(alignment: .bottom, spacing: 6) {
@@ -813,7 +877,7 @@ private struct TeamChatView: View {
                     Text(m.text).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(m.from == "lead" ? 0.10 : 0.06)))
+                .background(RoundedRectangle(cornerRadius: 12).fill(m.from == "lead" ? Color.buniRaised : Color.buniField))
                 Text(Self.clock.string(from: Date(timeIntervalSince1970: m.ts))).font(.system(size: 9)).foregroundColor(.secondary)
                 Spacer(minLength: 60)
             }
@@ -859,6 +923,180 @@ private struct TeamChatView: View {
     }
 }
 
+// MARK: 팀원(세션)별 진행 · 요구사항 전달
+
+/// 팀장과 팀원을 한 줄씩 보여 주고, 누르면 그 세션의 실시간 진행·Claude 에서 열기·요구사항 전달이 펼쳐진다
+private struct TeamSquadBoard: View {
+    let job: TeamJob
+    @State private var open: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if job.plan != nil {
+                row(id: "lead", icon: "🐰", name: L.t("팀장", "Team lead"),
+                    status: leadStatus, depends: [], canSend: false)
+            }
+            ForEach(job.plan?.roles ?? []) { r in
+                let st = job.roles?[r.id]
+                let (label, color) = roleInfo(st?.status ?? "pending")
+                row(id: r.id, icon: r.icon ?? "🧑‍💻", name: r.name ?? r.id,
+                    status: (label + ((st?.attempts ?? 0) > 1 ? L.t("  (\(st!.attempts!)회)", "  (×\(st!.attempts!))") : "")
+                             + (st?.notePending == true ? L.t("  · 📨 반영 대기", "  · 📨 queued") : ""), color),
+                    depends: r.dependsOn ?? [], canSend: true)
+            }
+        }
+    }
+
+    private var leadStatus: (String, Color) {
+        switch job.phase {
+        case "planning":  return (L.t("팀 구성 중", "Building the team"), .green)
+        case "reviewing": return (L.t("검토 중", "Reviewing"), .green)
+        case "merging":   return (L.t("결과 합치는 중", "Merging"), .green)
+        case "wrapup":    return (L.t("정리 중", "Wrapping up"), .green)
+        default:          return (L.t("대기", "Waiting"), .gray)
+        }
+    }
+
+    @ViewBuilder
+    private func row(id: String, icon: String, name: String, status: (String, Color), depends: [String], canSend: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { open = (open == id) ? nil : id } label: {
+                HStack {
+                    Text("\(icon)  \(name)").font(.system(size: 13, weight: .semibold))
+                    Chip(text: status.0, color: status.1)
+                    Spacer()
+                    if !depends.isEmpty { Text("← " + depends.joined(separator: ", ")).font(.system(size: 10)).foregroundColor(.secondary) }
+                    Image(systemName: open == id ? "chevron.up" : "chevron.down").font(.system(size: 10)).foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            if open == id {
+                TeamSessionPanel(job: job, key: id, canSend: canSend)
+                    .padding(.horizontal, 10).padding(.bottom, 10)
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.buniField))
+    }
+}
+
+private struct TeamSessionPanel: View {
+    let job: TeamJob
+    let key: String
+    let canSend: Bool
+    @ObservedObject private var store = TeamStore.shared
+    @State private var note = ""
+    @State private var noteRestored = false
+    @State private var sentFlash = false
+
+    private static let clock: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
+    }()
+
+    var body: some View {
+        // 진행 중에는 2초마다 파일을 다시 읽는다
+        TeamLive {
+            let act = TeamStore.readActivity(jobId: job.id, key: key)
+            let sessions = TeamStore.readSessions(jobId: job.id).filter { $0.key == key }
+            VStack(alignment: .leading, spacing: 8) {
+                if let s = job.roles?[key]?.summary, !s.isEmpty, !canSendHidden {
+                    Text(s).font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                activityBox(act)
+                if !sessions.isEmpty { sessionButtons(sessions) }
+                if canSend { sender }
+            }
+        }
+    }
+
+    private var canSendHidden: Bool { false }
+
+    @ViewBuilder
+    private func activityBox(_ act: TeamActivity) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if act.lines.isEmpty {
+                Text(L.t("아직 시작하지 않았어요.", "Not started yet.")).font(.system(size: 11)).foregroundColor(.secondary)
+            } else {
+                ForEach(Array(act.lines.suffix(12).enumerated()), id: \.offset) { _, l in
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(Self.clock.string(from: Date(timeIntervalSince1970: l.ts)))
+                            .font(.system(size: 10, design: .monospaced)).foregroundColor(.secondary)
+                        Text(l.text).font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if act.state == "running" {
+                    HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(L.t("지금 진행 중", "Working now")).font(.system(size: 10)).foregroundColor(.green) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8).background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.18)))
+    }
+
+    @ViewBuilder
+    private func sessionButtons(_ sessions: [TeamSession]) -> some View {
+        HStack(spacing: 8) {
+            if let last = sessions.last {
+                Button(L.t("💻 Claude에서 열기", "💻 Open in Claude")) { store.openSession(job, sessionId: last.id) }
+                    .buttonStyle(PillButtonStyle(color: .gray))
+            }
+            if sessions.count > 1 {
+                Menu(L.t("이전 세션 \(sessions.count - 1)개", "\(sessions.count - 1) earlier")) {
+                    ForEach(sessions.dropLast().reversed()) { s in
+                        Button(Self.clock.string(from: Date(timeIntervalSince1970: s.started)) + "  " + s.label) {
+                            store.openSession(job, sessionId: s.id)
+                        }
+                    }
+                }.menuStyle(.borderlessButton).fixedSize()
+            }
+            Text(L.t("터미널에서 이 세션을 이어서 열어요", "Opens this session in Terminal")).font(.system(size: 10)).foregroundColor(.secondary)
+        }
+    }
+
+    private var sender: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let notes = job.roles?[key]?.notes, !notes.isEmpty {
+                ForEach(Array(notes.enumerated()), id: \.offset) { _, n in
+                    Text("📨 " + (n.text ?? "")).font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack {
+                TextField(L.t("이 팀원에게만 전할 요구사항", "A request just for this teammate"), text: $note)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 11))
+                    .onSubmit(send)
+                    .onAppear {
+                        if !noteRestored { noteRestored = true; note = TeamDrafts.shared.get(TeamDrafts.key(job.id, "note:" + key)) }
+                    }
+                    .onChange(of: note) { v in
+                        if noteRestored { TeamDrafts.shared.set(TeamDrafts.key(job.id, "note:" + key), v) }
+                    }
+                Button(sentFlash ? L.t("보냈어요 ✓", "Sent ✓") : L.t("📨 보내기", "📨 Send"), action: send)
+                    .buttonStyle(PillButtonStyle(color: .accentColor))
+                    .disabled(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Text(hint).font(.system(size: 10)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var hint: String {
+        switch job.roles?[key]?.status ?? "pending" {
+        case "running":  return L.t("지금 하는 일이 끝나면 반영해서 다시 진행해요.", "Applied by redoing the work once this run finishes.")
+        case "pending", "revise": return L.t("이 팀원이 시작할 때 반영해요.", "Applied when this teammate starts.")
+        default: return L.t("이미 끝난 팀원이면 다시 열어 반영해서 진행해요. 이 팀원의 산출물을 쓰는 팀원도 다시 확인해요.",
+                            "If already done, it's reopened and redone. Teammates relying on it re-check too.")
+        }
+    }
+
+    private func send() {
+        let t = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        store.sendRoleNote(job, role: key, text: t)
+        note = ""
+        sentFlash = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { sentFlash = false }
+    }
+}
+
 // MARK: 진행
 
 private struct TeamEvents: View {
@@ -880,7 +1118,95 @@ private struct TeamEvents: View {
     }
 }
 
+// MARK: 결과
+
+private struct TeamResult: View {
+    let job: TeamJob
+    var onDeleted: () -> Void
+    @ObservedObject private var store = TeamStore.shared
+
+    var body: some View {
+        let reportURL = TeamStore.jobsDir.appendingPathComponent(job.id).appendingPathComponent("REPORT.md")
+        let doc = TeamStore.readReportView(jobId: job.id, fallback: job.summary ?? "")
+        VStack(alignment: .leading, spacing: 12) {
+            Text(job.state == "done" ? L.t("검토를 마친 작업이에요", "Reviewed") : L.t("✅ 끝났어요", "✅ Finished"))
+                .font(.system(size: 13, weight: .bold)).foregroundColor(.green)
+            if job.busy == true {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(job.busyMsg ?? L.t("정리하는 중…", "Working…")).font(.system(size: 12))
+                    Text(L.t("— 다음 작업 제안이 곧 아래 보고서에 추가돼요", "— next-step suggestions will appear in the report below"))
+                        .font(.system(size: 11)).foregroundColor(.secondary)
+                }
+            }
+            // 보고서 한 장 — 안에 '지금 확인할 것' 버튼과 '다음에 할 일' 버튼이 들어 있다
+            MarkdownView(text: doc, draftScope: job.id) { host, target in
+                switch host {
+                case "open", "run": store.openItem(job, itemId: target)
+                case "followup":    store.startFollowup(job, stepId: target)
+                case "view":        store.focusJobId = target
+                case "apply":       store.applyResult(job)
+                case "diff":        store.openDiff(job)
+                case "ok":          store.reviewFeedback(job, itemId: target, verdict: "ok")
+                default: break
+                }
+            } onFeedback: { itemId, text, files in
+                store.reviewFeedback(job, itemId: itemId, verdict: "fix", text: text, files: files)
+            }
+            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.buniField))
+
+            Text(L.t("브랜치: \(job.branch ?? "")  ·  원래 브랜치: \(job.baseRef ?? "")  ·  비용 약 $\(String(format: "%.2f", job.costUsd ?? 0))",
+                     "Branch: \(job.branch ?? "")  ·  base: \(job.baseRef ?? "")  ·  cost ≈ $\(String(format: "%.2f", job.costUsd ?? 0))"))
+                .font(.system(size: 10)).foregroundColor(.secondary)
+            HStack {
+                Button(L.t("📄 보고서 파일 열기", "📄 Open report file")) { NSWorkspace.shared.open(reportURL) }.buttonStyle(PillButtonStyle(color: .gray))
+                if let f = job.resultFolder {
+                    Button(L.t("📂 결과 폴더", "📂 Results folder")) { NSWorkspace.shared.open(f) }.buttonStyle(PillButtonStyle(color: .gray))
+                }
+                if job.state != "done" {
+                    Button(L.t("✅ 검토 완료", "✅ Mark reviewed")) { store.markDone(job) }.buttonStyle(PillButtonStyle(color: .accentColor))
+                }
+                Button(L.t("🔄 다시 정리", "🔄 Redo list")) { store.wrapUp(job) }.buttonStyle(PillButtonStyle(color: .gray))
+                Spacer()
+                Button(L.t("🗑 삭제", "🗑 Delete")) { store.delete(job); onDeleted() }.buttonStyle(PillButtonStyle(color: .gray))
+            }
+        }
+    }
+}
+
 // MARK: - 예약 설정
+
+/// 프로젝트 단위 모델 — 비우면 전역 설정을 따른다 (우선순위: 팀원별 → 프로젝트 → 전역)
+private struct ProjectSettingsSheet: View {
+    let job: TeamJob
+    var onClose: () -> Void
+    @ObservedObject private var store = TeamStore.shared
+    @State private var model = ""
+    @State private var leadModel = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L.t("프로젝트 설정", "Project settings")).font(.system(size: 15, weight: .bold))
+            Text(job.displayTitle).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+            Text(L.t("모델", "Models")).font(.system(size: 12, weight: .semibold))
+            HStack { Text(L.t("팀원 기본", "Teammates")).frame(width: 80, alignment: .leading); SquadModelMenu(model: $model, allowDefault: true, defaultLabel: L.t("전역 설정과 같게", "Same as global")) }
+            HStack { Text(L.t("팀장", "Lead")).frame(width: 80, alignment: .leading); SquadModelMenu(model: $leadModel, allowDefault: true, defaultLabel: L.t("전역 설정과 같게", "Same as global")) }
+            Text(L.t("비워 두면 스쿼드 설정의 모델을 따라요. 팀원마다 고른 모델이 있으면 그게 먼저예요. 다음 실행부터 적용돼요.",
+                     "Empty follows the Squad settings. A model picked for a teammate wins. Applies from the next run."))
+                .font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button(L.t("취소", "Cancel")) { onClose() }
+                Button(L.t("저장", "Save")) {
+                    store.setProjectSettings(job, model: model, leadModel: leadModel); onClose()
+                }.buttonStyle(PillButtonStyle(color: .accentColor))
+            }
+        }
+        .padding(20).frame(width: 400)
+        .onAppear { model = job.model ?? ""; leadModel = job.leadModel ?? "" }
+    }
+}
 
 private struct TeamSettingsSheet: View {
     @Binding var isPresented: Bool
@@ -924,7 +1250,7 @@ private struct TeamSettingsSheet: View {
             Text(L.t("결과를 내 폴더에 반영하는 방식", "How results reach your folder")).font(.system(size: 12, weight: .semibold))
             Picker("", selection: $s.applyMode) {
                 Text(L.t("스마트 — 중요하지 않으면 바로, 중요하면 확인 (기본)", "Smart — auto unless important (default)")).tag("smart")
-                Text(L.t("자동 — 무엇이든 끝나면 바로 반영", "Auto — always apply when done")).tag("auto")
+                Text(L.t("자동 — 무엇이든 끝나면 승인 없이 바로 반영", "Auto — always apply when done, no approval")).tag("auto")
                 Text(L.t("확인 후 — 바뀐 내용을 보고 승인하면 반영", "Confirm — review, then approve")).tag("confirm")
                 Text(L.t("수동 — 반영하지 않고 브랜치로만", "Manual — keep on a branch only")).tag("manual")
             }.pickerStyle(.radioGroup).labelsHidden()

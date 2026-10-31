@@ -59,6 +59,9 @@ class CompanionController: ObservableObject {
     /// 대기 중에 무기를 꺼내 보여주는 중 — 캐릭터 뷰는 이 값에 맞춰 오른팔을 들어 올리고,
     /// 무기 레이어는 들어 올린 손 위치에 무기를 그린다.
     @Published var isShowingWeapon: Bool = false
+    /// 패널이 다른 창에 완전히 가려졌거나 숨겨졌거나 화면이 꺼져 있어 아무도 못 보는 동안 true —
+    /// 끝없이 도는 애니메이션(깜빡임·장비 반짝임·작업 도구)을 멈춰 배터리를 아낀다.
+    @Published var isPaused: Bool = false
     @Published var isSliding: Bool = false {
         didSet { if isSliding, !oldValue { slidingSince = Date() } }
     }

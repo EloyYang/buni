@@ -55,6 +55,7 @@ final class CloudSync: ObservableObject {
             guard CloudSession.shared.isSignedIn else { return }
             Task { @MainActor in await self?.syncNow() }
         }
+        periodic?.tolerance = 60
     }
 
     // MARK: - 동기화

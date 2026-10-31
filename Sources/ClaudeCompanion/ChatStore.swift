@@ -460,6 +460,7 @@ final class ChatStore: ObservableObject {
                 Task { @MainActor in self?.startStreams() }    // 토큰이 만료되기 전에 새 토큰으로 다시 잇는다
             },
         ]
+        timers.forEach { $0.tolerance = 1 }
     }
 
     private func stopTimers() { timers.forEach { $0.invalidate() }; timers = [] }

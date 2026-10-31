@@ -15,28 +15,28 @@ struct KeyRecorderField: View {
         HStack {
             Text(label)
                 .frame(width: 80, alignment: .leading)
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(.buniInk)
 
             Button(action: toggleRecording) {
                 HStack(spacing: 6) {
                     if isRecording {
                         Text(L.t("키 입력 대기...", "Press a key..."))
-                            .foregroundColor(.yellow)
+                            .foregroundColor(.buniWarn)
                     } else if let sc = shortcut {
                         Text(sc.displayString)
-                            .foregroundColor(.white)
+                            .foregroundColor(.buniInk)
                     } else {
                         Text(L.t("없음", "None"))
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(.buniDim)
                     }
                     Spacer()
                     if !isRecording {
                         Image(systemName: "pencil")
-                            .foregroundColor(.white.opacity(0.5))
+                            .foregroundColor(.buniDim)
                             .font(.system(size: 10))
                     } else {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.yellow.opacity(0.7))
+                            .foregroundColor(.buniWarn)
                             .font(.system(size: 10))
                     }
                 }
@@ -44,15 +44,15 @@ struct KeyRecorderField: View {
                 .padding(.vertical, 5)
                 .frame(width: 160)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: BuniTheme.rSm)
                         .fill(isRecording
-                              ? Color.yellow.opacity(0.15)
-                              : Color.white.opacity(0.10))
+                              ? Color.buniWarn.opacity(0.15)
+                              : Color.buniField)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 6)
+                            RoundedRectangle(cornerRadius: BuniTheme.rSm)
                                 .stroke(isRecording
-                                        ? Color.yellow.opacity(0.6)
-                                        : Color.white.opacity(0.25),
+                                        ? Color.buniWarn
+                                        : Color.buniLine,
                                         lineWidth: 1)
                         )
                 )
@@ -62,7 +62,7 @@ struct KeyRecorderField: View {
             if shortcut != nil && !isRecording {
                 Button(action: { shortcut = nil }) {
                     Image(systemName: "minus.circle")
-                        .foregroundColor(.red.opacity(0.7))
+                        .foregroundColor(.buniDanger)
                         .font(.system(size: 13))
                 }
                 .buttonStyle(.plain)
@@ -121,22 +121,22 @@ struct ShortcutSettingsView: View {
             content
         }
         .frame(minWidth: 380, minHeight: 360)
-        .background(BT.bgCanvas)
+        .background(Color.buniBg)
     }
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(L.t("설정", "Settings"))
                 .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(.buniInk)
 
-            Divider().background(Color.white.opacity(0.2))
+            Divider().background(Color.buniLine)
 
             // ── 언어
             HStack {
                 Text(L.t("언어", "Language"))
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.85))
+                    .foregroundColor(.buniInk)
                 Spacer()
                 Picker("", selection: $lang.current) {
                     ForEach(Language.allCases, id: \.self) { l in
@@ -148,18 +148,18 @@ struct ShortcutSettingsView: View {
                 .frame(width: 160)
             }
 
-            Divider().background(Color.white.opacity(0.2))
+            Divider().background(Color.buniLine)
 
             // ── Pro
             ProSettingsSection()
 
-            Divider().background(Color.white.opacity(0.2))
+            Divider().background(Color.buniLine)
 
             // ── 단축키
             VStack(alignment: .leading, spacing: 8) {
                 Text(L.t("단축키", "Shortcuts"))
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.85))
+                    .foregroundColor(.buniInk)
 
                 VStack(alignment: .leading, spacing: 12) {
                     KeyRecorderField(label: L.t("권한 허락", "Approve"),
@@ -177,27 +177,27 @@ struct ShortcutSettingsView: View {
                 }
             }
 
-            Divider().background(Color.white.opacity(0.2))
+            Divider().background(Color.buniLine)
 
             // ── 계정 · 다른 PC와 연동 (선택)
             accountSection
 
-            Divider().background(Color.white.opacity(0.2))
+            Divider().background(Color.buniLine)
 
             // ── 덮개 닫아도 계속 실행 (시간대 예약)
             keepAwakeSection
 
-            Divider().background(Color.white.opacity(0.2))
+            Divider().background(Color.buniLine)
 
             HStack {
                 Text(L.t("단축키는 전역으로 동작합니다.",
                          "Shortcuts work system-wide."))
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.buniDim)
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게
                 Spacer()
                 Button(L.t("닫기", "Close")) { NSApp.keyWindow?.close() }
-                    .buttonStyle(PillButtonStyle(color: .accentColor))
+                    .buttonStyle(PillButtonStyle(color: .buniAccent))
             }
         }
         .padding(20)
@@ -218,20 +218,20 @@ struct ShortcutSettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L.t("계정 · 다른 PC와 연동", "Account · Sync across PCs"))
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(.buniInk)
 
             if !cloud.isConfigured {
                 Text(L.t("서버 설정이 없어서 지금은 이 PC에만 저장돼요. 연동을 쓰려면 cloud/SETUP.md의 설정이 필요해요.",
                          "No server configured, so data stays on this PC. See cloud/SETUP.md to enable sync."))
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(.buniDim)
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게
             } else if let user = cloud.user {
                 HStack(spacing: 6) {
                     Text("☁️").font(.system(size: 12))
                     Text(user.name ?? L.t("로그인됨", "Signed in"))
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(.buniInk)
                     Spacer()
                     if cloudSync.isSyncing || cloud.isBusy {
                         ProgressView().controlSize(.small)
@@ -239,19 +239,19 @@ struct ShortcutSettingsView: View {
                 }
                 Text(lastSyncText)
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(.buniDim)
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게
                 HStack(spacing: 8) {
                     Button(L.t("지금 동기화", "Sync now")) {
                         guard ProGate.require(.cloudSync) else { return }
                         Task { await cloudSync.syncNow() }
                     }
-                        .buttonStyle(PillButtonStyle(color: .accentColor))
+                        .buttonStyle(PillButtonStyle(color: .buniAccent))
                     Button(L.t("로그아웃", "Sign out")) { cloud.signOut() }
-                        .buttonStyle(PillButtonStyle(color: .gray))
+                        .buttonStyle(PillButtonStyle(color: .buniRaised))
                     Spacer()
                     Button(L.t("서버 데이터 삭제", "Delete server data")) { confirmDeleteServerData() }
-                        .buttonStyle(PillButtonStyle(color: BT.danger))
+                        .buttonStyle(PillButtonStyle(color: Color.buniDanger))
                 }
             } else {
                 Text(L.t("로그인은 선택이에요. 안 해도 모든 기능을 그대로 쓸 수 있고, 다른 PC에서도 같은 설정·레벨을 쓰고 싶을 때만 로그인하세요.\n"
@@ -259,7 +259,7 @@ struct ShortcutSettingsView: View {
                          "Signing in is optional. Everything works without it — sign in only if you want the same settings and level on your other PCs.\n"
                          + "Stored: coins, items, outfits, a token count for your level, account ID and display name (conversations, code and email are never stored)"))
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(.buniDim)
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게
                 Button(L.t("Google로 로그인", "Sign in with Google")) {
                     // 새로 동기화를 켜려면 Pro 가 필요하다 — 이미 쓰던 사용자는 그대로 로그인할 수 있다
@@ -268,7 +268,7 @@ struct ShortcutSettingsView: View {
                     }
                     Task { await cloud.signIn() }
                 }
-                .buttonStyle(PillButtonStyle(color: .accentColor))
+                .buttonStyle(PillButtonStyle(color: .buniAccent))
                 .disabled(cloud.isBusy)
             }
 
@@ -276,14 +276,14 @@ struct ShortcutSettingsView: View {
                 Text(L.t("Pro 체험이 끝나서 동기화를 잠시 멈췄어요. 데이터는 그대로 남아 있고, Pro로 돌아오면 이어서 맞춰요.",
                          "Sync is paused because your Pro trial ended. Your data is untouched and sync resumes with Pro."))
                     .font(.system(size: 10))
-                    .foregroundColor(BT.warning)
+                    .foregroundColor(Color.buniWarn)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             if let message = cloud.message {
                 Text(message)
                     .font(.system(size: 10))
-                    .foregroundColor(BT.warning)
+                    .foregroundColor(Color.buniWarn)
                     .fixedSize(horizontal: false, vertical: true)
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게
             }
@@ -315,20 +315,20 @@ struct ShortcutSettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L.t("덮개 닫아도 계속 실행", "Keep running with lid closed"))
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(.buniInk)
 
             if awake.isHelperInstalled {
                 Toggle(isOn: $awake.scheduleEnabled) {
                     Text(L.t("시간대 예약", "Daily schedule"))
                         .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.8))
+                        .foregroundColor(.buniInk2)
                 }
                 .toggleStyle(.switch)
                 .controlSize(.small)
 
                 HStack(spacing: 6) {
                     timeField(L.t("시작", "From"), minute: $awake.scheduleStartMinute)
-                    Text("~").foregroundColor(.white.opacity(0.5))
+                    Text("~").foregroundColor(.buniDim)
                     timeField(L.t("종료", "To"), minute: $awake.scheduleEndMinute)
                 }
                 .disabled(!awake.scheduleEnabled)
@@ -337,13 +337,13 @@ struct ShortcutSettingsView: View {
                 Text(L.t("예약된 시간에는 덮개를 닫아도 자지 않아요. 가방 안에서는 열이 오를 수 있어요.",
                          "It won't sleep during the scheduled window. It can get warm in a bag."))
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.buniDim)
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게
             } else {
                 Text(L.t("메뉴바 → 덮개 닫아도 계속 실행 → 권한 설정하기에서 먼저 1회 설정해 주세요.",
                          "Set it up once from the menu bar first."))
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(.buniDim)
                     .fixedSize(horizontal: false, vertical: true)   // 줄바꿈이 되도록 — 한 줄로 잘리지 않게
             }
         }
@@ -353,11 +353,11 @@ struct ShortcutSettingsView: View {
         HStack(spacing: 4) {
             Text(label)
                 .font(.system(size: 10))
-                .foregroundColor(.white.opacity(0.55))
+                .foregroundColor(.buniDim)
             Stepper(value: minute, in: 0...(24 * 60 - 1), step: 30) {
                 Text(String(format: "%02d:%02d", minute.wrappedValue / 60, minute.wrappedValue % 60))
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.white)
+                    .foregroundColor(.buniInk)
             }
             .controlSize(.small)
         }
@@ -371,8 +371,8 @@ struct PillButtonStyle: ButtonStyle {
     @State private var hover = false
 
     /// 기본(.accentColor)은 주 버튼 — 당근색 면. 회색은 조용한 보조 버튼. 상태색(위험·성공)은 옅은 면 + 색 글자.
-    private var isPrimary: Bool { color == .accentColor || color == BT.accentBase }
-    private var isQuiet: Bool { color == .gray }
+    private var isPrimary: Bool { color == BT.accentBase }
+    private var isQuiet: Bool { color == BT.quiet }
 
     func makeBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed

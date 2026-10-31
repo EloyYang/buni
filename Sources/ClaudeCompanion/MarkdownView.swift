@@ -4,10 +4,12 @@ import SwiftUI
 /// (SwiftUI 의 Text 는 줄 안쪽 서식만 알아서, 블록 구조는 여기서 나눠 그린다)
 struct MarkdownView: View {
     let text: String
+    /// 항목 아래 입력창에 쓰던 글을 보관할 때 쓰는 프로젝트 id — 비우면 보관하지 않는다
+    var draftScope: String = ""
     /// `[라벨](buni://동작/대상)` 한 줄은 버튼으로 그린다 — 눌리면 (동작, 대상) 을 알려 준다
     var onAction: ((String, String) -> Void)? = nil
-    /// 항목 아래 채팅 입력창에서 보낸 글 — (대상, 내용)
-    var onFeedback: ((String, String) -> Void)? = nil
+    /// 항목 아래 채팅 입력창에서 보낸 글 — (대상, 내용, 첨부 파일들)
+    var onFeedback: ((String, String, [URL]) -> Void)? = nil
 
     private enum Block {
         case heading(Int, String)
@@ -70,11 +72,11 @@ struct MarkdownView: View {
                     }
                 }.padding(10)
             }
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.buniPanel))
         case .rule:
             Divider()
         case .feedbackBox(let id):
-            MarkdownFeedbackBox { text in onFeedback?(id, text) }
+            MarkdownFeedbackBox(draftKey: draftScope.isEmpty ? nil : TeamDrafts.key(draftScope, "fb:" + id)) { text, files in onFeedback?(id, text, files) }
         case .actions(let items):
             HStack(spacing: 8) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, a in
@@ -230,35 +232,56 @@ struct MarkdownView: View {
 
 /// 검토 항목 바로 아래에 떠 있는 채팅 입력창 — 보고 나서 바로 의견을 적어 보낸다 (Enter 로도 전송)
 private struct MarkdownFeedbackBox: View {
-    var onSend: (String) -> Void
+    var draftKey: String? = nil
+    var onSend: (String, [URL]) -> Void
     @State private var text = ""
+    @State private var restored = false
     @State private var sent = false
+    @State private var files: [URL] = []              // 보내기 전 첨부 (메모리만)
+    @State private var attachNote: String? = nil
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "bubble.left.and.text.bubble.right").foregroundColor(.secondary)
-            TextField(L.t("이 항목을 보고 느낀 점·고칠 점을 적어 보내세요", "Write what you'd change about this item"), text: $text)
-                .textFieldStyle(.plain).font(.system(size: 13)).onSubmit(send)
-            Button(action: send) {
-                Text(sent ? L.t("보냈어요 ✓", "Sent ✓") : L.t("보내기", "Send"))
-                    .font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(canSend ? Color.accentColor : Color.gray.opacity(0.5)))
+        VStack(alignment: .leading, spacing: 6) {
+            AttachChips(files: $files, note: $attachNote)
+            HStack(spacing: 8) {
+                Image(systemName: "bubble.left.and.text.bubble.right").foregroundColor(.secondary)
+                TextField(L.t("이 항목을 보고 느낀 점·고칠 점을 적어 보내세요", "Write what you'd change about this item"), text: $text)
+                    .textFieldStyle(.plain).font(.system(size: 13)).onSubmit(send)
+                AttachPickButton(files: $files, note: $attachNote)
+                Button(action: send) {
+                    Text(sent ? L.t("보냈어요 ✓", "Sent ✓") : L.t("보내기", "Send"))
+                        .font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(canSend ? Color.accentColor : Color.gray.opacity(0.5)))
+                }
+                .buttonStyle(.plain).disabled(!canSend)
             }
-            .buttonStyle(.plain).disabled(!canSend)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.25)))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.buniLine, lineWidth: 1))
+        .onAppear {
+            if !restored {
+                restored = true
+                if let k = draftKey { text = TeamDrafts.shared.get(k); files = TeamAttachPending.shared.get(k).filter { FileManager.default.fileExists(atPath: $0.path) } }
+            }
+        }
+        .onChange(of: text) { v in
+            if restored, let k = draftKey { TeamDrafts.shared.set(k, v) }
+        }
+        .onChange(of: files) { v in
+            if restored, let k = draftKey { TeamAttachPending.shared.set(k, v) }
+        }
     }
 
     private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     private func send() {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
-        onSend(t)
+        guard !t.isEmpty else { return }                  // 피드백은 글이 있어야 한다 (첨부는 거기에 덧붙인다)
+        onSend(t, files)
         text = ""
+        files = []; attachNote = nil
         sent = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { sent = false }
     }

@@ -479,7 +479,7 @@ struct RabbitCharacterView: View {
 
     private func scheduleBlink() {
         DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 2.5...6.0)) {
-            blinking = true
+            blinking = !ctrl.isPaused   // 가려졌거나 화면이 꺼져 있으면 깜빡임을 그리지 않는다
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
                 blinking = false
                 scheduleBlink()

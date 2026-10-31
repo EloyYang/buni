@@ -1,5 +1,7 @@
 # 소개문 / Product copy
 
+> **초안 · 미게시** — 게시·발송 전 검토용 원고.
+
 > 사실만 쓴다. 후기·사용자 수·별점·"인기" 같은 수치는 아직 없으므로 쓰지 않는다.
 > 가격: Pro 월 $3 / 연 $24 / 평생 $49, 신규 14일·기존 30일 체험. 결제 링크가 열리기 전에는 "출시 예정"으로 쓴다.
 > 사이트: {SITE_URL} (현재 사이트 주소로 교체 — 이 저장소에서 확인되지 않아 자리표시) · GitHub: https://github.com/EloyYang/buni
@@ -17,7 +19,7 @@ Claude Code가 일하는 동안 터미널을 계속 들여다보고 계신가요
 - 토큰 사용량과 남은 시간을 게이지로 확인
 - 세션마다 다른 캐릭터(6종), 작업이 끝나면 쌓이는 코인으로 꾸미는 상점
 - 노트북 덮개를 닫아도 계속 실행, 방 코드 채팅(최대 10명), SSH Remote 지원
-세션 패널·상태 표시·채팅 같은 기존 기능은 계속 무료예요. Pro(월 $3 / 연 $24 / 평생 $49)는 스쿼드 고급 기능(업무 예약·병렬), 프로 캐릭터·테마, 클라우드 동기화를 열어줘요. 앱에는 분석·원격 수집이 없어요.
+세션 패널·상태 표시·채팅 같은 기존 기능은 계속 무료예요. Pro(월 $3 / 연 $24 / 평생 $49)는 프로 캐릭터·컬러 변형, 클라우드 동기화를 열고 개별 팩을 30% 할인해 줘요. 앱에는 분석·원격 수집이 없어요.
 
 ## English (short)
 Buni is a macOS and Windows app that shows your Claude Code session state — thinking, using a tool, asking permission, done — as a pixel rabbit in the corner of your screen. No more staring at the terminal.
@@ -28,7 +30,7 @@ Do you keep watching the terminal while Claude Code works? Buni puts a small rab
 - Token usage and time-left gauge
 - A different rabbit per session (6 characters), plus a shop where coins earned from finished tasks buy outfits
 - Keep running with the lid closed, chat rooms by code (up to 10 people), SSH remote support
-Everything that exists today — session panels, status display, chat — stays free. Pro ($3/mo, $24/yr, $49 lifetime) unlocks advanced squad features (scheduled and parallel jobs), Pro characters & themes and cloud sync. The app has no analytics or remote collection.
+Everything that exists today — session panels, status display, chat — stays free. Pro ($3/mo, $24/yr, $49 lifetime) unlocks Pro characters & color variants and cloud sync, and takes 30% off individual packs. The app has no analytics or remote collection.
 
 ## 사실 점검 (과장 방지)
 | 문구 | 근거 |

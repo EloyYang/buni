@@ -72,14 +72,15 @@ class BoardCards(unittest.TestCase):
             {'id': 's4', 'title': '그냥 대기', 'why': 'w', 'goal': 'g', 'auto': 'cap', 'direction_change': False}]}
         Path(bt.wrapup_path(cls.a['id'])).write_text(json.dumps(wu, ensure_ascii=False), encoding='utf-8')
         cls.cards = bt.board_cards()
-        cls.by = {c['id']: c for c in cls.cards}
+        # 업무(task) 카드는 담당 팀원 id 로도 찾을 수 있게 — 시험 사례는 팀원 하나가 업무 하나를 맡는다
+        cls.by = {(f"{c['job_id']}|{c['role_id']}" if c['kind'] == 'task' else c['id']): c for c in cls.cards}
 
     def test_role_cards_include_followup_and_finished(self):
         a = self.a['id']
         self.assertEqual(self.by[f'{a}|dev']['column'], 'done')
         self.assertEqual(self.by[f'{a}|qa']['column'], 'running')
         self.assertEqual(self.by[f'{a}|qa']['recent'], 'pytest 실행 중')
-        self.assertEqual(self.by[f'{a}|qa']['progress'], (1, 3))
+        self.assertEqual(self.by[f'{a}|qa']['progress'], (0, 1))                    # 업무 카드의 진행률 = 그 업무를 맡은 팀원 중 끝낸 수
         nx = self.by[f'{a}|next_x']
         self.assertEqual((nx['column'], nx['auto']), ('ready', 'started'))      # 이어서 진행하는 업무 = 대기열, 자동 진행됨
         self.assertEqual(self.by[f'{self.b["id"]}|mk']['column'], 'review')
@@ -107,7 +108,7 @@ class BoardCards(unittest.TestCase):
         self.assertEqual(s['review'], 1)
 
     def test_search_status_assignee_scope(self):
-        f = lambda **kw: {c['id'] for c in bt.board_filter(self.cards, **kw)}
+        f = lambda **kw: {(f"{c['job_id']}|{c['role_id']}" if c['kind'] == 'task' else c['id']) for c in bt.board_filter(self.cards, **kw)}
         a = self.a['id']
         self.assertEqual(f(query='pytest'), {f'{a}|qa'})                         # 최근 활동 내용
         self.assertEqual(f(query='결제 개발자'), {f'{a}|dev'})                    # 담당자

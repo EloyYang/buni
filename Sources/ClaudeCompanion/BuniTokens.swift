@@ -23,6 +23,8 @@ enum BuniTokens {
         static let textOnAccent  = dynamic(dark: 0x1A1206, light: 0x1A1206)
 
         static let accentBase  = dynamic(dark: 0xF28C2E, light: 0xF28C2E)
+        /// PillButtonStyle 의 '조용한 보조 버튼' 표시 — 색 자체는 textTertiary 와 같다.
+        static let quiet       = textTertiary
         static let accentHover = dynamic(dark: 0xFFB066, light: 0xD97A1F)
         static let accentText  = dynamic(dark: 0xFFB066, light: 0xA85500)
         static let accentSoft  = dynamic(dark: 0x33261A, light: 0xFDEBD6)

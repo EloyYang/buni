@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 struct CompanionView: View {
     @EnvironmentObject var ctrl: CompanionController
@@ -14,11 +15,18 @@ struct CompanionView: View {
 
     // 리셋 시간 갱신 (30초마다)
     @State private var resetTimeTick = Date()
-    private let resetTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    private let resetTimer = Timer.publish(every: 30, tolerance: 10, on: .main, in: .common).autoconnect()
 
-    // 한도 도달 시 카운트다운 갱신 (1초마다 — 안내 버블이 떠 있을 때만 반영)
+    // 한도 도달 시 카운트다운 갱신 (1초마다 — 안내 버블이 떠 있고 보일 때만 돌린다)
     @State private var limitTick = Date()
-    private let limitTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let limitTimer = Timer.publish(every: 1, tolerance: 0.5, on: .main, in: .common)
+    @State private var limitTimerRun: Cancellable?
+
+    private func syncLimitTimer() {
+        let need = ctrl.isLimitNoticeVisible && !ctrl.isPaused
+        if need, limitTimerRun == nil { limitTimerRun = limitTimer.connect() }
+        else if !need { limitTimerRun?.cancel(); limitTimerRun = nil }
+    }
 
     // 드래그 위치 조정
     @State private var dragActive = false
@@ -61,6 +69,11 @@ struct CompanionView: View {
         .onReceive(resetTimer) { t in resetTimeTick = t }
         // 한도 안내가 떠 있을 때만 상태를 갱신해 불필요한 재렌더 방지
         .onReceive(limitTimer) { t in if ctrl.isLimitNoticeVisible { limitTick = t } }
+        .onAppear { syncLimitTimer() }
+        .onChange(of: ctrl.isLimitNoticeVisible) { _ in syncLimitTimer() }
+        .onChange(of: ctrl.isPaused) { _ in syncLimitTimer() }
+        // 애니메이션을 멈춘 동안(가려짐·화면 꺼짐)에는 작업 도구 등 하위 뷰도 같이 멈춘다
+        .environment(\.buniPaused, ctrl.isPaused)
     }
 
     /// 상태에 맞는 말풍선(권한 요청/완료/한도 안내/일반) 하나

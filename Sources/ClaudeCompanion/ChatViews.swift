@@ -64,15 +64,15 @@ struct ChatAvatarView: View {
             HStack(spacing: 4) {
                 Text("Lv.\(member.level)")
                     .font(.system(size: 8, weight: .bold).monospacedDigit())
-                    .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.40))
+                    .foregroundColor(.buniWarn)
                 Text(member.name)
                     .font(.system(size: 10, weight: .semibold))
                     .lineLimit(1)
             }
-            .foregroundColor(.white.opacity(0.92))
+            .foregroundColor(.buniInk)
             .padding(.horizontal, 7).padding(.vertical, 2)
             .frame(maxWidth: 108)
-            .background(Capsule().fill(isMe ? Color.accentColor.opacity(0.85) : Color.black.opacity(0.55)))
+            .background(Capsule().fill(isMe ? Color.buniAccent : Color.buniRail.opacity(0.9)))
             .contentShape(Capsule())
             .onTapGesture { if isMe { store.nameEditing = true } }
             .help(isMe ? L.t("눌러서 닉네임 바꾸기", "Click to change your nickname") : "")
@@ -85,14 +85,14 @@ struct ChatAvatarView: View {
             VStack(spacing: 0) {
                 Text(m.text)
                     .font(.system(size: 11))
-                    .foregroundColor(.black.opacity(0.88))
+                    .foregroundColor(.buniBg)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)       // 글자 수만큼만 — 줄임표 없이 전부 보인다
                     .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(0.96)))
-                Triangle().fill(Color.white.opacity(0.96)).frame(width: 10, height: 6)
+                    .background(RoundedRectangle(cornerRadius: BuniTheme.rMd).fill(Color.buniInk))
+                Triangle().fill(Color.buniInk).frame(width: 10, height: 6)
             }
-            .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+            .shadow(color: Color.buniRail.opacity(0.5), radius: 2, y: 1)
             .transition(.scale(scale: 0.6, anchor: .bottom).combined(with: .opacity))
         }
     }
@@ -136,15 +136,15 @@ struct ChatProfilePreview: View {
                 HStack(spacing: 4) {
                     Text("Lv.\(shop.level)")
                         .font(.system(size: 8, weight: .bold).monospacedDigit())
-                        .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.40))
+                        .foregroundColor(.buniWarn)
                     Text(store.displayName)
                         .font(.system(size: 10, weight: .semibold))
                         .lineLimit(1)
                 }
-                .foregroundColor(.white.opacity(0.92))
+                .foregroundColor(.buniInk)
                 .padding(.horizontal, 7).padding(.vertical, 2)
                 .frame(maxWidth: 108)
-                .background(Capsule().fill(Color.accentColor.opacity(0.85)))
+                .background(Capsule().fill(Color.buniAccent))
             }
             .frame(width: 112)
             VStack(alignment: .leading, spacing: 3) {
@@ -152,13 +152,13 @@ struct ChatProfilePreview: View {
                 Text(L.t("방에 들어가면 다른 사람에게 이렇게 보여요. 닉네임·캐릭터를 바꾸면 바로 바뀌어요. 옷차림은 상점에서 바꿔요.",
                          "This is how others will see you in the room. It updates as you change your nickname or character; outfits are changed in the shop."))
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.buniDim)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 8).padding(.horizontal, 10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.14)))
+        .padding(.vertical, BuniTheme.sm).padding(.horizontal, 10)
+        .background(RoundedRectangle(cornerRadius: BuniTheme.rMd).fill(Color.buniPanel))
     }
 }
 
@@ -172,11 +172,11 @@ struct ChatInput: View {
         HStack(spacing: 4) {
             Image(systemName: "bubble.left.fill")
                 .font(.system(size: 9))
-                .foregroundColor(.accentColor)
+                .foregroundColor(.buniAccent)
             TextField("", text: $store.draft)
                 .textFieldStyle(.plain)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.white)
+                .foregroundColor(.buniInk)
                 .focused($focused)
                 .onChange(of: store.draft) {
                     store.inputTouched = Date()
@@ -187,16 +187,16 @@ struct ChatInput: View {
             if store.draft.count >= 40 {
                 Text("\(store.draft.count)/\(ChatStore.maxTextLength)")
                     .font(.system(size: 8, weight: .medium).monospacedDigit())
-                    .foregroundColor(.white.opacity(store.draft.count >= ChatStore.maxTextLength ? 0.95 : 0.55))
+                    .foregroundColor(store.draft.count >= ChatStore.maxTextLength ? .buniInk : .buniDim)
             } else if store.draft.isEmpty {
-                Text("↵").font(.system(size: 10, weight: .bold)).foregroundColor(.white.opacity(0.45))
+                Text("↵").font(.system(size: 10, weight: .bold)).foregroundColor(.buniDim)
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 3)
         .frame(width: 106, height: 22)
-        .background(Capsule().fill(Color(white: 0.10).opacity(0.94)))
-        .overlay(Capsule().stroke(Color.accentColor, lineWidth: 2))
-        .shadow(color: Color.accentColor.opacity(glow ? 0.85 : 0.35), radius: glow ? 6 : 3)
+        .background(Capsule().fill(Color.buniRail.opacity(0.94)))
+        .overlay(Capsule().stroke(Color.buniAccent, lineWidth: 2))
+        .shadow(color: Color.buniAccent.opacity(glow ? 0.85 : 0.35), radius: glow ? 6 : 3)
         .onAppear {
             store.inputTouched = Date(); focused = true
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { glow = true }
@@ -223,14 +223,14 @@ private struct NameEditor: View {
             .textFieldStyle(.plain)
             .font(.system(size: 10, weight: .semibold))
             .multilineTextAlignment(.center)
-            .foregroundColor(.black)
+            .foregroundColor(.buniBg)
             .focused($focused)
             .onChange(of: text) { if $0.count > ChatStore.maxNicknameLength { text = String($0.prefix(ChatStore.maxNicknameLength)) } }
             .onSubmit { commit() }
             .onExitCommand { store.nameEditing = false }
             .frame(width: 88)
             .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Capsule().fill(Color.white.opacity(0.96)))
+            .background(Capsule().fill(Color.buniInk))
             .onAppear { original = store.displayName; text = original; focused = true }
     }
 
@@ -315,10 +315,10 @@ struct ChatRoomView: View {
         }
         .buttonStyle(.plain)
         .font(.system(size: 10, weight: .semibold))
-        .foregroundColor(.white)
+        .foregroundColor(.buniInk)
         .opacity(hover || store.inputActive ? 0.95 : 0.35)
         .padding(.horizontal, 10).padding(.vertical, 3)
-        .background(Capsule().fill(Color.black.opacity(hover || store.inputActive ? 0.6 : 0.3)))
+        .background(Capsule().fill(Color.buniRail.opacity(hover || store.inputActive ? 0.85 : 0.5)))
         .animation(.easeOut(duration: 0.15), value: hover)
     }
 }
@@ -342,16 +342,16 @@ struct ChatLobbyView: View {
                 note(L.t("채팅은 Google 로그인이 필요해요. 로그인하면 같은 방 사람들과 이름이 보여요.",
                          "Chat needs a Google sign-in so people in the room can tell you apart."))
                 Button(L.t("Google로 로그인", "Sign in with Google")) { Task { await cloud.signIn() } }
-                    .buttonStyle(PillButtonStyle(color: .accentColor))
+                    .buttonStyle(PillButtonStyle(color: .buniAccent))
                     .disabled(cloud.isBusy)
             } else {
                 profile
-                Divider()
+                Divider().background(Color.buniLine)
                 if let code = store.roomCode { inRoom(code) } else { lobby }
             }
 
             if let err = store.lastError {
-                Text(err).font(.system(size: 11)).foregroundColor(BT.danger)
+                Text(err).font(.system(size: 11)).foregroundColor(.buniDanger)
             }
             Spacer(minLength: 0)
             note(L.t("방에는 최대 10명까지 들어올 수 있어요. 다른 사람에게는 내 닉네임·캐릭터·옷차림·대화와 "
@@ -359,12 +359,14 @@ struct ChatLobbyView: View {
                      "Up to 10 people per room. Others only see your nickname, character, outfit, messages and a work "
                      + "motion (idle / working / done) — never what you're working on."))
         }
+        .foregroundColor(.buniInk)
         .padding(20)
         .frame(width: 400)
+        .background(Color.buniBg)
     }
 
     private func note(_ text: String) -> some View {
-        Text(text).font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+        Text(text).font(.system(size: 11)).foregroundColor(.buniDim).fixedSize(horizontal: false, vertical: true)
     }
 
     // 닉네임 · 캐릭터
@@ -384,9 +386,9 @@ struct ChatLobbyView: View {
                         Text(type.shortName)
                             .font(.system(size: 11, weight: .semibold))
                             .frame(maxWidth: .infinity).padding(.vertical, 5)
-                            .background(RoundedRectangle(cornerRadius: 7)
-                                .fill(store.character == type ? Color.accentColor.opacity(0.85) : Color.gray.opacity(0.22)))
-                            .foregroundColor(store.character == type ? .white : .primary)
+                            .background(RoundedRectangle(cornerRadius: BuniTheme.rSm)
+                                .fill(store.character == type ? Color.buniAccent : Color.buniRaised))
+                            .foregroundColor(.buniInk)
                     }.buttonStyle(.plain)
                 }
             }
@@ -400,7 +402,7 @@ struct ChatLobbyView: View {
             Button(L.t("새 방 만들기", "Create a room")) {
                 busy = true; Task { await store.createRoom(); busy = false }
             }
-            .buttonStyle(PillButtonStyle(color: .accentColor))
+            .buttonStyle(PillButtonStyle(color: .buniAccent))
             .disabled(busy)
 
             HStack {
@@ -409,7 +411,7 @@ struct ChatLobbyView: View {
                     .font(.system(size: 13, design: .monospaced))
                     .onSubmit { enter() }
                 Button(L.t("입장", "Join")) { enter() }
-                    .buttonStyle(PillButtonStyle(color: BT.accentBase))
+                    .buttonStyle(PillButtonStyle(color: .buniAccent))
                     .disabled(busy || codeInput.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -429,7 +431,7 @@ struct ChatLobbyView: View {
                 Button(L.t("복사", "Copy")) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(code, forType: .string)
-                }.buttonStyle(PillButtonStyle(color: .gray))
+                }.buttonStyle(PillButtonStyle(color: .buniRaised))
                 Spacer()
                 Text("\(store.members.count)/\(ChatStore.maxMembers)").font(.system(size: 12, design: .monospaced))
             }
@@ -437,17 +439,17 @@ struct ChatLobbyView: View {
                 HStack(spacing: 8) {
                     Circle().fill(color(m.motion)).frame(width: 8, height: 8)
                     Text(m.name).font(.system(size: 12, weight: .semibold))
-                    Text(label(m.motion)).font(.system(size: 11)).foregroundColor(.secondary)
+                    Text(label(m.motion)).font(.system(size: 11)).foregroundColor(.buniDim)
                     Spacer()
                 }
             }
             Button(L.t("방 나가기", "Leave room")) { store.leave() }
-                .buttonStyle(PillButtonStyle(color: BT.danger))
+                .buttonStyle(PillButtonStyle(color: .buniDanger))
         }
     }
 
     private func color(_ m: ChatMotion) -> Color {
-        switch m { case .idle: return .gray; case .working: return Color(red: 0.95, green: 0.75, blue: 0.2); case .done: return BT.success }
+        switch m { case .idle: return .buniDim; case .working: return .buniWarn; case .done: return .buniOk }
     }
     private func label(_ m: ChatMotion) -> String {
         switch m { case .idle: return L.t("대기", "Idle"); case .working: return L.t("작업 중", "Working"); case .done: return L.t("완료", "Done") }

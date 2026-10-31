@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 // 부니 스쿼드 — 슬랙처럼 "단체방(채널)" 과 "개별 대화(DM)" 로 나눠 보여 주는 화면 조각들.
 //  · 단체방: 지시·보고·검토의 한두 줄 요약만 (자세한 건 '상세 ›' 로 그 팀원의 DM 으로)
@@ -8,11 +9,12 @@ import AppKit
 // MARK: - 팔레트
 
 enum SQ {
-    static let rail  = BT.bgSidebar
-    static let main  = BT.bgCanvas
-    static let line  = BT.borderSubtle
-    static let dim   = BT.textTertiary
-    static let hover = BT.surface2
+    // 색은 BuniTheme(docs/design-system.md) 토큰에서 가져온다
+    static let rail  = Color.buniRail
+    static let main  = Color.buniBg
+    static let line  = Color.buniLine
+    static let dim   = Color.buniDim
+    static let hover = Color.buniRaised.opacity(0.6)
 
     private static let avatarColors: [Color] = [
         Color(red: 0.36, green: 0.52, blue: 0.95), Color(red: 0.25, green: 0.66, blue: 0.55),
@@ -21,7 +23,7 @@ enum SQ {
         Color(red: 0.30, green: 0.62, blue: 0.82), Color(red: 0.80, green: 0.62, blue: 0.22),
     ]
     static func avatarColor(_ id: String) -> Color {
-        if id == "lead" { return Color(red: 0.93, green: 0.55, blue: 0.22) }
+        if id == "lead" { return Color.buniAccent }
         if id == "user" { return Color(red: 0.40, green: 0.45, blue: 0.55) }
         let h = id.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xffff }
         return avatarColors[h % avatarColors.count]
@@ -100,9 +102,12 @@ struct SquadComposer: NSViewRepresentable {
     @Binding var text: String
     @Binding var height: CGFloat
     var onSend: () -> Void
+    /// ⌘V 로 클립보드의 파일·이미지를 붙여넣으면 첨부로 올린다 (글이면 평소처럼 붙여넣는다)
+    var onPasteFiles: (([URL]) -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let tv = ComposerTextView()
+        tv.onPasteFiles = { context.coordinator.parent.onPasteFiles?($0) }
         tv.delegate = context.coordinator
         tv.isRichText = false
         tv.allowsUndo = true
@@ -171,6 +176,13 @@ struct SquadComposer: NSViewRepresentable {
 
 private final class ComposerTextView: NSTextView {
     override var acceptsFirstResponder: Bool { true }
+    var onPasteFiles: (([URL]) -> Void)?
+
+    override func paste(_ sender: Any?) {
+        let files = onPasteFiles == nil ? [] : TeamAttach.pasteboardFiles()
+        if !files.isEmpty { onPasteFiles?(files); return }
+        super.paste(sender)
+    }
 }
 
 /// 슬랙처럼 둥근 테두리 안에 입력창 + 보내기 버튼
@@ -179,12 +191,20 @@ struct SquadComposerBar: View {
     var hint: String? = nil
     var mentions: [(id: String, label: String)] = []
     var disabled = false
-    var onSend: (String) -> Void
+    /// 쓰던 글을 보관하는 열쇠 (`TeamDrafts.key`) — 비우면 보관하지 않는다
+    var draftKey: String? = nil
+    /// 보낸 글과 첨부 파일들 — 글 없이 첨부만 보내도 된다
+    var onSend: (String, [URL]) -> Void
 
     @State private var text = ""
     @State private var height: CGFloat = 34
+    @State private var restoredKey: String? = nil
+    @State private var files: [URL] = []              // 보내기 전 첨부 (메모리만 — 입력 중 draft 저장과 무관)
+    @State private var attachNote: String? = nil
+    @State private var dropping = false
 
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var canSend: Bool { !(trimmed.isEmpty && files.isEmpty) && !disabled }
 
     private var mentionMatches: [(id: String, label: String)] {
         guard text.hasPrefix("@"), !text.contains(" "), !text.contains("\n") else { return [] }
@@ -206,39 +226,66 @@ struct SquadComposerBar: View {
                     Spacer()
                 }
             }
+            AttachChips(files: $files, note: $attachNote)
             HStack(alignment: .bottom, spacing: 8) {
                 ZStack(alignment: .topLeading) {
-                    SquadComposer(text: $text, height: $height, onSend: send)
+                    SquadComposer(text: $text, height: $height, onSend: send, onPasteFiles: { addFiles($0) })
                     if text.isEmpty {
-                        Text(placeholder).font(.system(size: 13)).foregroundColor(.white.opacity(0.35))
+                        Text(placeholder).font(.system(size: 13)).foregroundColor(.buniDim)
                             .padding(.horizontal, 9).padding(.vertical, 7).allowsHitTesting(false)
                     }
                 }
                 .frame(height: height)
+                AttachPickButton(files: $files, note: $attachNote)
                 Button(action: send) {
                     Image(systemName: "paperplane.fill").font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundColor(canSend ? Color.buniAccentInk : Color.buniDim)
                         .frame(width: 30, height: 28)
-                        .background(RoundedRectangle(cornerRadius: 7)
-                            .fill(trimmed.isEmpty || disabled ? Color.white.opacity(0.12) : Color.accentColor))
+                        .background(RoundedRectangle(cornerRadius: BuniTheme.rSm)
+                            .fill(canSend ? Color.buniAccent : Color.buniRaised))
                 }
                 .buttonStyle(.plain)
-                .disabled(trimmed.isEmpty || disabled)
+                .disabled(!canSend)
                 .padding(.bottom, 3)
             }
             .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.14), lineWidth: 1))
-            Text(hint ?? L.t("Enter 보내기 · Shift+Enter 줄바꿈", "Enter to send · Shift+Enter for a new line"))
-                .font(.system(size: 10)).foregroundColor(.white.opacity(0.38))
+            .background(RoundedRectangle(cornerRadius: BuniTheme.rMd).fill(Color.buniField))
+            .overlay(RoundedRectangle(cornerRadius: BuniTheme.rMd).stroke(dropping ? Color.buniAccent : Color.buniLine, lineWidth: dropping ? 2 : 1))
+            .onDrop(of: [UTType.fileURL], isTargeted: $dropping) { providers in
+                TeamAttach.loadURLs(providers) { addFiles($0) }
+                return true
+            }
+            Text((hint ?? L.t("Enter 보내기 · Shift+Enter 줄바꿈", "Enter to send · Shift+Enter for a new line")) + TeamAttach.hint)
+                .font(.system(size: 10)).foregroundColor(.buniDim)
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
+        .onAppear { restore() }
+        .onChange(of: text) { v in
+            // 되살리는 중에 빈 글로 덮어쓰지 않는다
+            if let k = draftKey, restoredKey == k { TeamDrafts.shared.set(k, v) }
+        }
+        .onChange(of: files) { v in
+            if let k = draftKey, restoredKey == k { TeamAttachPending.shared.set(k, v) }
+        }
+    }
+
+    private func restore() {
+        guard let k = draftKey, restoredKey != k else { return }
+        restoredKey = k
+        text = TeamDrafts.shared.get(k)
+        files = TeamAttachPending.shared.get(k).filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private func addFiles(_ urls: [URL]) {
+        let r = TeamAttach.merge(urls, into: files)
+        files = r.files; attachNote = r.note
     }
 
     private func send() {
-        guard !trimmed.isEmpty, !disabled else { return }
-        onSend(trimmed)
+        guard canSend else { return }
+        onSend(trimmed, files)
         text = ""
+        files = []; attachNote = nil
         height = 34
     }
 }
@@ -339,7 +386,7 @@ private struct MessageRow<Content: View>: View {
             if header { SquadAvatar(icon: icon, id: id) }
             else {
                 Text(squadClock.string(from: Date(timeIntervalSince1970: time)))
-                    .font(.system(size: 9)).foregroundColor(.white.opacity(0.25)).frame(width: 34)
+                    .font(.system(size: 9)).foregroundColor(.buniDim).frame(width: 34)
             }
             VStack(alignment: .leading, spacing: 2) {
                 if header {
@@ -352,7 +399,7 @@ private struct MessageRow<Content: View>: View {
                                 .background(RoundedRectangle(cornerRadius: 4).fill(tag.1.opacity(0.18)))
                         }
                         Text(squadClock.string(from: Date(timeIntervalSince1970: time)))
-                            .font(.system(size: 10)).foregroundColor(.white.opacity(0.35))
+                            .font(.system(size: 10)).foregroundColor(.buniDim)
                     }
                 }
                 content()
@@ -375,7 +422,7 @@ private func kindTag(_ kind: String) -> (String, Color)? {
 private struct SystemNote: View {
     let text: String
     var body: some View {
-        Text(text).font(.system(size: 10.5)).foregroundColor(.white.opacity(0.42))
+        Text(text).font(.system(size: 10.5)).foregroundColor(.buniDim)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 24).padding(.vertical, 3)
             .multilineTextAlignment(.center)
@@ -406,7 +453,7 @@ struct SquadChannelView: View {
 
     var body: some View {
         let people = SquadPeople(job: job)
-        TimelineView(.periodic(from: .now, by: 1.5)) { _ in
+        TeamLive {
             let msgs = TeamStore.readChat(jobId: job.id)
             let typing = TeamStore.readTyping(jobId: job.id)
             VStack(spacing: 0) {
@@ -424,26 +471,28 @@ struct SquadChannelView: View {
                     hint: L.t("Enter 보내기 · Shift+Enter 줄바꿈 · @이름 으로 한 팀원에게만 지시",
                               "Enter to send · Shift+Enter new line · @name to instruct one teammate"),
                     mentions: [("lead", people.name("lead"))] + (job.plan?.roles ?? []).map { ($0.id, $0.name ?? $0.id) },
-                    disabled: job.state == "cancelled"
-                ) { send($0) }
+                    disabled: job.state == "cancelled",
+                    draftKey: TeamDrafts.key(job.id, "channel")
+                ) { send($0, $1) }
             }
         }
     }
 
-    private func send(_ text: String) {
+    /// '@이름 …' 이면 그 팀원에게만(첨부도 그 팀원에게만), 아니면 팀장이 듣고 나눠 지시한다
+    private func send(_ text: String, _ files: [URL]) {
         let roles = job.plan?.roles ?? []
         if text.hasPrefix("@") {
             let body = String(text.dropFirst())
             if let r = roles.first(where: { body.hasPrefix($0.name ?? $0.id) }) {
                 let rest = String(body.dropFirst((r.name ?? r.id).count)).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !rest.isEmpty { store.sendRoleNote(job, role: r.id, text: rest); return }
+                if !rest.isEmpty || !files.isEmpty { store.sendRoleNote(job, role: r.id, text: rest, files: files); return }
             }
             if body.hasPrefix(L.t("팀장", "Lead")) {
                 let rest = String(body.dropFirst(L.t("팀장", "Lead").count)).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !rest.isEmpty { store.sendChat(job, to: "lead", text: rest); return }
+                if !rest.isEmpty || !files.isEmpty { store.sendChat(job, to: "lead", text: rest, files: files); return }
             }
         }
-        store.sendChat(job, to: "lead", text: text)
+        store.sendChat(job, to: "lead", text: text, files: files)
     }
 
     @ViewBuilder
@@ -479,16 +528,20 @@ struct SquadChannelView: View {
                     Text(sum.text).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     if (sum.more || m.kind != "review"), member != "lead", member != "all", member != "user" {
                         Button { onOpenDM(member) } label: {
-                            Text(L.t("상세 보기 ›", "Details ›")).font(.system(size: 11, weight: .semibold)).foregroundColor(.accentColor)
+                            Text(L.t("상세 보기 ›", "Details ›")).font(.system(size: 11, weight: .semibold)).foregroundColor(.buniInfo)
                         }.buttonStyle(.plain)
                     }
+                    AttachmentStrip(jobId: job.id, items: m.attachments)
                 }
             }
         default:
             let toRole = m.from == "user" && m.to != "lead" && m.to != "all" && m.to != "user"
             MessageRow(icon: people.icon(m.from), id: m.from, name: people.name(m.from), time: m.ts, header: header,
                        sub: toRole ? "→ \(people.icon(m.to)) \(people.name(m.to))" : nil) {
-                Text(m.text).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(m.text).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    AttachmentStrip(jobId: job.id, items: m.attachments)
+                }
             }
         }
     }
@@ -508,7 +561,7 @@ struct SquadDMView: View {
 
     var body: some View {
         let people = SquadPeople(job: job)
-        TimelineView(.periodic(from: .now, by: 1.5)) { _ in
+        TeamLive {
             let msgs = filter(TeamStore.readChat(jobId: job.id))
             let typing = isLead ? TeamStore.readTyping(jobId: job.id) : ""
             VStack(spacing: 0) {
@@ -530,10 +583,11 @@ struct SquadDMView: View {
                         ? L.t("팀장이 이해해서 답하고, 필요한 팀원에게 나눠 지시해요 (약 1분)",
                               "The lead replies and delegates as needed (about a minute)")
                         : hint,
-                    disabled: job.state == "cancelled"
-                ) { text in
-                    if isLead { store.sendChat(job, to: "lead", text: text) }
-                    else { store.sendRoleNote(job, role: who, text: text) }
+                    disabled: job.state == "cancelled",
+                    draftKey: TeamDrafts.key(job.id, isLead ? "lead" : "dm:" + who)
+                ) { text, files in
+                    if isLead { store.sendChat(job, to: "lead", text: text, files: files) }
+                    else { store.sendRoleNote(job, role: who, text: text, files: files) }
                 }
             }
         }
@@ -572,6 +626,9 @@ struct SquadDMView: View {
         let sessions = TeamStore.readSessions(jobId: job.id).filter { $0.key == who }
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
+                if let dl = role?.dutyLabel, !dl.isEmpty {
+                    Chip(text: dl, color: .buniDim)
+                }
                 Chip(text: label + ((st?.attempts ?? 0) > 1 ? L.t("  (\(st!.attempts!)회)", "  (×\(st!.attempts!))") : ""), color: color)
                 if st?.notePending == true {
                     Text(L.t("📨 반영 대기", "📨 queued")).font(.system(size: 10)).foregroundColor(.orange)
@@ -606,14 +663,14 @@ struct SquadDMView: View {
             }
             if cardOpen {
                 if let mission = role?.mission, !mission.isEmpty {
-                    Text(mission).font(.system(size: 11.5)).foregroundColor(.white.opacity(0.75))
+                    Text(mission).font(.system(size: 11.5)).foregroundColor(.buniInk2)
                         .lineLimit(3).fixedSize(horizontal: false, vertical: true)
                 }
                 activityBox(act)
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(Color.white.opacity(0.035))
+        .background(Color.buniPanel)
         .overlay(Rectangle().fill(SQ.line).frame(height: 1), alignment: .bottom)
     }
 
@@ -626,7 +683,7 @@ struct SquadDMView: View {
                 ForEach(Array(act.lines.suffix(6).enumerated()), id: \.offset) { _, l in
                     HStack(alignment: .top, spacing: 6) {
                         Text(Self.clock.string(from: Date(timeIntervalSince1970: l.ts)))
-                            .font(.system(size: 10, design: .monospaced)).foregroundColor(.white.opacity(0.35))
+                            .font(.system(size: 10, design: .monospaced)).foregroundColor(.buniDim)
                         Text(l.text).font(.system(size: 11)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -653,10 +710,13 @@ struct SquadDMView: View {
             MessageRow(icon: people.icon(m.from), id: m.from, name: people.name(m.from), time: m.ts, header: true || header,
                        tag: kindTag(m.kind),
                        sub: m.from == "lead" && m.to != who && m.to != "user" && m.to != "all" ? "→ \(people.name(m.to))" : nil) {
-                if m.kind == "report" || (m.kind == "say" && m.text.contains("\n")) {
-                    MarkdownView(text: m.text)
-                } else {
-                    Text(m.text).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 3) {
+                    if m.kind == "report" || (m.kind == "say" && m.text.contains("\n")) {
+                        MarkdownView(text: m.text)
+                    } else {
+                        Text(m.text).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    }
+                    AttachmentStrip(jobId: job.id, items: m.attachments)
                 }
             }
         }
@@ -668,7 +728,7 @@ struct SquadDMView: View {
 struct SquadSectionTitle: View {
     let text: String
     var body: some View {
-        Text(text).font(.system(size: 10, weight: .heavy)).foregroundColor(.white.opacity(0.38))
+        Text(text).font(.system(size: 10, weight: .heavy)).foregroundColor(.buniDim)
             .textCase(.uppercase)
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 3)
     }
@@ -694,22 +754,22 @@ struct SquadNavRow: View {
                 leading.frame(width: 20)
                 Text(title)
                     .font(.system(size: 13, weight: unread > 0 || selected ? .bold : .regular))
-                    .foregroundColor(selected ? .white : .white.opacity(unread > 0 ? 0.95 : 0.72))
+                    .foregroundColor(selected || unread > 0 ? .buniInk : .buniInk2)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let subtitle {
-                    Text(subtitle).font(.system(size: 9.5)).foregroundColor(selected ? .white.opacity(0.8) : subtitleColor).lineLimit(1)
+                    Text(subtitle).font(.system(size: 9.5)).foregroundColor(selected ? .buniInk2 : subtitleColor).lineLimit(1)
                 }
                 if unread > 0 {
                     Text("\(min(unread, 99))").font(.system(size: 10, weight: .heavy)).foregroundColor(.white)
                         .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Capsule().fill(Color(red: 0.88, green: 0.28, blue: 0.36)))
+                        .background(Capsule().fill(Color.buniDanger))
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6)
-                .fill(selected ? Color.accentColor.opacity(0.85) : (tint?.opacity(hover ? 0.26 : 0.18) ?? (hover ? SQ.hover : .clear))))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Color.clear : (tint?.opacity(0.45) ?? Color.clear), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: BuniTheme.rSm)
+                .fill(selected ? Color.buniRaised : (tint?.opacity(hover ? 0.26 : 0.18) ?? (hover ? SQ.hover : .clear))))
+            .overlay(RoundedRectangle(cornerRadius: BuniTheme.rSm).stroke(selected ? Color.clear : (tint?.opacity(0.45) ?? Color.clear), lineWidth: 1))
             .padding(.horizontal, 8)
             .contentShape(Rectangle())
         }
@@ -785,7 +845,7 @@ struct SquadProposalCards: View {
                         if let was = p.was, !was.isEmpty {
                             HStack(alignment: .top, spacing: 6) {
                                 Text(L.t("기존", "Was")).font(.system(size: 10, weight: .bold)).foregroundColor(SQ.dim).frame(width: 30, alignment: .leading)
-                                Text(was).font(.system(size: 12)).strikethrough().foregroundColor(.white.opacity(0.6)).textSelection(.enabled)
+                                Text(was).font(.system(size: 12)).strikethrough().foregroundColor(.buniDim).textSelection(.enabled)
                             }
                         }
                         HStack(alignment: .top, spacing: 6) {
