@@ -38,10 +38,10 @@ class CardTitleParity(unittest.TestCase):
         self.assertIn("c['short_title']", board)
         self.assertNotRegex(board[:board.index("c['short_title']") + 400], r"text=c\['job_title'\]")
         mac = _read('Sources/ClaudeCompanion/SquadBoardViews.swift')
-        cards = mac[mac.index('private struct SquadCard'):mac.index('private struct SquadItemDetail')]
+        cards = mac[mac.index('private struct SquadCard'):mac.index('struct SquadItemDetail')]
         self.assertEqual(cards.count('Text(item.shortTitle)'), 2)         # 보드 카드·목록 줄
         self.assertNotIn('jobTitle', cards)                               # 카드에는 전체 제목을 안 그린다
-        detail = mac[mac.index('private struct SquadItemDetail'):mac.index('private struct SquadProgressBar')]
+        detail = mac[mac.index('struct SquadItemDetail'):mac.index('private struct SquadProgressBar')]
         self.assertIn('Text(item.jobTitle)', detail)                      # 눌러 연 상세에서 전체 제목
 
 

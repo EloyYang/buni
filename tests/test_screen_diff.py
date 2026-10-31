@@ -122,6 +122,8 @@ class ScreenDiff(unittest.TestCase):
 
     def test_job_screens_caches_into_screens_json(self):
         jid = 'job-shots'
+        bt.save_settings({'auto_capture': True})
+        self.addCleanup(bt.save_settings, {'auto_capture': False})
         sd = Path(bt.job_path(jid, 'screens'))
         write_png(sd / 'home.before.png', 32, 32)
         write_png(sd / 'home.after.png', 32, 32, paint=block(8, 8, 16, 16))

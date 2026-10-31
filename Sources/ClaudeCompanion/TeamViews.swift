@@ -146,6 +146,7 @@ struct TeamRootView: View {
     @State private var settingsJob: TeamJob?                  // 프로젝트 설정 (모델) 시트
     @State private var showArchived = false                   // 보관된 팀원 보기
     @State private var boardOn = false                        // 현황 모니터링 화면
+    @State private var openTask: String?                      // 프로젝트 현황에서 눌러 상세를 보는 업무 (팝업)
 
     init(initialSelection: String? = nil, initialPane: SquadPane? = nil) {
         _selection = State(initialValue: initialSelection)
@@ -453,7 +454,7 @@ struct TeamRootView: View {
                 Rectangle().fill(SQ.line).frame(height: 1)
                 switch p {
                 case .overview:
-                    TeamJobDetail(job: job, onDeleted: { selection = nil }, onOpenDM: { pane[job.id] = .dm($0) })
+                    TeamJobDetail(job: job, onDeleted: { selection = nil }, onOpenDM: { pane[job.id] = .dm($0) }, onOpenTask: { openTask = $0 })
                         .id(job.id + job.state + (job.busy == true ? "b" : ""))
                 case .requirements:
                     SquadRequirementsView(job: job).id(job.id + "req" + String(job.requirements?.count ?? 0))
@@ -464,6 +465,22 @@ struct TeamRootView: View {
                     SquadDMView(job: job, who: "lead", onSeen: { markSeen(job.id, .lead) }).id(job.id + "lead")
                 case .dm(let r):
                     SquadDMView(job: job, who: r, onSeen: { markSeen(job.id, p) }).id(job.id + "dm" + r)
+                }
+            }
+            // 업무 상세 — 전체 현황과 같은 팝업을 화면 가운데에 연다 (바깥을 누르거나 Esc 로 닫는다)
+            .overlay {
+                if p == .overview, let tid = openTask {
+                    let now = Date().timeIntervalSince1970
+                    if let it = SquadBoard.items([job], now: now).first(where: { $0.taskId == tid }) {
+                        SquadDetailPopup(item: it, now: now, onGoto: { _, to in openTask = nil; pane[job.id] = to }, onClose: { openTask = nil })
+                    }
+                }
+            }
+            .onChange(of: selection) { _ in openTask = nil }
+            .onAppear {
+                // 화면 비교용 캡처(tools/preview)에서만 — 첫 업무의 상세를 연 채로 그린다
+                if ProcessInfo.processInfo.environment["BUNI_PREVIEW_OPEN"] != nil, p == .overview, openTask == nil {
+                    openTask = job.tasks?.first?.id
                 }
             }
         } else {
@@ -581,6 +598,7 @@ private struct TeamJobDetail: View {
     let job: TeamJob
     var onDeleted: () -> Void
     var onOpenDM: (String) -> Void = { _ in }
+    var onOpenTask: (String) -> Void = { _ in }
     @ObservedObject private var store = TeamStore.shared
 
     var body: some View {
@@ -637,7 +655,7 @@ private struct TeamJobDetail: View {
                 } else { TeamQuestionsForm(job: job) }
             case "review_requirements": TeamRequirements(job: job, onDeleted: onDeleted)
             case "queued", "paused", "waiting_limit", "running", "review", "done":
-                SquadProjectBoard(job: job, onOpenDM: onOpenDM)
+                SquadProjectBoard(job: job, onOpenDM: onOpenDM, onOpenTask: onOpenTask)
             default: // failed / cancelled
                 VStack(alignment: .leading, spacing: 10) {
                     Text(job.error?.isEmpty == false ? job.error! : L.t("취소된 작업이에요.", "This job was cancelled."))

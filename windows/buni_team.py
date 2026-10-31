@@ -3160,13 +3160,33 @@ def _screen_names(job_id: str) -> list:
     return sorted(names)
 
 
+def _file_sig(path: str) -> list:
+    try:
+        return [os.path.getsize(path), int(os.path.getmtime(path))]
+    except OSError:
+        return [0, 0]
+
+
+def _preview_shot_items(job_id: str) -> dict:
+    """반영한 변경마다 capture_shots 가 찍어 둔 전·후 화면 — 같은 이름은 가장 최근 변경의 것. {이름: {before, after, change}}"""
+    out = {}
+    for m in reversed(list_changes(job_id, 50)):                  # 오래된 것부터 → 새 변경이 덮어쓴다
+        for n in m.get('shots') or []:
+            b, a = (os.path.join(changes_dir(job_id), m['id'], 'shots', side, n) for side in SCREEN_SIDES)
+            if os.path.isfile(b) and os.path.isfile(a):
+                out[n[:-4] if n.lower().endswith('.png') else n] = {'before': b, 'after': a, 'change': m['id']}
+    return out
+
+
 def job_screens(job_id: str) -> list:
     """업무 상세에 보여 줄 전·후 화면 [{name, before, after, w, h, boxes, error, captured, missing, reason}] — 파일이 바뀐 때만 다시 계산해 `screens.json` 에 저장.
     전·후 한 쌍이 다 있으면 captured=True. 한쪽이 없거나 캡처에 실패한 이름은 captured=False(화면에 '캡처 아님'), missing=없는 쪽, reason=이유."""
     sd = job_path(job_id, 'screens')
     log = _capture_log(job_id)
+    show_fail = bool(load_settings().get('auto_capture'))          # 화면 전체 캡처를 켠 사람에게만 그 실패 이유를 보여 준다 (끈 뒤에는 옛 실패 기록이 오류처럼 남지 않게)
     names = _screen_names(job_id)
-    sig = []
+    shots = _preview_shot_items(job_id)
+    sig = [['__shots', show_fail] + [[n, i['before'], i['after'], _file_sig(i['before']), _file_sig(i['after'])] for n, i in shots.items()]]
     for n in names:
         row = [n]
         for side in SCREEN_SIDES:
@@ -3192,10 +3212,15 @@ def job_screens(job_id: str) -> list:
         if has['before'] and has['after']:
             items.append({'name': n, 'before': b, 'after': a, **screen_diff(b, a), 'captured': True, 'missing': [], 'reason': ''})
             continue
+        if not show_fail:
+            continue
         missing = [s for s in SCREEN_SIDES if not has[s]]
         why = [log.get(n, {}).get(s, {}).get('error', '') or ('변경 전 화면이 없어요' if s == 'before' else '변경 후 화면이 없어요') for s in missing]
         items.append({'name': n, 'before': b if has['before'] else '', 'after': a if has['after'] else '', 'w': 0, 'h': 0, 'boxes': [], 'error': '',
                       'captured': False, 'missing': missing, 'reason': ' · '.join(dict.fromkeys(why))})     # 전·후가 같은 이유로 실패하면 한 번만
+    for n, i in shots.items():                                     # 권한 없이 앱 화면만 따로 그려 찍은 변경 전·후 (capture_shots)
+        items.append({'name': n, 'before': i['before'], 'after': i['after'], **screen_diff(i['before'], i['after']), 'captured': True, 'missing': [], 'reason': '',
+                      'change': i['change']})
     if items or old:
         try:
             _atomic_write(cache, json.dumps({'sig': sig, 'dir': sd, 'items': items}, ensure_ascii=False, indent=2))
@@ -4158,9 +4183,12 @@ def capture_shots(job_id: str, cid: str) -> list:
                 return []
             env = dict(os.environ, BUNI_SHOT_DIR=shots, BUNI_SHOT_SIDE=side, BUNI_TREE=tree)
             try:
-                subprocess.run(cmd, shell=True, cwd=tree, env=env, capture_output=True, timeout=900, creationflags=0x08000000 if IS_WIN else 0)
-            except (OSError, subprocess.SubprocessError):
-                return []
+                run = subprocess.run(cmd, shell=True, cwd=tree, env=env, capture_output=True, timeout=900, creationflags=0x08000000 if IS_WIN else 0)
+            except (OSError, subprocess.SubprocessError) as e:
+                return _shots_failed(job_id, cid, f"{'변경 전' if side == 'before' else '변경 후'} 화면을 그리지 못했어요 ({type(e).__name__})")
+            if run.returncode != 0:
+                tail = (run.stderr or b'').decode('utf-8', 'replace').strip().splitlines()[-2:]
+                return _shots_failed(job_id, cid, f"{'변경 전' if side == 'before' else '변경 후'} 화면을 그리지 못했어요" + (' — ' + ' '.join(tail)[:160] if tail else ''))
             out[side] = {n for n in os.listdir(shots) if n.lower().endswith('.png')}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -4175,10 +4203,23 @@ def capture_shots(job_id: str, cid: str) -> list:
         pairs.append(n)
     meta = load_change(job_id, cid)
     meta['shots'] = pairs
+    meta.pop('shots_note', None)
+    if not pairs:
+        meta['shots_note'] = '앱 화면을 그려 봤지만 눈에 보이는 차이가 없었어요 (그리는 화면: 전체 현황 · 프로젝트 현황 · 단체방 · 업무 상세)'
     _save_change(job_id, meta)
     if pairs:
-        chat_add(job_id, 'system', 'user', f"🖼 화면이 바뀐 곳 {len(pairs)}개를 변경 전·후로 찍어 뒀어요 — 프로젝트 현황에서 나란히 볼 수 있고, 마음에 안 들면 되돌릴 수 있어요", 'status')
+        chat_add(job_id, 'system', 'user', f"🖼 화면이 바뀐 곳 {len(pairs)}개를 변경 전·후로 찍어 뒀어요 — 전체 현황·프로젝트 현황의 업무를 눌러 나란히 볼 수 있고, 마음에 안 들면 되돌릴 수 있어요", 'status')
     return pairs
+
+
+def _shots_failed(job_id: str, cid: str, why: str) -> list:
+    """변경 전·후 화면을 못 그렸다 — 이유를 변경 기록에 남기고 채팅으로 알린다 (조용히 사라지지 않게). 화면 기록 권한과는 무관하다."""
+    meta = load_change(job_id, cid)
+    if meta:
+        meta['shots'], meta['shots_note'] = [], why
+        _save_change(job_id, meta)
+        chat_add(job_id, 'system', 'user', f'🖼 변경 전·후 화면을 못 만들었어요 — {why}', 'status')
+    return []
 
 
 def _capture_shots_async(job_id: str, cid: str):

@@ -51,7 +51,7 @@ class TestTypingIsolation(unittest.TestCase):
     def test_mac_decision_box_owns_its_text(self):
         src = (self.ROOT / 'Sources' / 'ClaudeCompanion' / 'SquadBoardViews.swift').read_text(encoding='utf-8')
         self.assertIn('private struct SquadDecisionBox: View', src)
-        detail = src[src.index('private struct SquadItemDetail'):src.index('private struct SquadDecisionBox')]
+        detail = src[src.index('struct SquadItemDetail'):src.index('private struct SquadDecisionBox')]
         self.assertNotIn('@State private var note', detail)   # body 가 파일을 읽는 상세에 입력 상태를 두지 않는다
 
     def test_windows_tick_defers_while_typing(self):

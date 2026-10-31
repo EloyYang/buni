@@ -369,6 +369,12 @@ struct SquadBoardView: View {
                 }
             }
         }
+        .onAppear {
+            // 화면 비교용 캡처(tools/preview)에서만 — 첫 업무의 상세를 연 채로 그린다
+            if ProcessInfo.processInfo.environment["BUNI_PREVIEW_OPEN"] != nil, selectedId == nil {
+                selectedId = SquadBoard.items(store.jobs).first(where: { $0.kind == "task" })?.id
+            }
+        }
         .task {
             // 승인 대기 · 반영한 변경(되돌리기·화면 비교)은 git 으로 확인하는 일이라 가끔만 다시 본다
             while !Task.isCancelled {
@@ -379,22 +385,7 @@ struct SquadBoardView: View {
     }
 
     private func detailPopup(_ sel: SquadItem, _ now: Double) -> some View {
-        GeometryReader { g in
-            ZStack {
-                Color.black.opacity(0.45)
-                    .contentShape(Rectangle())
-                    .onTapGesture { selectedId = nil }
-                SquadItemDetail(item: sel, now: now, onGoto: onGoto, onClose: { selectedId = nil }).id(sel.id)
-                    .frame(width: min(580, max(320, g.size.width - 48)), height: min(660, max(320, g.size.height - 48)))
-                    .background(RoundedRectangle(cornerRadius: BuniTokens.Radius.xl, style: .continuous).fill(BT.surface1))
-                    .overlay(RoundedRectangle(cornerRadius: BuniTokens.Radius.xl, style: .continuous).stroke(BT.borderStrong, lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: BuniTokens.Radius.xl, style: .continuous))
-                    .shadow(color: .black.opacity(0.4), radius: 24, y: 8)
-                Button("") { selectedId = nil }.keyboardShortcut(.cancelAction).opacity(0).frame(width: 0, height: 0)   // Esc
-            }
-            .frame(width: g.size.width, height: g.size.height)
-        }
-        .transition(.opacity)
+        SquadDetailPopup(item: sel, now: now, onGoto: onGoto, onClose: { selectedId = nil })
     }
 
     // MARK: 필터 · 정렬
@@ -757,8 +748,35 @@ private struct SquadShotZoom: View {
     }
 }
 
+/// 업무 상세 팝업 — 화면 가운데에 띄우고 바깥을 누르거나 Esc 로 닫는다 (전체 현황·프로젝트 현황이 같이 쓴다)
+struct SquadDetailPopup: View {
+    let item: SquadItem
+    let now: Double
+    var onGoto: (SquadItem, SquadPane) -> Void
+    var onClose: () -> Void
+
+    var body: some View {
+        GeometryReader { g in
+            ZStack {
+                Color.black.opacity(0.45)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onClose() }
+                SquadItemDetail(item: item, now: now, onGoto: onGoto, onClose: onClose).id(item.id)
+                    .frame(width: min(580, max(320, g.size.width - 48)), height: min(660, max(320, g.size.height - 48)))
+                    .background(RoundedRectangle(cornerRadius: BuniTokens.Radius.xl, style: .continuous).fill(BT.surface1))
+                    .overlay(RoundedRectangle(cornerRadius: BuniTokens.Radius.xl, style: .continuous).stroke(BT.borderStrong, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: BuniTokens.Radius.xl, style: .continuous))
+                    .shadow(color: .black.opacity(0.4), radius: 24, y: 8)
+                Button("") { onClose() }.keyboardShortcut(.cancelAction).opacity(0).frame(width: 0, height: 0)   // Esc
+            }
+            .frame(width: g.size.width, height: g.size.height)
+        }
+        .transition(.opacity)
+    }
+}
+
 /// 카드 상세 — 담당자 · 진행률 · 최근 활동 · 결과 · 관련 채팅, 같은 프로젝트의 화면(담당자 DM · 결과 · 스쿼드 채팅)과 Claude 로 이동
-private struct SquadItemDetail: View {
+struct SquadItemDetail: View {
     let item: SquadItem
     let now: Double
     var onGoto: (SquadItem, SquadPane) -> Void

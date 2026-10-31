@@ -1035,7 +1035,7 @@ class TeamWindow:
             tk.Label(hd, text=' ' + t(ko, en), bg=FIELD, fg='#C4C4CE', font=(FONT, 8, 'bold')).pack(side='left')
             tk.Label(hd, text=str(len(items)), bg=FIELD, fg=DIM, font=(FONT, 8)).pack(side='left', padx=4)
             for tk_ in items:
-                self._task_card(col, job, tk_, key)
+                self._bind_open_detail(self._task_card(col, job, tk_, key), job, tk_)
             if not items:
                 tk.Label(col, text=t('비어 있음', 'Empty'), bg=FIELD, fg='#55555F', font=(FONT, 8)).pack(pady=14)
             tk.Frame(col, bg=FIELD, height=6).pack()
@@ -1154,6 +1154,7 @@ class TeamWindow:
         if parts:
             self._action_btn(acts, t('대화', 'Chat'), lambda rid=parts[0][0]: self.set_pane(job['id'], 'dm:' + rid), 'quiet').pack(side='left', padx=(0, 4))
         self._action_btn(acts, t('추가 요청', 'Ask for more'), lambda: self._ask_more(job, task), 'quiet').pack(side='left')
+        return card
 
     def _task_review(self, card, job, task, needs, wrap):
         """승인 대기(✅ 승인 · 🚫 거절 · 📄 변경 내용) · 반영됨(🖼 변경 전·후 화면 · ↩ 되돌리기) · 되돌림(↪ 다시 적용)."""
@@ -2151,6 +2152,33 @@ class TeamWindow:
 
     DETAIL_W, DETAIL_H = 560, 640
 
+    def _dismiss_detail(self):
+        """상세 팝업을 닫는다 — 전체 현황에서 열었으면 선택 표시를 지우려고 목록을 다시 그린다 (프로젝트 현황은 그대로 둔다)."""
+        self._close_detail_popup(clear=True)
+        if self._board:
+            self._draw_board_results()
+
+    def _open_task_detail(self, job, task):
+        """프로젝트 현황의 업무 카드를 누르면 전체 현황과 같은 상세 팝업을 연다."""
+        job = buni_team.load_job(job['id']) or job
+        c = next((x for x in buni_team.board_cards([job]) if x.get('task_id') == task.get('id')), None)
+        if c:
+            self._show_detail_popup(c)
+
+    def _bind_open_detail(self, card, job, task):
+        """카드의 빈 곳·글자를 누르면 상세를 연다 — 버튼·메뉴처럼 이미 누를 곳이 있는 것은 건드리지 않는다."""
+        go = lambda e: self._open_task_detail(job, task)
+        def walk(w):
+            if w.winfo_class() not in ('Button', 'Menubutton') and not w.bind('<Button-1>'):
+                w.bind('<Button-1>', go)
+                try:
+                    w.config(cursor='hand2')
+                except tk.TclError:
+                    pass
+            for ch in w.winfo_children():
+                walk(ch)
+        walk(card)
+
     def _close_detail_popup(self, clear=False):
         pop = getattr(self, '_dpop', None)
         self._dpop = None
@@ -2168,8 +2196,8 @@ class TeamWindow:
         if pop is None or not pop.winfo_exists():
             pop = self._dpop = tk.Toplevel(self.win)
             pop.title(self.t('업무 상세', 'Task details')); pop.configure(bg=FIELD); pop.transient(self.win)
-            pop.protocol('WM_DELETE_WINDOW', lambda: (self._close_detail_popup(clear=True), self._draw_board_results()))
-            pop.bind('<Escape>', lambda e: (self._close_detail_popup(clear=True), self._draw_board_results()))
+            pop.protocol('WM_DELETE_WINDOW', lambda: self._dismiss_detail())
+            pop.bind('<Escape>', lambda e: self._dismiss_detail())
             self.win.update_idletasks()
             w, h = self.DETAIL_W, min(self.DETAIL_H, max(360, self.win.winfo_height() - 40))
             x = self.win.winfo_rootx() + max(0, (self.win.winfo_width() - w) // 2)
@@ -2280,7 +2308,7 @@ class TeamWindow:
         room = self._has_room(job) if job.get('status') else False
         head = tk.Frame(side, bg=FIELD); head.pack(fill='x', padx=14, pady=(12, 4))
         close = tk.Label(head, text='✕', bg=FIELD, fg=DIM, cursor='hand2', font=(FONT, 11)); close.pack(side='right')
-        close.bind('<Button-1>', lambda e: (self._close_detail_popup(clear=True), self._draw_board_results()))
+        close.bind('<Button-1>', lambda e: self._dismiss_detail())
         tk.Label(head, text=c['job_title'], bg=FIELD, fg=FG, font=(FONT, 11, 'bold'), wraplength=470, justify='left', anchor='w').pack(side='left', fill='x')
         acts = tk.Frame(side, bg=FIELD); acts.pack(fill='x', padx=14, pady=12, side='bottom')          # 스크롤해도 이동 버튼은 늘 보인다
         holder = tk.Frame(side, bg=FIELD); holder.pack(fill='both', expand=True, padx=14)

@@ -56,6 +56,7 @@ func priorityInfo(_ p: String?) -> (String, String, Color) {
 struct SquadProjectBoard: View {
     let job: TeamJob
     var onOpenDM: (String) -> Void
+    var onOpenTask: (String) -> Void = { _ in }      // 업무 카드를 누르면 상세 팝업을 연다 (팝업은 이 화면을 감싼 쪽이 그린다 — 여기는 스크롤 안이라 크기를 알 수 없다)
     @ObservedObject private var store = TeamStore.shared
 
     var body: some View {
@@ -291,6 +292,7 @@ struct SquadProjectBoard: View {
                     VStack(spacing: BuniTokens.Space.s3) {
                         ForEach(col == .done ? items.sorted { ($0.doneAt ?? 0) > ($1.doneAt ?? 0) } : items) { t in
                             SquadTaskCard(job: job, task: t, column: col, onOpenDM: onOpenDM)
+                                .onTapGesture { onOpenTask(t.id) }
                         }
                         if items.isEmpty {
                             Text(L.t("비어 있음", "Empty")).font(.system(size: BuniTokens.Font.sizeXs)).foregroundColor(BT.textTertiary.opacity(0.7))

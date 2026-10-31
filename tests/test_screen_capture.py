@@ -27,9 +27,32 @@ class CaptureEngine(unittest.TestCase):
         write_png(self.a, 32, 32)
         write_png(self.b, 32, 32, paint=block(8, 8, 16, 16))
         self._grab = bt.grab_screen
+        bt.save_settings({'auto_capture': True})                # 화면 전체 캡처를 켠 사람에게만 실패 이유가 보인다
 
     def tearDown(self):
         bt.grab_screen = self._grab
+        bt.save_settings({'auto_capture': False})
+
+    def test_failures_hidden_when_auto_capture_is_off(self):
+        # 옛 화면 전체 캡처의 실패 기록(권한 오류)이 남아 있어도, 기능을 끈 뒤에는 업무 상세에 오류처럼 보이지 않는다
+        jid = 'cap-stale'
+        bt.capture_screen(jid, 'home', 'before', source=str(self.src / 'nope.png'))
+        self.assertEqual(len(bt.job_screens(jid)), 1)
+        bt.save_settings({'auto_capture': False})
+        self.assertEqual(bt.job_screens(jid), [])
+
+    def test_preview_shots_show_up_as_captured_screens(self):
+        # 권한 없이 앱 화면만 그려 찍은 변경 전·후(capture_shots)가 업무 상세의 변경 전·후 화면에 나온다
+        jid = 'cap-preview'
+        root = Path(bt.changes_dir(jid)) / '001'
+        for side, paint in (('before', None), ('after', block(8, 8, 16, 16))):
+            write_png(root / 'shots' / side / '업무 상세.png', 32, 32, paint=paint)
+        (root / 'meta.json').write_text(json.dumps({'id': '001', 'shots': ['업무 상세.png'], 'files': []}), encoding='utf-8')
+        bt.save_settings({'auto_capture': False})
+        items = bt.job_screens(jid)
+        self.assertEqual([i['name'] for i in items], ['업무 상세'])
+        self.assertTrue(items[0]['captured'])
+        self.assertEqual(len(items[0]['boxes']), 1)
 
     def test_import_pair_makes_captured_screen_with_box(self):
         jid = 'cap-import'
@@ -101,7 +124,7 @@ class CaptureEngine(unittest.TestCase):
         self.assertTrue(bt.grab_screen(str(self.src / 'z.png'), region='1,2,3'))      # 영역 형식 오류 → 이유 문자열
 
     def test_cli_capture_and_screens(self):
-        env = dict(os.environ, BUNI_TEAM_HOME=TMP.name)
+        env = dict(os.environ, BUNI_TEAM_HOME=bt.team_home())       # 설정(auto_capture)을 쓴 곳과 같은 폴더
         cli = [sys.executable, str(HERE.parent / 'windows/buni_team.py')]
         r = subprocess.run(cli + ['capture', 'cap-cli', 'home', 'before', '--from-file', str(self.a)], capture_output=True, text=True, env=env)
         self.assertTrue(json.loads(r.stdout)['ok'], r.stdout + r.stderr)
